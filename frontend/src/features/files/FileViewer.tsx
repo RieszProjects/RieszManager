@@ -1,6 +1,6 @@
-/** Read-only file viewer (code, markdown, images, PDFs) shown as a dialog. */
+/** Read-only file viewer (code, markdown, rendered HTML, images, PDFs) shown as a dialog. */
 import { Dialog, IconButton, Tooltip } from "@mui/material";
-import { Code2, Copy, Download, Eye, LoaderCircle, WrapText, X } from "lucide-react";
+import { Code2, Copy, Download, ExternalLink, Eye, LoaderCircle, WrapText, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, fileRawUrl } from "@/api/client";
 import type { FileInfo } from "@/api/types";
@@ -9,6 +9,7 @@ import { Markdown } from "@/components/Markdown";
 import { copyText } from "@/lib/clipboard";
 import { clockTime, fileSize } from "@/lib/format";
 import { useIsMobile } from "@/lib/useIsMobile";
+import { PREVIEW_SANDBOX, viewUrl } from "@/lib/viewLink";
 import { toast, useUi } from "@/store/ui";
 
 export function FileViewer() {
@@ -19,13 +20,18 @@ export function FileViewer() {
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState(true);
   const [wrap, setWrap] = useState(false);
+  const [pageUrl, setPageUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!target) return;
     setInfo(null);
     setError(null);
     setPreview(true);
+    setPageUrl(null);
     const ctrl = new AbortController();
+    if (/\.html?$/i.test(target.path)) {
+      viewUrl(target.project, target.path).then(setPageUrl).catch((err) => toast((err as Error).message, "error"));
+    }
     api<{ file: FileInfo }>("files/content", { query: { project: target.project, path: target.path }, signal: ctrl.signal })
       .then((res) => setInfo(res.file))
       .catch((err) => (err as Error).name !== "AbortError" && setError((err as Error).message));
@@ -34,6 +40,8 @@ export function FileViewer() {
 
   const close = () => openFile(null);
   const isMarkdown = info?.language === "markdown";
+  const isHtml = info?.kind === "text" && Boolean(pageUrl);
+  const previewable = isMarkdown || isHtml;
 
   return (
     <Dialog open={Boolean(target)} onClose={close} fullScreen={isMobile} maxWidth={false}
@@ -45,12 +53,17 @@ export function FileViewer() {
               <div className="mono clamp-1">{target.path}</div>
               {info && <div className="dim">{fileSize(info.size)} · 修改于 {clockTime(info.mtime)}{info.truncated ? " · 仅显示前面部分" : ""}</div>}
             </div>
-            {info?.kind === "text" && isMarkdown && (
-              <Tooltip title={preview ? "查看源码" : "预览"}>
+            {info?.kind === "text" && previewable && (
+              <Tooltip title={preview ? "查看源码" : isHtml ? "渲染网页" : "预览"}>
                 <IconButton size="small" onClick={() => setPreview(!preview)}>{preview ? <Code2 size={17} /> : <Eye size={17} />}</IconButton>
               </Tooltip>
             )}
-            {info?.kind === "text" && (!isMarkdown || !preview) && (
+            {isHtml && pageUrl && (
+              <Tooltip title="在新标签页打开">
+                <IconButton size="small" component="a" href={pageUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={16} /></IconButton>
+              </Tooltip>
+            )}
+            {info?.kind === "text" && (!previewable || !preview) && (
               <Tooltip title="自动换行">
                 <IconButton size="small" className={wrap ? "on" : ""} onClick={() => setWrap(!wrap)}><WrapText size={17} /></IconButton>
               </Tooltip>
@@ -68,7 +81,9 @@ export function FileViewer() {
           <div className="rz-fileviewer-body">
             {error && <div className="rz-center dim">{error}</div>}
             {!info && !error && <div className="rz-center"><LoaderCircle className="spin" size={20} /></div>}
-            {info?.kind === "text" && (isMarkdown && preview ? (
+            {info?.kind === "text" && (isHtml && preview && pageUrl ? (
+              <iframe className="rz-fileviewer-page" src={pageUrl} sandbox={PREVIEW_SANDBOX} title={info.name} referrerPolicy="no-referrer" />
+            ) : isMarkdown && preview ? (
               <div className="rz-fileviewer-md"><Markdown text={info.content ?? ""} /></div>
             ) : (
               <CodeBlock code={info.content ?? ""} language={info.language} lineNumbers wrap={wrap} />
