@@ -13,6 +13,7 @@ import { CssBaseline, ThemeProvider } from "@mui/material";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { setupBackStack } from "./lib/backStack";
 import { setupPwaUpdates } from "./lib/pwaUpdate";
 import { theme } from "./theme/theme";
 import { useApp } from "./store/app";
@@ -31,6 +32,7 @@ if (window.matchMedia("(pointer: coarse)").matches) {
 }
 
 setupPwaUpdates();
+setupBackStack();
 
 // Keep the install prompt so the settings page can offer "install app" later.
 window.addEventListener("beforeinstallprompt", (e) => {

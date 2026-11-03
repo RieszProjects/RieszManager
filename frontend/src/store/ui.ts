@@ -1,5 +1,6 @@
 /** UI state: routing, panels, dialogs and toasts. */
 import { create } from "zustand";
+import { takeOverlayEntry } from "@/lib/backStack";
 import { storage } from "@/lib/storage";
 
 export type Route =
@@ -86,12 +87,13 @@ export const useUi = create<UiStore>((set) => ({
   navigate: (route, replace = false) => {
     const path = routePath(route);
     if (path !== window.location.pathname) {
-      if (replace) window.history.replaceState(null, "", path);
+      if (replace || takeOverlayEntry()) window.history.replaceState(null, "", path);
       else window.history.pushState(null, "", path);
     }
     set({ route, leftOpen: false, rightOverlay: false });
   },
-  syncFromLocation: () => set({ route: parseRoute(window.location.pathname) }),
+  // Back that only closed an overlay leaves the URL unchanged: keep the same route object.
+  syncFromLocation: () => set((s) => (routePath(s.route) === window.location.pathname ? {} : { route: parseRoute(window.location.pathname) })),
   setContextProject: (contextProject) => set({ contextProject }),
   setLeftOpen: (leftOpen) => set({ leftOpen }),
   setRightOverlay: (rightOverlay) => set({ rightOverlay }),
