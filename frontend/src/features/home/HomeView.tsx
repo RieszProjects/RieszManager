@@ -1,9 +1,12 @@
 /** Landing view (nothing selected) and the per-project "new session" view. */
-import { useEffect } from "react";
+import { ChevronRight } from "lucide-react";
+import { useEffect, useMemo } from "react";
 import { Mascot } from "@/components/Mascot";
+import { useOrganizeView } from "@/lib/organize";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
+import { SessionRow } from "../sessions/SessionRow";
 import { Composer } from "../composer/Composer";
 import { MobileHeaderButtons } from "../layout/MobileHeaderButtons";
 import { RightDock, RightPanelButton } from "../layout/RightDock";
@@ -15,6 +18,39 @@ function greeting(): string {
   if (h < 14) return "中午好";
   if (h < 18) return "下午好";
   return "晚上好";
+}
+
+const HOME_RECENT = 3;
+
+/** Phones have no sidebar on screen: offer the latest few sessions on the landing view. */
+function HomeRecent() {
+  const sessions = useApp((s) => s.sessions);
+  const setLeftOpen = useUi((s) => s.setLeftOpen);
+  const setSidebarTab = useUi((s) => s.setSidebarTab);
+  const view = useOrganizeView();
+  const recent = useMemo(
+    () => Object.values(sessions).filter((s) => view.sessionVisible(s)).sort((a, b) => b.mtime - a.mtime).slice(0, HOME_RECENT),
+    [sessions, view],
+  );
+  if (!recent.length) return null;
+  return (
+    <section className="rz-home-recent">
+      <div className="rz-home-recent-head">
+        <span className="rz-side-label">最近会话</span>
+        <button
+          type="button"
+          className="rz-home-recent-all"
+          onClick={() => {
+            setSidebarTab("recent");
+            setLeftOpen(true);
+          }}
+        >
+          全部 <ChevronRight size={14} />
+        </button>
+      </div>
+      {recent.map((s) => <SessionRow key={s.sessionId} session={s} showProject />)}
+    </section>
+  );
 }
 
 export function HomeView() {
@@ -34,6 +70,7 @@ export function HomeView() {
         <Mascot pose="sleepy" className="rz-home-mascot" />
         <h1 className="rz-home-title rz-home-greeting">{greeting()}</h1>
       </div>
+      {isMobile && <HomeRecent />}
     </div>
   );
 }
