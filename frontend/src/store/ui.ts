@@ -45,6 +45,8 @@ interface UiStore {
   settingsOpen: boolean;
   newSessionOpen: boolean;
   renameTarget: { sessionId: string; title: string } | null;
+  /** Show archived sessions and projects in lists (per device). */
+  showArchived: boolean;
   toasts: Toast[];
 
   navigate: (route: Route, replace?: boolean) => void;
@@ -59,6 +61,7 @@ interface UiStore {
   setSettingsOpen: (open: boolean) => void;
   setNewSessionOpen: (open: boolean) => void;
   setRenameTarget: (target: UiStore["renameTarget"]) => void;
+  setShowArchived: (show: boolean) => void;
   toast: (message: string, severity?: Toast["severity"]) => void;
   dismissToast: (id: number) => void;
 }
@@ -77,6 +80,7 @@ export const useUi = create<UiStore>((set) => ({
   settingsOpen: false,
   newSessionOpen: false,
   renameTarget: null,
+  showArchived: storage.get("showArchived", false),
   toasts: [],
 
   navigate: (route, replace = false) => {
@@ -105,6 +109,10 @@ export const useUi = create<UiStore>((set) => ({
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setNewSessionOpen: (newSessionOpen) => set({ newSessionOpen }),
   setRenameTarget: (renameTarget) => set({ renameTarget }),
+  setShowArchived: (showArchived) => {
+    storage.set("showArchived", showArchived);
+    set({ showArchived });
+  },
   toast: (message, severity = "info") =>
     set((s) => ({ toasts: [...s.toasts, { id: ++toastId, message, severity }] })),
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),

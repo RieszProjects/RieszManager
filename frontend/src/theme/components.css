@@ -658,3 +658,15 @@
   transition: opacity 0.28s ease, visibility 0s linear 0.28s;
 }
 .rz-mdrawer-backdrop.show { opacity: 1; visibility: visible; transition: opacity 0.28s ease, visibility 0s; }
+
+/* ---- Archive / reorder ---- */
+.rz-tag.muted { color: var(--text3); background: rgba(232, 226, 212, 0.06); border-color: var(--line); }
+.rz-session-row.archived .rz-session-title, .rz-tree-project.archived .rz-project-name { color: var(--text3); }
+.rz-project-row { position: relative; }
+.rz-project-row .rz-project-open { padding-right: 34px; }
+.rz-sortable { position: relative; touch-action: manipulation; }
+.rz-sortable.dragging { z-index: 10; }
+.rz-sortable.dragging > * { background: var(--bg3); border-radius: 8px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45); opacity: 0.95; }
+body.rz-dragging, body.rz-dragging * { cursor: grabbing !important; user-select: none !important; }
+.rz-side-running { padding-bottom: 8px; margin-bottom: 10px; border-bottom: 1px solid var(--line-soft); }
+.rz-project-row:hover .rz-project-more, .rz-project-row:focus-within .rz-project-more { opacity: 1; }

@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import type { SessionSummary } from "@/api/types";
 import { Mascot } from "@/components/Mascot";
 import { dateBucket, relativeTime, type DateBucket } from "@/lib/format";
+import { useOrganizeView } from "@/lib/organize";
 import { sessionTitle, useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { ProjectTree } from "../sessions/ProjectTree";
@@ -25,9 +26,10 @@ function RecentList({ query }: { query: string }) {
   const [limit, setLimit] = useState(RECENT_LIMIT);
   const activeId = route.view === "session" ? route.sessionId : null;
   const q = query.trim().toLowerCase();
+  const view = useOrganizeView();
 
   const { running, groups, total } = useMemo(() => {
-    const all = Object.values(sessions).filter((s) => matches(s, q)).sort((a, b) => b.mtime - a.mtime);
+    const all = Object.values(sessions).filter((s) => view.sessionVisible(s) && matches(s, q)).sort((a, b) => b.mtime - a.mtime);
     const runningList = all.filter((s) => live[s.sessionId]);
     const rest = all.filter((s) => !live[s.sessionId]).slice(0, limit);
     const grouped = new Map<DateBucket, SessionSummary[]>();
@@ -36,12 +38,12 @@ function RecentList({ query }: { query: string }) {
       grouped.set(bucket, [...(grouped.get(bucket) ?? []), s]);
     }
     return { running: runningList, groups: Array.from(grouped.entries()), total: all.length - runningList.length };
-  }, [sessions, live, q, limit]);
+  }, [sessions, live, q, limit, view]);
 
   return (
     <div className="rz-side-list">
       {running.length > 0 && (
-        <section>
+        <section className="rz-side-running">
           <div className="rz-side-label">运行中</div>
           {running.map((s) => <SessionRow key={s.sessionId} session={s} showProject active={s.sessionId === activeId} />)}
         </section>

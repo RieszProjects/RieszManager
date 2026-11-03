@@ -11,6 +11,7 @@
  *   (code blocks, tables, chip rows), or while a dialog/menu is open, are ignored.
  */
 import { useEffect, useRef, type ReactNode } from "react";
+import { DRAGGING_CLASS } from "../organize/SortableList";
 
 type Side = "left" | "right";
 
@@ -98,7 +99,7 @@ export function MobileDrawers({ left, right, leftOpen, rightOpen, rightEnabled, 
     };
 
     const onStart = (e: TouchEvent) => {
-      if (e.touches.length !== 1 || insideOverlay(e.target)) {
+      if (e.touches.length !== 1 || insideOverlay(e.target) || document.body.classList.contains(DRAGGING_CLASS)) {
         g = null;
         return;
       }
@@ -116,6 +117,11 @@ export function MobileDrawers({ left, right, leftOpen, rightOpen, rightEnabled, 
 
     const onMove = (e: TouchEvent) => {
       if (!g || g.abandoned) return;
+      if (document.body.classList.contains(DRAGGING_CLASS)) {
+        if (g.locked && g.side) release(g.side);
+        g = null;
+        return;
+      }
       const t = e.touches[0];
       const dx = t.clientX - g.x0;
       const dy = t.clientY - g.y0;

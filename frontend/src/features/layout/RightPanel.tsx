@@ -7,6 +7,9 @@ import type { Project } from "@/api/types";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { FileTree } from "../files/FileTree";
+import { useOrganizeView } from "@/lib/organize";
+import { useOrganize } from "@/store/organize";
+import { SortableList } from "../organize/SortableList";
 import { SessionRow } from "../sessions/SessionRow";
 
 interface Props {
@@ -31,9 +34,11 @@ export function RightPanel({ variant = "drawer", onClose }: Props) {
     api<{ project: Project }>(`projects/${encodeURIComponent(projectId)}`).then((r) => setDetail(r.project)).catch(() => undefined);
   }, [projectId, tab]);
 
+  const view = useOrganizeView();
+  const setOrder = useOrganize((s) => s.setOrder);
   const list = useMemo(
-    () => Object.values(sessions).filter((s) => s.project === projectId).sort((a, b) => b.mtime - a.mtime),
-    [sessions, projectId],
+    () => view.orderSessions(Object.values(sessions).filter((s) => s.project === projectId && view.sessionVisible(s))),
+    [sessions, projectId, view],
   );
 
   const cls = `rz-right${variant === "floating" ? " floating" : ""}`;
@@ -78,7 +83,9 @@ export function RightPanel({ variant = "drawer", onClose }: Props) {
       <div className="rz-right-body">
         {!showFiles ? (
           <div className="rz-side-list">
-            {list.map((s) => <SessionRow key={s.sessionId} session={s} active={s.sessionId === activeSession} />)}
+            <SortableList items={list} getId={(s) => s.sessionId} onReorder={(ids) => void setOrder("session", ids)}>
+              {(s) => <SessionRow session={s} active={s.sessionId === activeSession} />}
+            </SortableList>
             {list.length === 0 && <div className="rz-side-empty">这个项目还没有会话</div>}
           </div>
         ) : (

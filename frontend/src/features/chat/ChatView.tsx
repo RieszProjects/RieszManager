@@ -1,7 +1,7 @@
 /** A conversation: header, transcript, live activity, pending prompts and the composer. */
 import { IconButton, ListItemIcon, Menu, MenuItem } from "@mui/material";
 import {
-  Copy, EllipsisVertical, GitFork, Hand, LoaderCircle, MonitorUp, Pencil, Power, SquareTerminal, TriangleAlert, X,
+  Archive, ArchiveRestore, Copy, EllipsisVertical, GitFork, Hand, LoaderCircle, MonitorUp, Pencil, Power, SquareTerminal, TriangleAlert, X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { api } from "@/api/client";
@@ -12,6 +12,7 @@ import { StatusDot } from "@/components/StatusDot";
 import { copyText } from "@/lib/clipboard";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { sessionTitle, useApp } from "@/store/app";
+import { useOrganize } from "@/store/organize";
 import { useSessions } from "@/store/sessions";
 import { toast, useUi } from "@/store/ui";
 import { Composer } from "../composer/Composer";
@@ -51,6 +52,8 @@ function SessionMenu({ sessionId, state, cwd, title }: { sessionId: string; stat
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const navigate = useUi((s) => s.navigate);
   const setRenameTarget = useUi((s) => s.setRenameTarget);
+  const archived = useOrganize((s) => s.archived.session.has(sessionId));
+  const setArchived = useOrganize((s) => s.setArchived);
   const close = () => setAnchor(null);
   const run = async (fn: () => Promise<void>) => {
     close();
@@ -67,6 +70,10 @@ function SessionMenu({ sessionId, state, cwd, title }: { sessionId: string; stat
         transformOrigin={{ vertical: "top", horizontal: "right" }}>
         <MenuItem onClick={() => { close(); setRenameTarget({ sessionId, title }); }}>
           <ListItemIcon><Pencil size={16} /></ListItemIcon>重命名
+        </MenuItem>
+        <MenuItem onClick={() => { close(); void setArchived("session", sessionId, !archived); }}>
+          <ListItemIcon>{archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}</ListItemIcon>
+          {archived ? "取消归档" : "归档"}
         </MenuItem>
         <MenuItem onClick={() => run(async () => {
           const res = await api<{ sessionId: string }>(`sessions/${sessionId}/fork`, { body: {} });

@@ -1,6 +1,7 @@
 import { Dialog, DialogContent, DialogTitle } from "@mui/material";
 import { Folder, FolderGit2 } from "lucide-react";
 import { useMemo } from "react";
+import { useOrganizeView } from "@/lib/organize";
 import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 
@@ -10,7 +11,11 @@ export function NewSessionDialog() {
   const setOpen = useUi((s) => s.setNewSessionOpen);
   const navigate = useUi((s) => s.navigate);
   const allProjects = useApp((s) => s.projects);
-  const projects = useMemo(() => allProjects.filter((p) => !p.external && p.exists), [allProjects]);
+  const view = useOrganizeView();
+  const projects = useMemo(
+    () => view.orderProjects(allProjects.filter((p) => !p.external && view.projectVisible(p))),
+    [allProjects, view],
+  );
   return (
     <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="xs">
       <DialogTitle sx={{ fontFamily: "var(--font-display)", fontSize: 22 }}>选择项目</DialogTitle>

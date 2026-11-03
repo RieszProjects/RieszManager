@@ -14,6 +14,7 @@ import { RenameDialog } from "@/features/sessions/RenameDialog";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
 import { useApp } from "@/store/app";
 import { useAuth } from "@/store/auth";
+import { useOrganize } from "@/store/organize";
 import { useSessions } from "@/store/sessions";
 import { useUi } from "@/store/ui";
 
@@ -24,6 +25,7 @@ function useLiveData(enabled: boolean) {
     void app.loadConfig().catch(() => undefined);
     void app.loadProjects().catch(() => undefined);
     void app.loadSessions().catch(() => undefined);
+    void useOrganize.getState().load().catch(() => undefined);
     const offEvent = socket.onEvent((event) => {
       useApp.getState().handleEvent(event);
       useSessions.getState().handleEvent(event);

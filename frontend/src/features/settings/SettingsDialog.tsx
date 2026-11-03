@@ -1,6 +1,6 @@
 /** Settings: two-factor authentication, signed-in devices, login history, notifications. */
 import { Button, Dialog, DialogContent, IconButton, Switch, Tab, Tabs, TextField } from "@mui/material";
-import { Bell, Download, LogOut, MonitorSmartphone, ShieldCheck, ShieldOff, X } from "lucide-react";
+import { Archive, Bell, Download, LogOut, MonitorSmartphone, ShieldCheck, ShieldOff, X } from "lucide-react";
 import QRCode from "qrcode";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/api/client";
@@ -199,6 +199,8 @@ function DevicesSection({ data, reload }: { data: Security; reload: () => void }
 
 function GeneralSection() {
   const config = useApp((s) => s.config);
+  const showArchived = useUi((s) => s.showArchived);
+  const setShowArchived = useUi((s) => s.setShowArchived);
   const logout = useAuth((s) => s.logout);
   const [perm, setPerm] = useState(typeof Notification !== "undefined" ? Notification.permission : "denied");
   const [installEvent, setInstallEvent] = useState<(Event & { prompt: () => Promise<void> }) | null>(
@@ -221,6 +223,13 @@ function GeneralSection() {
         </div>
         <Switch checked={perm === "granted"} disabled={perm === "denied" || typeof Notification === "undefined"}
           onChange={async () => setPerm(await Notification.requestPermission())} />
+      </div>
+      <div className="rz-settings-row">
+        <div>
+          <div className="rz-settings-title"><Archive size={17} /> 显示已归档的会话和项目</div>
+          <div className="dim">只影响这台设备上的列表</div>
+        </div>
+        <Switch checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
       </div>
       {installEvent && (
         <div className="rz-settings-row">

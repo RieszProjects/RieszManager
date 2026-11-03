@@ -3,6 +3,7 @@ import { FolderGit2 } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { Mascot } from "@/components/Mascot";
 import { relativeTime } from "@/lib/format";
+import { useOrganizeView } from "@/lib/organize";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { sessionTitle, useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
@@ -25,10 +26,14 @@ export function HomeView() {
   const navigate = useUi((s) => s.navigate);
   const setContextProject = useUi((s) => s.setContextProject);
   const isMobile = useIsMobile();
-  const recent = useMemo(() => Object.values(sessions).sort((a, b) => b.mtime - a.mtime).slice(0, 6), [sessions]);
+  const view = useOrganizeView();
+  const recent = useMemo(
+    () => Object.values(sessions).filter(view.sessionVisible).sort((a, b) => b.mtime - a.mtime).slice(0, 6),
+    [sessions, view],
+  );
   const topProjects = useMemo(
-    () => projects.filter((p) => !p.external).sort((a, b) => (b.lastActivity ?? 0) - (a.lastActivity ?? 0)).slice(0, 6),
-    [projects],
+    () => view.orderProjects(projects.filter((p) => !p.external && view.projectVisible(p))).slice(0, 6),
+    [projects, view],
   );
   useEffect(() => setContextProject(null), [setContextProject]);
 

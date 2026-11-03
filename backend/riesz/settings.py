@@ -66,6 +66,7 @@ INSTALLED_APPS = [
     "channels",
     "accounts",
     "bridge",
+    "organize",
 ]
 
 MIDDLEWARE = [
