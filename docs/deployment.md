@@ -71,10 +71,11 @@ runner 默认通过登录 shell（`$SHELL -lc`）启动 `claude`，因此会话�
 ```bash
 ./rieszctl runner status
 ./rieszctl runner logs
-./rieszctl runner restart     # 修改 .env 后需要重启 runner
+./rieszctl runner reload      # 应用新代码或修改后的 .env：等所有托管会话空闲后再重载
+./rieszctl runner restart     # 立即重启：会中断正在工作的会话
 ```
 
-重启 runner 会结束它托管的 `claude` 进程；会话记录都在磁盘上，下次发送消息时会自动恢复。
+`reload` 会等到 runner 托管的所有 Claude 会话都空闲（没有进行中的回合、待确认的权限或排队消息）时，才结束这些空闲进程并重新加载自己；会话记录都在磁盘上，下次发送消息时自动恢复。`restart` 则立即生效，正在工作的会话会被打断，一般只在 runner 卡住时使用。
 
 ## 4. 启动容器
 
@@ -147,7 +148,7 @@ server {
 
 ```bash
 git pull
-./rieszctl runner install     # 更新 runner 依赖并重启服务
+./rieszctl runner install     # 更新 runner 依赖；服务已在运行时会平滑重载（不打断工作中的会话）
 ./rieszctl up                 # 重新构建并启动容器
 ```
 

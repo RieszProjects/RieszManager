@@ -76,6 +76,8 @@ After=default.target
 Type=simple
 WorkingDirectory=$ROOT/runner
 ExecStart=$ROOT/runner/.venv/bin/python -m riesz_runner --env-file $ENV_FILE
+# Graceful reload: waits until no hosted Claude session is working, then re-executes.
+ExecReload=/bin/kill -HUP \$MAINPID
 Restart=on-failure
 RestartSec=3
 # Let the runner close its claude children itself (they finish cleanly on stdin EOF).
@@ -88,7 +90,13 @@ Environment=SHELL=${SHELL:-/bin/bash}
 WantedBy=default.target
 UNIT
   systemctl --user daemon-reload
-  systemctl --user enable --now "$UNIT_NAME"
+  if systemctl --user is-active --quiet "$UNIT_NAME"; then
+    # Already running (upgrade): pick up the new code without interrupting busy sessions.
+    systemctl --user reload "$UNIT_NAME"
+    say "Runner will reload as soon as no hosted session is working"
+  else
+    systemctl --user enable --now "$UNIT_NAME"
+  fi
   if ! loginctl show-user "$USER" -p Linger 2>/dev/null | grep -q yes; then
     if loginctl enable-linger "$USER" 2>/dev/null || sudo -n loginctl enable-linger "$USER" 2>/dev/null; then
       say "Enabled lingering so the runner keeps running after logout"
@@ -105,6 +113,7 @@ cmd_runner() {
   case "$action" in
     install) cmd_runner_install ;;
     start|stop|restart|status) systemctl --user --no-pager "$action" "$UNIT_NAME" ;;
+    reload) systemctl --user reload "$UNIT_NAME" && say "Runner will reload as soon as no hosted session is working" ;;
     logs) journalctl --user -u "$UNIT_NAME" -n 200 -f ;;
     uninstall)
       systemctl --user disable --now "$UNIT_NAME" || true
@@ -142,7 +151,8 @@ Usage: ./rieszctl <command>
 
   init                 create .env with random secrets and a temporary password
   runner install       install the host runner as a systemd user service
-  runner <action>      start | stop | restart | status | logs | uninstall | run (foreground)
+  runner <action>      start | stop | restart | reload | status | logs | uninstall | run (foreground)
+                       (reload = apply new code once no hosted session is working; restart interrupts them)
   up                   build and start the containers
   down                 stop the containers
   restart              restart the containers

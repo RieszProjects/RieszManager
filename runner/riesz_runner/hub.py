@@ -44,6 +44,8 @@ class Hub:
         self._tail_wakeup: dict[str, asyncio.Event] = {}
         self._spawn_locks: dict[str, asyncio.Lock] = {}
         self.delivery: Delivery | None = None
+        self.reload_pending = False
+        self.reload_ready = asyncio.Event()
 
     # ---- lifecycle ----------------------------------------------------------
 
@@ -55,6 +57,30 @@ class Hub:
             asyncio.create_task(self._index_loop()),
             asyncio.create_task(self._reap_loop()),
         ]
+
+    # ---- graceful reload ------------------------------------------------------
+
+    def request_reload(self) -> None:
+        if not self.reload_pending:
+            log.info("reload requested; waiting until all hosted sessions are idle")
+            self.reload_pending = True
+            self._tasks.append(asyncio.create_task(self._reload_when_idle()))
+
+    def _all_idle(self) -> bool:
+        if self.delivery is not None and self.delivery.held:
+            return False
+        return all(not p.alive or (not p.busy and not p.queue) for p in self.hosted.values())
+
+    async def _reload_when_idle(self) -> None:
+        while True:
+            if self._all_idle():
+                # Two consecutive idle observations, so a turn that is just starting is not cut off.
+                await asyncio.sleep(1.0)
+                if self._all_idle():
+                    break
+            await asyncio.sleep(1.0)
+        log.info("all hosted sessions idle; reloading")
+        self.reload_ready.set()
 
     async def close(self) -> None:
         for task in self._tasks:
@@ -281,6 +307,8 @@ class Hub:
             proc = self.get_hosted(session_id)
             if proc is not None:
                 return proc
+            if self.reload_ready.is_set():
+                raise ControlError("the runner is restarting; try again in a few seconds")
             live = self.live.get(session_id)
             if live is not None:
                 raise ControlError("this session is running in another Claude Code process")
@@ -318,6 +346,8 @@ class Hub:
         permission_mode: str | None = None,
         effort: str | None = None,
     ) -> ClaudeProcess:
+        if self.reload_ready.is_set():
+            raise ControlError("the runner is restarting; try again in a few seconds")
         if not Path(cwd).is_dir():
             raise ControlError("directory does not exist")
         session_id = str(uuidlib.uuid4())
@@ -341,6 +371,8 @@ class Hub:
     async def fork_session(self, session_id: str, *, model: str | None = None,
                            permission_mode: str | None = None) -> ClaudeProcess:
         """Start a new session that continues from a copy of an existing one."""
+        if self.reload_ready.is_set():
+            raise ControlError("the runner is restarting; try again in a few seconds")
         entry = self.store.get(session_id)
         if entry is None or not entry.scanner.meta.cwd:
             raise ControlError("unknown session")
