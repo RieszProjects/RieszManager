@@ -48,6 +48,7 @@ cd RieszManager
 | `RIESZ_TRUST_CF_HEADER` | 使用 Cloudflare Tunnel 时设为 `true`，以便按真实客户端 IP 限流 |
 | `RUNNER_DEFAULT_PERMISSION_MODE` | 新会话的权限模式 |
 | `RUNNER_ALLOW_BYPASS` | 是否允许在网页中切换到“跳过权限”模式 |
+| `RUNNER_CHROME` | 网页端会话是否连接 Claude in Chrome：`auto`（跟随你在终端里 `/chrome` 的默认设置）、`on`、`off` |
 | `OPENAI_API_KEY` | 可选，启用服务端语音转写 |
 
 所有变量的说明见 `.env.example`。含有 `$` 的值（例如密码哈希）必须用单引号包起来。

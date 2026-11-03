@@ -12,6 +12,7 @@ import uuid as uuidlib
 from collections import deque
 from typing import Any, Awaitable, Callable
 
+from .claude_settings import chrome_enabled_by_default
 from .config import Config
 
 log = logging.getLogger(__name__)
@@ -94,6 +95,11 @@ class ClaudeProcess:
         ]
         if self.cfg.allow_bypass:
             args.append("--allow-dangerously-skip-permissions")
+        chrome = self.cfg.chrome
+        if chrome == "on" or (chrome == "auto" and chrome_enabled_by_default(self.cfg.claude_home)):
+            args.append("--chrome")
+        elif chrome == "off":
+            args.append("--no-chrome")
         if self.resume_from:
             args += ["--resume", self.resume_from]
             if self.fork:

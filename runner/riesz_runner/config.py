@@ -71,6 +71,8 @@ class Config:
     login_shell: bool = True
     allow_external_files: bool = False
     max_file_bytes: int = 2 * 1024 * 1024
+    # Claude in Chrome for hosted sessions: "auto" follows the user's /chrome default, or "on"/"off".
+    chrome: str = "auto"
     extra_args: list[str] = field(default_factory=list)
 
     @property
@@ -123,5 +125,6 @@ def load_config(env_file: str | None = None) -> Config:
         login_shell=_bool(env.get("RUNNER_LOGIN_SHELL"), True),
         allow_external_files=_bool(env.get("RUNNER_ALLOW_EXTERNAL_FILES"), False),
         max_file_bytes=int(env.get("RUNNER_MAX_FILE_BYTES") or 2 * 1024 * 1024),
+        chrome=(env.get("RUNNER_CHROME") or "auto").strip().lower(),
         extra_args=extra,
     )

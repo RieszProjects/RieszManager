@@ -1,4 +1,4 @@
-"""The user's Claude Code defaults (model and effort) from ~/.claude/settings.json."""
+"""The user's Claude Code defaults: model/effort (settings.json) and Chrome integration (~/.claude.json)."""
 
 from __future__ import annotations
 
@@ -23,3 +23,18 @@ def user_defaults(claude_home: Path, models: list[dict[str, Any]]) -> dict[str, 
     per_model = (settings.get("modelSettings") or {}).get(resolved) or {}
     effort = per_model.get("effortLevel") or settings.get("effortLevel")
     return {"model": model, "resolvedModel": resolved, "effort": effort}
+
+
+def chrome_enabled_by_default(claude_home: Path) -> bool:
+    """Whether interactive Claude Code would connect to Claude in Chrome by default.
+
+    Interactive sessions honour `claudeInChromeDefaultEnabled` in ~/.claude.json
+    (toggled with /chrome); print/stream-json sessions only do so with --chrome.
+    """
+    for candidate in (claude_home / ".claude.json", claude_home.parent / ".claude.json"):
+        try:
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        return bool(data.get("claudeInChromeDefaultEnabled"))
+    return False
