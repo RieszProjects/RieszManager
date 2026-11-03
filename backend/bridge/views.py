@@ -32,7 +32,7 @@ ROUTES: list[tuple[str, re.Pattern[str], str]] = [
         ("GET", rf"^sessions/(?P<sid>{UUID})/items$", "/v1/sessions/{sid}/items"),
         ("GET", rf"^sessions/(?P<sid>{UUID})/commands$", "/v1/sessions/{sid}/commands"),
         ("GET", rf"^sessions/(?P<sid>{UUID})/context$", "/v1/sessions/{sid}/context"),
-        ("POST", rf"^sessions/(?P<sid>{UUID})/(?P<action>messages|start|stop|interrupt|cancel|model|mode|fork|takeover)$",
+        ("POST", rf"^sessions/(?P<sid>{UUID})/(?P<action>messages|start|stop|interrupt|cancel|model|mode|effort|fork|takeover)$",
          "/v1/sessions/{sid}/{action}"),
         ("POST", rf"^sessions/(?P<sid>{UUID})/permissions/(?P<rid>[\w-]{{1,80}})$",
          "/v1/sessions/{sid}/permissions/{rid}"),
@@ -155,6 +155,7 @@ async def app_config(request: HttpRequest) -> HttpResponse:
         "runner": bool(health.get("ok")),
         "workspaceRoot": health.get("workspaceRoot"),
         "allowBypass": bool(health.get("allowBypass")),
+        "defaultPermissionMode": health.get("defaultPermissionMode") or "default",
         "transcription": bool(settings.OPENAI_API_KEY),
         "username": request.user.username,
     })

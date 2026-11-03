@@ -59,22 +59,27 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
   const [mentionResults, setMentionResults] = useState<Suggestion[]>([]);
   const [localModel, setLocalModel] = useState<string | null>(null);
   const [localMode, setLocalMode] = useState<string | null>(null);
+  const [localEffort, setLocalEffort] = useState<string | null>(null);
   const [interim, setInterim] = useState("");
   const ta = useRef<HTMLTextAreaElement>(null);
   const attachments = useAttachments();
   const history = usePromptHistory(projectId);
-  const { commands, models } = useCommands(sessionId, projectId);
+  const { commands, models, defaults } = useCommands(sessionId, projectId);
 
   const hosted = Boolean(state?.hosted && state.alive);
+  const external = Boolean(state?.external && state.alive && !hosted);
   const busy = Boolean(state?.busy);
-  const model = (hosted ? state?.model : localModel ?? state?.model ?? defaultModel) ?? null;
-  const mode = (hosted ? state?.permissionMode : localMode ?? state?.permissionMode ?? defaultMode) ?? "default";
+  const model = (hosted ? state?.model : localModel ?? state?.model ?? defaultModel) ?? defaults?.model ?? null;
+  const effort = (hosted ? state?.effort : localEffort ?? state?.effort) ?? defaults?.effort ?? null;
+  const mode = (hosted ? state?.permissionMode : localMode ?? state?.permissionMode ?? defaultMode)
+    ?? config?.defaultPermissionMode ?? "default";
 
   // Restore the draft when switching sessions.
   useEffect(() => {
     setText(storage.get(draftKey, ""));
     setLocalModel(null);
     setLocalMode(null);
+    setLocalEffort(null);
     attachments.clear();
     history.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -210,6 +215,18 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
     }
   };
 
+  const changeEffort = async (next: string) => {
+    if (hosted && sessionId) {
+      try {
+        await api(`sessions/${sessionId}/effort`, { body: { effort: next } });
+      } catch (err) {
+        toast((err as Error).message, "error");
+      }
+    } else {
+      setLocalEffort(next);
+    }
+  };
+
   const submit = async (override?: string) => {
     const value = override ?? text;
     if (attachments.uploading) {
@@ -223,6 +240,7 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
     if (!hosted) {
       if (localModel) body.model = localModel;
       if (localMode) body.permissionMode = localMode;
+      if (localEffort) body.effort = localEffort;
     }
     try {
       if (sessionId) {
@@ -230,7 +248,10 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
       } else {
         if (!projectId) throw new Error("请先选择项目");
         const res = await api<{ sessionId: string }>("sessions", {
-          body: { ...body, project: projectId, model: localModel ?? defaultModel ?? undefined, permissionMode: localMode ?? defaultMode ?? undefined },
+          body: {
+            ...body, project: projectId, model: localModel ?? defaultModel ?? undefined,
+            permissionMode: localMode ?? defaultMode ?? undefined, effort: localEffort ?? undefined,
+          },
         });
         storage.remove(draftKey);
         onCreated?.(res.sessionId);
@@ -271,7 +292,7 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
         setMenuDismissed(true);
         return;
       }
-      if (busy) {
+      if (busy && hosted) {
         e.preventDefault();
         void interrupt();
       }
@@ -327,7 +348,14 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
 
   const fileInput = useRef<HTMLInputElement>(null);
   const canSend = (text.trim().length > 0 || attachments.ids.length > 0) && !sending;
-  const showStop = busy && !canSend;
+  const showStop = busy && hosted && !canSend;
+  const defaultPlaceholder = external
+    ? busy
+      ? "终端里的会话正在工作，消息会在它空闲后送达"
+      : "发送后，这个终端会话会转到这里继续"
+    : busy
+      ? "继续输入，消息会在合适时机送达…"
+      : "给 Claude 发消息，/ 打开命令，@ 引用文件";
 
   return (
     <div className="rz-composer-wrap">
@@ -360,7 +388,7 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
           ref={ta}
           rows={1}
           value={interim ? `${text}${text && !/\s$/.test(text) ? " " : ""}${interim}` : text}
-          placeholder={placeholder ?? (busy ? "继续输入，消息会在合适时机送达…" : "给 Claude 发消息，/ 打开命令，@ 引用文件")}
+          placeholder={placeholder ?? defaultPlaceholder}
           onChange={(e) => {
             setText(e.target.value);
             setCaret(e.target.selectionStart);
@@ -386,7 +414,7 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
             }}
           />
           <ModePicker value={mode} allowBypass={Boolean(config?.allowBypass)} onChange={changeMode} />
-          <ModelPicker value={model} models={models} onChange={changeModel} />
+          <ModelPicker value={model} effort={effort} models={models} onChange={changeModel} onEffort={changeEffort} />
           <div className="rz-spacer" />
           {voice.available && (
             <Tooltip title={voice.recording ? "停止录音" : "语音输入"}>

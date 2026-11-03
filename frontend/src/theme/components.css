@@ -410,8 +410,8 @@
 .rz-composer textarea::placeholder { color: var(--text4); }
 .rz-composer-bar { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .rz-chip {
-  display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 9px; border-radius: 8px; max-width: 160px;
-  border: 1px solid var(--line-soft); background: none; color: var(--text3); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 9px; border-radius: 8px; max-width: 210px;
+  border: 1px solid var(--line); background: var(--bg1); color: var(--text2); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap;
 }
 .rz-chip span { overflow: hidden; text-overflow: ellipsis; }
 .rz-chip:hover:not(:disabled) { color: var(--text); border-color: var(--line); background: var(--bg3); }
@@ -548,3 +548,31 @@
 .rz-attempt.fail { color: #d8a094; }
 .rz-msg-wrap.settling .rz-msg-scroller { opacity: 0; }
 .rz-msg-wrap .rz-msg-scroller { transition: opacity 0.12s ease; }
+
+/* ---- Project tree (sidebar) ---- */
+.rz-tree-project .rz-project-row { padding: 0; gap: 0; }
+.rz-project-toggle {
+  flex-shrink: 0; width: 26px; height: 32px; display: flex; align-items: center; justify-content: center;
+  background: none; border: none; color: var(--text4); cursor: pointer; border-radius: 6px;
+}
+.rz-project-toggle:hover { color: var(--text); }
+.rz-project-toggle svg { transition: transform 0.15s; }
+.rz-tree-project.open .rz-project-toggle svg { transform: rotate(90deg); }
+.rz-project-open {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 10px 0 2px;
+  background: none; border: none; color: inherit; font: inherit; font-size: 13.5px; cursor: pointer; text-align: left;
+}
+.rz-project-open svg { color: var(--sage); flex-shrink: 0; }
+.rz-project-sessions { margin: 0 0 6px 13px; padding-left: 8px; border-left: 1px solid var(--line-soft); }
+.rz-project-sessions .rz-session-row { padding: 5px 10px; }
+.rz-project-none { font-size: 12px; color: var(--text4); padding: 4px 10px 6px; }
+
+/* ---- Model / effort picker ---- */
+.rz-effort-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 8px 10px 6px; margin-top: 4px; border-top: 1px solid var(--line-soft); }
+.rz-effort-label { font-size: 12px; color: var(--text3); margin-right: 4px; }
+.rz-effort {
+  height: 26px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--line); background: none;
+  color: var(--text2); font: inherit; font-size: 12px; cursor: pointer;
+}
+.rz-effort:hover { border-color: var(--text4); color: var(--text); }
+.rz-effort.on { border-color: var(--amber); color: var(--amber-strong); background: rgba(198, 150, 107, 0.12); }

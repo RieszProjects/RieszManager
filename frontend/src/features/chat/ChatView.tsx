@@ -35,55 +35,12 @@ function QueueBar({ sessionId, queue }: { sessionId: string; queue: QueueEntry[]
     <div className="rz-queue">
       {visible.map((q) => (
         <div key={q.uuid} className="rz-queue-item">
-          <span className="rz-tag">排队中</span>
+          <span className="rz-tag">{q.state === "held" ? "等待空闲" : "排队中"}</span>
           <span className="clamp-1">{q.preview}</span>
           <button type="button" aria-label="撤回" onClick={() => void cancel(q.uuid)}><X size={13} /></button>
         </div>
       ))}
-      <div className="rz-queue-hint">按 <kbd>Esc</kbd> 中断当前任务并立即发送</div>
-    </div>
-  );
-}
-
-function ExternalBar({ sessionId, state }: { sessionId: string; state: SessionState }) {
-  const navigate = useUi((s) => s.navigate);
-  const [busy, setBusy] = useState(false);
-  const fork = async () => {
-    setBusy(true);
-    try {
-      const res = await api<{ sessionId: string }>(`sessions/${sessionId}/fork`, { body: {} });
-      navigate({ view: "session", sessionId: res.sessionId });
-    } catch (err) {
-      toast((err as Error).message, "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-  const takeover = async () => {
-    setBusy(true);
-    try {
-      await api(`sessions/${sessionId}/takeover`, { body: {} });
-      socket.resubscribe(sessionId);
-      toast("已接管该会话", "success");
-    } catch (err) {
-      toast((err as Error).message, "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <div className="rz-external">
-      <div className="rz-external-text">
-        <SquareTerminal size={16} />
-        <div>
-          <div>此会话正在终端中运行{state.busy ? "，正在工作" : "，当前空闲"}</div>
-          <div className="dim">可以实时查看。要在这里继续，可分叉一份副本，或在空闲时接管（会关闭终端里的进程）。</div>
-        </div>
-      </div>
-      <div className="rz-external-actions">
-        <button type="button" className="rz-btn" disabled={busy} onClick={() => void fork()}><GitFork size={14} /> 分叉</button>
-        <button type="button" className="rz-btn" disabled={busy || state.busy} onClick={() => void takeover()}><Hand size={14} /> 接管</button>
-      </div>
+      {visible.some((q) => q.state !== "held") && <div className="rz-queue-hint">按 <kbd>Esc</kbd> 中断当前任务并立即发送</div>}
     </div>
   );
 }
@@ -126,6 +83,14 @@ function SessionMenu({ sessionId, state, cwd }: { sessionId: string; state: Sess
             <ListItemIcon><MonitorUp size={16} /></ListItemIcon>预先启动进程
           </MenuItem>
         )}
+        {state?.external && state.alive && !state.busy && (
+          <MenuItem onClick={() => run(async () => {
+            await api(`sessions/${sessionId}/takeover`, { body: {} });
+            socket.resubscribe(sessionId);
+          })}>
+            <ListItemIcon><Hand size={16} /></ListItemIcon>从终端转到这里
+          </MenuItem>
+        )}
         <MenuItem onClick={() => run(async () => {
           if (await copyText(sessionId)) toast("已复制会话 ID", "success");
         })}>
@@ -166,7 +131,6 @@ export function ChatView({ sessionId }: { sessionId: string }) {
 
   const state = data?.state ?? null;
   const items = data?.items ?? [];
-  const external = Boolean(state?.external && state.alive && !state.hosted);
   const project = projects.find((p) => p.id === projectId);
   const ctx = useMemo(() => ({ sessionId, cwd: summary?.cwd ?? null, projectId }), [sessionId, summary?.cwd, projectId]);
   const waiting = Boolean(state?.permissions?.length);
@@ -181,7 +145,6 @@ export function ChatView({ sessionId }: { sessionId: string }) {
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     setDragging(false);
-    if (external) return;
     const files = Array.from(e.dataTransfer.files ?? []);
     if (files.length) dropRef.current?.(files);
   };
@@ -254,20 +217,16 @@ export function ChatView({ sessionId }: { sessionId: string }) {
           )}
         </div>
         <div className="rz-chat-bottom">
-          {state?.hosted && <QueueBar sessionId={sessionId} queue={state.queue ?? []} />}
-          {external && state ? (
-            <ExternalBar sessionId={sessionId} state={state} />
-          ) : (
-            <Composer
-              sessionId={sessionId}
-              projectId={projectId}
-              state={state}
-              defaultModel={summary?.model}
-              defaultMode={summary?.permissionMode}
-              autoFocus
-              dropRef={dropRef}
-            />
-          )}
+          <QueueBar sessionId={sessionId} queue={state?.queue ?? []} />
+          <Composer
+            sessionId={sessionId}
+            projectId={projectId}
+            state={state}
+            defaultModel={summary?.model}
+            defaultMode={summary?.permissionMode}
+            autoFocus
+            dropRef={dropRef}
+          />
         </div>
         {dragging && <div className="rz-dropzone">松开以添加附件</div>}
       </div>

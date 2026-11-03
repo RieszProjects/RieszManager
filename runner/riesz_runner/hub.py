@@ -9,11 +9,16 @@ import uuid as uuidlib
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+from typing import TYPE_CHECKING
+
 from .config import Config
 from .live import LiveProcess, scan_live
 from .process import ClaudeProcess, ControlError
 from .projects import ProjectResolver
 from .store import SessionStore
+
+if TYPE_CHECKING:
+    from .delivery import Delivery
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +43,7 @@ class Hub:
         self._tasks: list[asyncio.Task[Any]] = []
         self._tail_wakeup: dict[str, asyncio.Event] = {}
         self._spawn_locks: dict[str, asyncio.Lock] = {}
+        self.delivery: Delivery | None = None
 
     # ---- lifecycle ----------------------------------------------------------
 
@@ -143,6 +149,8 @@ class Hub:
             before = {sid: (p.pid, p.status) for sid, p in self.live.items()}
             after = {sid: (p.pid, p.status) for sid, p in current.items()}
             self.live = current
+            if self.delivery is not None and self.delivery.held:
+                await self.delivery.on_live_changed()
             if before != after:
                 await self.broadcast_global({"ev": "live", "live": self.live_list()})
                 for sid in set(before) | set(after):
@@ -198,16 +206,28 @@ class Hub:
                     "waiting": bool(hosted.permissions)}
         live = self.live.get(session_id)
         if live is not None:
+            held = len(self.delivery.held.get(session_id, [])) if self.delivery else 0
             return {"hosted": False, "busy": live.status == "busy", "pid": live.pid,
-                    "kind": live.kind, "entrypoint": live.entrypoint, "status": live.status}
+                    "kind": live.kind, "entrypoint": live.entrypoint, "status": live.status, "held": held}
         return None
+
+    def _with_meta(self, session_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        """Fill model/effort/mode from the transcript where the process has not reported them."""
+        entry = self.store.entries.get(session_id)
+        if entry is not None:
+            meta = entry.scanner.meta
+            for key, value in (("model", meta.model), ("effort", meta.effort), ("permissionMode", meta.permission_mode)):
+                if not state.get(key):
+                    state[key] = value
+        return state
 
     def session_state(self, session_id: str) -> dict[str, Any]:
         hosted = self.hosted.get(session_id)
         if hosted is not None and hosted.alive:
-            return hosted.snapshot()
+            return self._with_meta(session_id, hosted.snapshot())
         live = self.live.get(session_id)
-        state: dict[str, Any] = {"hosted": False, "alive": False, "busy": False, "queue": [],
+        queue = self.delivery.queue_entries(session_id) if self.delivery else []
+        state: dict[str, Any] = {"hosted": False, "alive": False, "busy": False, "queue": queue,
                                  "permissions": [], "partial": None}
         if live is not None:
             state.update(alive=True, external=True, pid=live.pid, busy=live.status == "busy",
@@ -215,12 +235,7 @@ class Hub:
         if hosted is not None:
             state["exitCode"] = hosted.exit_code
             state["lastResult"] = hosted.last_result
-        entry = self.store.entries.get(session_id)
-        if entry is not None:
-            meta = entry.scanner.meta
-            state.setdefault("model", meta.model)
-            state.setdefault("permissionMode", meta.permission_mode)
-        return state
+        return self._with_meta(session_id, state)
 
     # ---- hosted processes ---------------------------------------------------
 
@@ -239,6 +254,8 @@ class Hub:
         if ev == "exit":
             self._poke(proc.session_id)
             await self.broadcast_global({"ev": "live", "live": self.live_list()})
+        if ev == "state":
+            event = {**event, "state": self._with_meta(proc.session_id, dict(event["state"]))}
         await self.broadcast_session(proc.session_id, event)
         if ev == "state":
             summary_live = self._live_info(proc.session_id)

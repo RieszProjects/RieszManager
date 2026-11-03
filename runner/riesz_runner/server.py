@@ -6,9 +6,7 @@ import asyncio
 import hmac
 import json
 import logging
-import os
 import re
-import signal
 import time
 import uuid as uuidlib
 from pathlib import Path
@@ -17,14 +15,16 @@ from typing import Any
 from aiohttp import WSMsgType, web
 
 from . import files as files_mod
+from .claude_settings import user_defaults
 from .config import Config
+from .delivery import Delivery
 from .history import PromptHistory
 from .hub import Hub
 from .probe import CapabilityProbe
 from .process import ControlError
 from .projects import ROOT_ID
 from .transcript import resolve_image
-from .uploads import UploadStore, compose_content
+from .uploads import UploadStore
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +39,8 @@ CFG = web.AppKey("cfg", Config)
 UPLOADS = web.AppKey("uploads", UploadStore)
 HISTORY = web.AppKey("history", PromptHistory)
 PROBE = web.AppKey("probe", CapabilityProbe)
+DELIVERY = web.AppKey("delivery", Delivery)
+EFFORT_LEVELS = {"low", "medium", "high", "xhigh", "max"}
 
 
 def _err(status: int, message: str) -> web.Response:
@@ -86,7 +88,8 @@ async def _body(request: web.Request) -> dict[str, Any]:
 async def health(request: web.Request) -> web.Response:
     cfg = request.app[CFG]
     return _json({"ok": True, "workspaceRoot": str(cfg.workspace_root), "claudeBin": cfg.claude_bin,
-                  "allowBypass": cfg.allow_bypass, "time": time.time()})
+                  "allowBypass": cfg.allow_bypass,
+                  "defaultPermissionMode": cfg.default_permission_mode, "time": time.time()})
 
 
 async def list_projects(request: web.Request) -> web.Response:
@@ -198,7 +201,9 @@ async def session_commands(request: web.Request) -> web.Response:
     sid = request.match_info.get("sid")
     proc = hub.get_hosted(sid) if sid else None
     if proc is not None and proc.init_info:
-        return _json({"commands": proc.commands(), "models": proc.models(), "source": "session"})
+        models = proc.models()
+        return _json({"commands": proc.commands(), "models": models, "source": "session",
+                      "defaults": user_defaults(hub.cfg.claude_home, models)})
     cwd = None
     if sid:
         entry = hub.store.get(sid)
@@ -210,7 +215,8 @@ async def session_commands(request: web.Request) -> web.Response:
     if not Path(cwd).is_dir():
         cwd = str(hub.cfg.workspace_root)
     info = await probe.get(cwd)
-    return _json({"commands": info["commands"], "models": info["models"], "source": "probe"})
+    return _json({"commands": info["commands"], "models": info["models"], "source": "probe",
+                  "defaults": user_defaults(hub.cfg.claude_home, info["models"])})
 
 
 async def context_usage(request: web.Request) -> web.Response:
@@ -244,15 +250,27 @@ def _validate_mode(cfg: Config, mode: Any) -> str | None:
     return mode
 
 
-async def _deliver(request: web.Request, proc: Any, body: dict[str, Any]) -> str:
+def _validate_effort(effort: Any) -> str | None:
+    if effort in (None, ""):
+        return None
+    if effort not in EFFORT_LEVELS:
+        raise web.HTTPBadRequest(text="invalid effort level")
+    return str(effort)
+
+
+def _prompt(request: web.Request, body: dict[str, Any]) -> tuple[str, list[dict[str, Any]], str]:
+    """Validate a prompt body: returns (text, attachment metas, message uuid)."""
     text = str(body.get("text") or "")
     attachments = _attachments(request, body.get("attachments"))
     if not text.strip() and not attachments:
         raise web.HTTPBadRequest(text="empty message")
-    content, preview = await asyncio.to_thread(compose_content, text, attachments)
     message_uuid = body.get("uuid") if _UUID_RE.match(str(body.get("uuid") or "")) else str(uuidlib.uuid4())
-    await proc.send_user(content, message_uuid, preview)
-    request.app[HISTORY].record(text, proc.cwd, proc.session_id)
+    return text, attachments, message_uuid
+
+
+async def _deliver_new(request: web.Request, proc: Any, body: dict[str, Any]) -> str:
+    text, attachments, message_uuid = _prompt(request, body)
+    await request.app[DELIVERY].send_new(proc, text, attachments, message_uuid)
     return message_uuid
 
 
@@ -265,11 +283,11 @@ async def create_session(request: web.Request) -> web.Response:
         return _err(400, "unknown project")
     mode = _validate_mode(hub.cfg, body.get("permissionMode"))
     proc = await hub.create_session(str(path), model=body.get("model") or None, permission_mode=mode,
-                                    effort=body.get("effort") or None)
+                                    effort=_validate_effort(body.get("effort")))
     request.app[PROBE].remember(proc.cwd, _probe_info(proc))
     message_uuid = None
     if body.get("text") or body.get("attachments"):
-        message_uuid = await _deliver(request, proc, body)
+        message_uuid = await _deliver_new(request, proc, body)
     return _json({"sessionId": proc.session_id, "uuid": message_uuid, "state": proc.snapshot()})
 
 
@@ -284,9 +302,12 @@ async def send_message(request: web.Request) -> web.Response:
     sid = _session_id(request)
     body = await _body(request)
     mode = _validate_mode(hub.cfg, body.get("permissionMode"))
-    proc = await hub.ensure_process(sid, model=body.get("model") or None, permission_mode=mode)
-    message_uuid = await _deliver(request, proc, body)
-    return _json({"uuid": message_uuid, "state": proc.snapshot()})
+    text, attachments, message_uuid = _prompt(request, body)
+    result = await request.app[DELIVERY].send(
+        sid, text, attachments, message_uuid,
+        model=body.get("model") or None, permission_mode=mode, effort=_validate_effort(body.get("effort")),
+    )
+    return _json({**result, "state": hub.session_state(sid)})
 
 
 async def start_session(request: web.Request) -> web.Response:
@@ -316,11 +337,15 @@ async def interrupt(request: web.Request) -> web.Response:
 
 async def cancel_message(request: web.Request) -> web.Response:
     hub = request.app[HUB]
-    proc = hub.get_hosted(_session_id(request))
+    sid = _session_id(request)
+    body = await _body(request)
+    message_uuid = str(body.get("uuid") or "")
+    if await request.app[DELIVERY].cancel(sid, message_uuid):
+        return _json({"result": {"cancelled": True}})
+    proc = hub.get_hosted(sid)
     if proc is None:
         return _err(409, "session is not running here")
-    body = await _body(request)
-    return _json({"result": await proc.cancel_message(str(body.get("uuid") or ""))})
+    return _json({"result": await proc.cancel_message(message_uuid)})
 
 
 async def answer_permission(request: web.Request) -> web.Response:
@@ -356,6 +381,19 @@ async def set_model(request: web.Request) -> web.Response:
     return _json({"state": proc.snapshot()})
 
 
+async def set_effort(request: web.Request) -> web.Response:
+    hub = request.app[HUB]
+    body = await _body(request)
+    effort = _validate_effort(body.get("effort"))
+    if effort is None:
+        return _err(400, "effort is required")
+    proc = hub.get_hosted(_session_id(request))
+    if proc is None:
+        return _err(409, "session is not running here")
+    await proc.set_effort(effort)
+    return _json({"state": proc.snapshot()})
+
+
 async def set_mode(request: web.Request) -> web.Response:
     hub = request.app[HUB]
     body = await _body(request)
@@ -374,36 +412,13 @@ async def fork_session(request: web.Request) -> web.Response:
     proc = await hub.fork_session(_session_id(request), model=body.get("model") or None, permission_mode=mode)
     message_uuid = None
     if body.get("text") or body.get("attachments"):
-        message_uuid = await _deliver(request, proc, body)
+        message_uuid = await _deliver_new(request, proc, body)
     return _json({"sessionId": proc.session_id, "uuid": message_uuid})
 
 
 async def takeover(request: web.Request) -> web.Response:
     """Stop an idle Claude Code process running elsewhere, then resume the session here."""
-    hub = request.app[HUB]
-    sid = _session_id(request)
-    live = hub.live.get(sid)
-    if live is None:
-        proc = await hub.ensure_process(sid)
-        return _json({"state": proc.snapshot()})
-    if live.status == "busy":
-        return _err(409, "the session is busy in another process; wait until it is idle")
-    try:
-        os.kill(live.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
-    except PermissionError:
-        return _err(403, "not allowed to stop that process")
-    for _ in range(50):
-        await asyncio.sleep(0.2)
-        try:
-            os.kill(live.pid, 0)
-        except ProcessLookupError:
-            break
-    else:
-        return _err(409, "the other process did not exit")
-    hub.live.pop(sid, None)
-    proc = await hub.ensure_process(sid)
+    proc = await request.app[DELIVERY].takeover(_session_id(request))
     return _json({"state": proc.snapshot()})
 
 
@@ -560,6 +575,8 @@ def build_app(cfg: Config) -> web.Application:
     app[UPLOADS] = UploadStore(cfg.uploads_dir)
     app[HISTORY] = PromptHistory(cfg.history_file, cfg.own_history_file)
     app[PROBE] = CapabilityProbe(cfg)
+    app[DELIVERY] = Delivery(hub, app[HISTORY])
+    hub.delivery = app[DELIVERY]
 
     async def on_startup(app: web.Application) -> None:
         await hub.start()
@@ -592,6 +609,7 @@ def build_app(cfg: Config) -> web.Application:
     r.add_post("/v1/sessions/{sid}/permissions/{rid}", answer_permission)
     r.add_post("/v1/sessions/{sid}/model", set_model)
     r.add_post("/v1/sessions/{sid}/mode", set_mode)
+    r.add_post("/v1/sessions/{sid}/effort", set_effort)
     r.add_post("/v1/sessions/{sid}/fork", fork_session)
     r.add_post("/v1/sessions/{sid}/takeover", takeover)
     r.add_get("/v1/history", history)

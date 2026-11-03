@@ -78,6 +78,9 @@ WorkingDirectory=$ROOT/runner
 ExecStart=$ROOT/runner/.venv/bin/python -m riesz_runner --env-file $ENV_FILE
 Restart=on-failure
 RestartSec=3
+# Let the runner close its claude children itself (they finish cleanly on stdin EOF).
+KillMode=mixed
+TimeoutStopSec=30
 Environment=PYTHONUNBUFFERED=1
 Environment=SHELL=${SHELL:-/bin/bash}
 

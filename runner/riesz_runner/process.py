@@ -190,6 +190,7 @@ class ClaudeProcess:
             "status": self.status,
             "model": self.model,
             "permissionMode": self.permission_mode,
+            "effort": self.effort,
             "queue": list(self.queue.values()),
             "permissions": list(self.permissions.values()),
             "partial": self.partial,
@@ -258,6 +259,11 @@ class ClaudeProcess:
     async def set_model(self, model: str | None) -> None:
         await self.control("set_model", model=model)
         self.model = model
+        await self._emit_state()
+
+    async def set_effort(self, level: str) -> None:
+        await self.control("apply_flag_settings", settings={"effortLevel": level})
+        self.effort = level
         await self._emit_state()
 
     async def set_permission_mode(self, mode: str) -> None:
@@ -390,6 +396,8 @@ class ClaudeProcess:
                 self.model = msg["model"]
             if msg.get("permissionMode"):
                 self.permission_mode = msg["permissionMode"]
+            if isinstance(msg.get("effort"), str):
+                self.effort = msg["effort"]
             new_sid = msg.get("session_id")
             if new_sid and new_sid != self.session_id:
                 old = self.session_id

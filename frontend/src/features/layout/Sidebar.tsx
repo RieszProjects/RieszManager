@@ -1,13 +1,13 @@
 /** Left sidebar: brand, new-session entry, search, recent sessions and projects. */
 import { IconButton, InputBase, Tooltip } from "@mui/material";
-import { Folder, FolderGit2, PanelLeftClose, Plus, Search, Settings, Wifi, WifiOff } from "lucide-react";
+import { PanelLeftClose, Plus, Search, Settings, Wifi, WifiOff } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { SessionSummary } from "@/api/types";
 import { Mascot } from "@/components/Mascot";
-import { StatusDot } from "@/components/StatusDot";
 import { dateBucket, relativeTime, type DateBucket } from "@/lib/format";
 import { sessionTitle, useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
+import { ProjectTree } from "../sessions/ProjectTree";
 import { SessionRow } from "../sessions/SessionRow";
 
 const RECENT_LIMIT = 150;
@@ -60,47 +60,6 @@ function RecentList({ query }: { query: string }) {
   );
 }
 
-function ProjectList({ query }: { query: string }) {
-  const projects = useApp((s) => s.projects);
-  const route = useUi((s) => s.route);
-  const contextProject = useUi((s) => s.contextProject);
-  const navigate = useUi((s) => s.navigate);
-  const q = query.trim().toLowerCase();
-  const list = projects.filter((p) => !q || p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q));
-  const workspace = list.filter((p) => !p.external);
-  const external = list.filter((p) => p.external);
-  const activeId = route.view === "project" ? route.projectId : contextProject;
-  const row = (p: (typeof projects)[number]) => (
-    <button
-      key={p.id}
-      type="button"
-      className={`rz-project-row${p.id === activeId ? " active" : ""}`}
-      onClick={() => navigate({ view: "project", projectId: p.id })}
-      title={p.path}
-    >
-      {p.isGit ? <FolderGit2 size={15} /> : <Folder size={15} />}
-      <span className="clamp-1 rz-project-name">{p.external ? p.path.replace(/^\/home\/[^/]+/, "~") : p.name}</span>
-      {p.liveCount > 0 && <StatusDot live={{ hosted: true, busy: true, pid: 0 }} size={6} />}
-      <span className="dim rz-project-count">{p.sessionCount || ""}</span>
-    </button>
-  );
-  return (
-    <div className="rz-side-list">
-      <section>
-        <div className="rz-side-label">工作区</div>
-        {workspace.map(row)}
-        {workspace.length === 0 && <div className="rz-side-empty">没有项目</div>}
-      </section>
-      {external.length > 0 && (
-        <section>
-          <div className="rz-side-label">其他目录</div>
-          {external.map(row)}
-        </section>
-      )}
-    </div>
-  );
-}
-
 export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
   const [query, setQuery] = useState("");
   const tab = useUi((s) => s.sidebarTab);
@@ -144,10 +103,10 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
         <InputBase placeholder="搜索会话或项目" value={query} onChange={(e) => setQuery(e.target.value)} fullWidth />
       </div>
       <div className="rz-side-tabs" role="tablist">
-        <button type="button" role="tab" aria-selected={tab === "recent"} className={tab === "recent" ? "on" : ""} onClick={() => setTab("recent")}>最近</button>
         <button type="button" role="tab" aria-selected={tab === "projects"} className={tab === "projects" ? "on" : ""} onClick={() => setTab("projects")}>项目</button>
+        <button type="button" role="tab" aria-selected={tab === "recent"} className={tab === "recent" ? "on" : ""} onClick={() => setTab("recent")}>最近</button>
       </div>
-      {tab === "recent" ? <RecentList query={query} /> : <ProjectList query={query} />}
+      {tab === "recent" ? <RecentList query={query} /> : <ProjectTree query={query} />}
       <div className="rz-side-foot">
         <Tooltip title={online ? `已连接 · ${sessionsCount} 个会话 · 最近活动 ${relativeTime(lastActivity)}` : runnerOnline ? "正在重新连接…" : "宿主机运行器未连接"}>
           <span className={`rz-conn${online ? " on" : ""}`}>{online ? <Wifi size={14} /> : <WifiOff size={14} />}{online ? "已连接" : "未连接"}</span>

@@ -48,31 +48,66 @@ export function cycleMode(current: string | null | undefined, allowBypass: boole
   return order[(idx + 1) % order.length];
 }
 
+const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"];
+
+/** Find the catalog entry for a model alias or full model id (aliases win over "default"). */
+export function resolveModel(models: ModelInfo[], value: string | null | undefined): ModelInfo | undefined {
+  if (!value) return undefined;
+  return (
+    models.find((m) => m.value === value) ??
+    models.find((m) => m.value !== "default" && m.resolvedModel === value) ??
+    models.find((m) => m.resolvedModel === value)
+  );
+}
+
+function modelName(models: ModelInfo[], value: string | null | undefined): string {
+  const option = resolveModel(models, value);
+  if (!option) return modelLabel(value);
+  if (option.value === "default") {
+    const concrete = models.find((m) => m.value !== "default" && m.resolvedModel === option.resolvedModel);
+    return concrete?.displayName ?? modelLabel(option.resolvedModel);
+  }
+  return option.displayName;
+}
+
 interface ModelProps {
   value: string | null | undefined;
+  effort: string | null | undefined;
   models: ModelInfo[];
   onChange: (model: string) => void;
+  onEffort: (effort: string) => void;
   disabled?: boolean;
 }
 
-export function ModelPicker({ value, models, onChange, disabled }: ModelProps) {
+export function ModelPicker({ value, effort, models, onChange, onEffort, disabled }: ModelProps) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
-  const isCurrent = (m: ModelInfo) => value === m.value || (m.resolvedModel && value === m.resolvedModel);
+  const current = resolveModel(models, value);
+  const levels = current?.supportedEffortLevels?.length ? current.supportedEffortLevels : EFFORT_LEVELS;
+  const name = modelName(models, value);
   return (
     <>
-      <button type="button" className="rz-chip" disabled={disabled || !models.length} onClick={(e) => setAnchor(e.currentTarget)} title="模型">
+      <button type="button" className="rz-chip" disabled={disabled || !models.length} onClick={(e) => setAnchor(e.currentTarget)} title="模型与推理强度">
         <Cpu size={13} />
-        <span>{models.find((m) => m.value === value)?.displayName ?? modelLabel(value)}</span>
+        <span>{effort ? `${name} · ${effort}` : name}</span>
         <ChevronDown size={12} />
       </button>
       <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => setAnchor(null)}
         anchorOrigin={{ vertical: "top", horizontal: "left" }} transformOrigin={{ vertical: "bottom", horizontal: "left" }}>
         {models.map((m) => (
-          <MenuItem key={m.value} selected={Boolean(isCurrent(m))} onClick={() => { setAnchor(null); onChange(m.value); }}>
+          <MenuItem key={m.value} selected={m.value === current?.value} onClick={() => { setAnchor(null); onChange(m.value); }}>
             <ListItemText primary={m.displayName} secondary={m.description} slotProps={{ secondary: { sx: { fontSize: 12 } } }} />
-            {isCurrent(m) && <Check size={15} />}
+            {m.value === current?.value && <Check size={15} />}
           </MenuItem>
         ))}
+        <div className="rz-effort-row" onClick={(e) => e.stopPropagation()}>
+          <span className="rz-effort-label">推理强度</span>
+          {levels.map((level) => (
+            <button key={level} type="button" className={`rz-effort${level === effort ? " on" : ""}`}
+              onClick={() => { setAnchor(null); onEffort(level); }}>
+              {level}
+            </button>
+          ))}
+        </div>
       </Menu>
     </>
   );

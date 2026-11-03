@@ -73,7 +73,7 @@ export const useUi = create<UiStore>((set) => ({
   rightOverlay: false,
   desktopLeftCollapsed: storage.get("leftCollapsed", false),
   rightTab: "sessions",
-  sidebarTab: storage.get("sidebarTab", "recent"),
+  sidebarTab: storage.get("sidebarTab.v2", "projects"),
   file: null,
   settingsOpen: false,
   newSessionOpen: false,
@@ -102,7 +102,7 @@ export const useUi = create<UiStore>((set) => ({
     }),
   setRightTab: (rightTab) => set({ rightTab }),
   setSidebarTab: (sidebarTab) => {
-    storage.set("sidebarTab", sidebarTab);
+    storage.set("sidebarTab.v2", sidebarTab);
     set({ sidebarTab });
   },
   openFile: (file) => set({ file }),

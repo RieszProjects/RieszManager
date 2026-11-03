@@ -108,6 +108,7 @@ class TranscriptMeta:
     prompt_count: int = 0
     model: str | None = None
     permission_mode: str | None = None
+    effort: str | None = None
     version: str | None = None
     entrypoint: str | None = None
 
@@ -128,6 +129,7 @@ class TranscriptMeta:
             "promptCount": self.prompt_count,
             "model": self.model,
             "permissionMode": self.permission_mode,
+            "effort": self.effort,
             "version": self.version,
             "entrypoint": self.entrypoint,
         }
@@ -175,6 +177,8 @@ class MetaScanner:
             model = (rec.get("message") or {}).get("model")
             if model and model != "<synthetic>":
                 meta.model = model
+                if isinstance(rec.get("effort"), str):
+                    meta.effort = rec["effort"]
         elif rtype == "user" and not rec.get("isMeta") and not rec.get("isSidechain"):
             text = _plain_user_text(rec)
             origin = rec.get("origin")

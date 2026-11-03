@@ -24,6 +24,7 @@ export interface LiveInfo {
   kind?: string | null;
   entrypoint?: string | null;
   status?: string | null;
+  held?: number;
 }
 
 export interface SessionSummary {
@@ -38,6 +39,7 @@ export interface SessionSummary {
   updatedAt: string | null;
   promptCount: number;
   model: string | null;
+  effort?: string | null;
   permissionMode: string | null;
   project: string | null;
   live: LiveInfo | null;
@@ -198,6 +200,7 @@ export interface SessionState {
   busy: boolean;
   status?: string | null;
   model?: string | null;
+  effort?: string | null;
   permissionMode?: string | null;
   queue: QueueEntry[];
   permissions: PermissionRequest[];
@@ -265,6 +268,7 @@ export interface AppConfig {
   runner: boolean;
   workspaceRoot: string | null;
   allowBypass: boolean;
+  defaultPermissionMode: string;
   transcription: boolean;
   username: string;
 }
