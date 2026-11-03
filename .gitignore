@@ -1,0 +1,34 @@
+# Working folders (never committed)
+reports/
+tmp/
+instructions/
+memo/
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+runner/runner.env
+!runner/runner.env.example
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.sqlite3
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,7 @@
+Django>=6.1,<6.2
+channels>=4.3,<5
+uvicorn[standard]>=0.54,<1
+aiohttp>=3.14,<4
+pyotp>=2.10,<3
+cryptography>=50,<51
+python-dotenv>=1.2,<2
