@@ -75,7 +75,7 @@ export function ActivityLine({ busy, since, status, waiting, compact }: Activity
   const label = waiting ? "等待你的确认" : status === "compacting" ? "正在压缩上下文" : verb;
   return (
     <div className="rz-activity">
-      {compact ? <LoaderCircle size={14} className="spin" /> : <Mascot pose="working" size={30} className="rz-activity-mascot" />}
+      {compact ? <LoaderCircle size={14} className="spin" /> : <Mascot pose="working" size={50} className="rz-activity-mascot" />}
       <span className="rz-activity-verb">{label}…</span>
       {elapsed && <span className="dim">{elapsed}</span>}
       {!waiting && <span className="dim rz-activity-hint"><kbd>Esc</kbd> 中断</span>}

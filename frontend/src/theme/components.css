@@ -369,7 +369,7 @@
 .rz-plan-body { max-height: 50vh; overflow: auto; padding: 4px 2px; }
 
 /* Activity line */
-.rz-activity { display: flex; align-items: center; gap: 10px; padding: 8px 0 2px; font-size: 13px; color: var(--text2); min-height: 40px; }
+.rz-activity { display: flex; align-items: center; gap: 10px; padding: 8px 0 2px; font-size: 13px; color: var(--text2); min-height: 60px; }
 .rz-activity-mascot { animation: rz-bob 1.6s ease-in-out infinite; }
 .rz-activity-verb { font-family: var(--font-display); font-style: italic; font-size: 16px; color: var(--amber-strong); }
 .rz-activity-hint { margin-left: auto; font-size: 12px; }
@@ -672,6 +672,13 @@ body.rz-dragging, body.rz-dragging * { cursor: grabbing !important; user-select:
 .rz-project-row:hover .rz-project-more, .rz-project-row:focus-within .rz-project-more { opacity: 1; }
 
 /* ---- Landing view: just the mascot ---- */
-.rz-home-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.rz-home-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; gap: 28px; padding: 24px; }
+.rz-home-greeting { margin: 0; align-self: center; white-space: nowrap; }
+.rz-shell.mobile .rz-home-stage { flex-direction: column; gap: 14px; }
 .rz-home-stage .rz-home-mascot { width: auto; height: min(62vh, 560px); max-width: 80%; object-fit: contain; }
 .rz-shell.mobile .rz-home-stage .rz-home-mascot { width: auto; height: min(52vh, 420px); max-width: 86%; }
+
+/* Session row actions sit on the title line, next to the status dot. */
+.rz-session-row-main { min-height: 20px; line-height: 20px; }
+.rz-session-row > .rz-session-more { top: 4px; transform: none; }          /* 7px row padding + (20px line - 26px button) / 2 */
+.rz-project-sessions .rz-session-row > .rz-session-more { top: 2px; }      /* 5px row padding in the project tree */

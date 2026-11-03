@@ -8,6 +8,15 @@ import { Composer } from "../composer/Composer";
 import { MobileHeaderButtons } from "../layout/MobileHeaderButtons";
 import { RightDock, RightPanelButton } from "../layout/RightDock";
 
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 5) return "这么晚了还不睡吗";
+  if (h < 11) return "早上好";
+  if (h < 14) return "中午好";
+  if (h < 18) return "下午好";
+  return "晚上好";
+}
+
 export function HomeView() {
   const setContextProject = useUi((s) => s.setContextProject);
   const isMobile = useIsMobile();
@@ -23,6 +32,7 @@ export function HomeView() {
       )}
       <div className="rz-home-stage">
         <Mascot pose="sleepy" className="rz-home-mascot" />
+        <h1 className="rz-home-title rz-home-greeting">{greeting()}</h1>
       </div>
     </div>
   );
