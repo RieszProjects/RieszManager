@@ -4,6 +4,7 @@ import { setUnauthorizedHandler } from "@/api/client";
 import { socket } from "@/api/socket";
 import { Mascot } from "@/components/Mascot";
 import { Toaster } from "@/components/Toaster";
+import { UpdateBanner } from "@/components/UpdateBanner";
 import { LoginPage } from "@/features/auth/LoginPage";
 import { ChatView } from "@/features/chat/ChatView";
 import { FileViewer } from "@/features/files/FileViewer";
@@ -82,7 +83,7 @@ export function App() {
       </div>
     );
   }
-  if (status !== "authenticated") return <><LoginPage /><Toaster /></>;
+  if (status !== "authenticated") return <><LoginPage /><Toaster /><UpdateBanner /></>;
   return (
     <>
       <AppShell>
@@ -93,6 +94,7 @@ export function App() {
       <NewSessionDialog />
       <RenameDialog />
       <Toaster />
+      <UpdateBanner />
     </>
   );
 }

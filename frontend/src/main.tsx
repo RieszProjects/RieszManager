@@ -13,6 +13,7 @@ import { CssBaseline, ThemeProvider } from "@mui/material";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { setupPwaUpdates } from "./lib/pwaUpdate";
 import { theme } from "./theme/theme";
 import { useApp } from "./store/app";
 import { useSessions } from "./store/sessions";
@@ -28,6 +29,8 @@ if (window.matchMedia("(pointer: coarse)").matches) {
     document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
   }
 }
+
+setupPwaUpdates();
 
 // Keep the install prompt so the settings page can offer "install app" later.
 window.addEventListener("beforeinstallprompt", (e) => {

@@ -10,8 +10,9 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: "autoUpdate",
-      injectRegister: "auto",
+      // Registered from src/lib/pwaUpdate.ts, which decides when to switch to a new version.
+      registerType: "prompt",
+      injectRegister: false,
       includeAssets: ["favicon.png", "icons/apple-touch-icon.png"],
       manifest: {
         id: "/",
