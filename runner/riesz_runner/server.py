@@ -445,6 +445,12 @@ async def files_content(request: web.Request) -> web.Response:
     return _json({"file": info})
 
 
+async def files_search(request: web.Request) -> web.Response:
+    root = _project_root(request)
+    results = await asyncio.to_thread(files_mod.search, root, request.query.get("q", ""))
+    return _json({"results": results})
+
+
 async def files_raw(request: web.Request) -> web.StreamResponse:
     root = _project_root(request)
     path = files_mod.raw_path(root, request.query.get("path", ""))
@@ -514,8 +520,9 @@ async def websocket(request: web.Request) -> web.WebSocketResponse:
                 queue.put_nowait({"ev": "live", "live": hub.live_list()})
             elif op == "sub":
                 sid = str(data.get("sessionId") or "")
-                if not _UUID_RE.match(sid) or sid in subscriptions:
+                if not _UUID_RE.match(sid):
                     continue
+                # A repeated "sub" just asks for a fresh snapshot.
                 view = await hub.catch_up(sid)
                 items = view.items[-SNAPSHOT_ITEMS:] if view else []
                 queue.put_nowait({
@@ -524,8 +531,9 @@ async def websocket(request: web.Request) -> web.WebSocketResponse:
                     "state": hub.session_state(sid),
                     "session": hub.session_summary(sid) if hub.store.entries.get(sid) else None,
                 })
-                hub.subscribe(sid, sub)
-                subscriptions[sid] = sub
+                if sid not in subscriptions:
+                    hub.subscribe(sid, sub)
+                    subscriptions[sid] = sub
             elif op == "unsub":
                 sid = str(data.get("sessionId") or "")
                 if sid in subscriptions:
@@ -590,6 +598,7 @@ def build_app(cfg: Config) -> web.Application:
     r.add_get("/v1/files/list", files_list)
     r.add_get("/v1/files/content", files_content)
     r.add_get("/v1/files/raw", files_raw)
+    r.add_get("/v1/files/search", files_search)
     r.add_post("/v1/uploads", upload)
     r.add_get("/v1/uploads/{uid}", upload_raw)
     r.add_get("/v1/ws", websocket)

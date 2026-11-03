@@ -103,3 +103,37 @@ def raw_path(root: Path, rel: str) -> Path:
     if not path.is_file():
         raise FileAccessError("not a file")
     return path
+
+
+def search(root: Path, query: str, limit: int = 40, max_entries: int = 30000) -> list[dict[str, Any]]:
+    """Fuzzy-ish path search for @-mentions: ranks basename prefix > basename substring > path substring."""
+    q = query.strip().lower()
+    root_real = Path(os.path.realpath(root))
+    scored: list[tuple[int, str, bool]] = []
+    seen = 0
+    for dirpath, dirnames, filenames in os.walk(root_real):
+        dirnames[:] = [d for d in dirnames if d not in HIDDEN_NAMES and d not in HEAVY_DIRS]
+        rel_dir = os.path.relpath(dirpath, root_real)
+        rel_dir = "" if rel_dir == "." else rel_dir
+        for name, is_dir in [(d, True) for d in dirnames] + [(f, False) for f in filenames]:
+            seen += 1
+            if seen > max_entries:
+                break
+            rel = os.path.join(rel_dir, name) if rel_dir else name
+            low_name = name.lower()
+            low_rel = rel.lower()
+            if not q:
+                score = 3 + rel.count("/")
+            elif low_name.startswith(q):
+                score = 0
+            elif q in low_name:
+                score = 1
+            elif q in low_rel:
+                score = 2
+            else:
+                continue
+            scored.append((score * 1000 + len(rel), rel, is_dir))
+        if seen > max_entries:
+            break
+    scored.sort()
+    return [{"path": rel + ("/" if is_dir else ""), "dir": is_dir} for _, rel, is_dir in scored[:limit]]

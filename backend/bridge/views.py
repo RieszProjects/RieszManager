@@ -37,7 +37,7 @@ ROUTES: list[tuple[str, re.Pattern[str], str]] = [
         ("POST", rf"^sessions/(?P<sid>{UUID})/permissions/(?P<rid>[\w-]{{1,80}})$",
          "/v1/sessions/{sid}/permissions/{rid}"),
         ("GET", r"^history$", "/v1/history"),
-        ("GET", r"^files/(?P<op>list|content)$", "/v1/files/{op}"),
+        ("GET", r"^files/(?P<op>list|content|search)$", "/v1/files/{op}"),
     ]
 ]
 
@@ -116,7 +116,7 @@ async def stream(request: HttpRequest, path: str) -> HttpResponse:
     if request.GET.get("download"):
         name = request.GET.get("name") or path.rsplit("/", 1)[-1]
         out["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(name)}"
-    else:
+    elif not out["Content-Type"].startswith("application/pdf"):
         # Never let uploaded/project files execute as HTML in our origin.
         out["Content-Security-Policy"] = "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'"
     return out
