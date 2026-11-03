@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import signal
 import time
 import uuid as uuidlib
@@ -25,6 +26,7 @@ _PARENT_ENV_PREFIXES = ("CLAUDE_CODE_", "CLAUDECODE")
 _PARENT_ENV_NAMES = {"CLAUDE_PID", "CLAUDE_EFFORT", "AI_AGENT"}
 
 STREAM_FLUSH_SECONDS = 0.06
+_EFFORT_COMMAND = re.compile(r"^/effort\s+(low|medium|high|xhigh|max)\b")
 STDERR_TAIL_LINES = 60
 
 
@@ -236,6 +238,11 @@ class ClaudeProcess:
             self._pending_controls.pop(request_id, None)
 
     async def send_user(self, content: Any, message_uuid: str, preview: str) -> None:
+        # Track `/effort <level>` typed as a prompt, so the level survives a later resume.
+        if isinstance(content, str):
+            match = _EFFORT_COMMAND.match(content.strip())
+            if match:
+                self.effort = match.group(1)
         self.queue[message_uuid] = {
             "uuid": message_uuid,
             "preview": preview[:300],

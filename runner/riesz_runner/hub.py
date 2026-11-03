@@ -15,6 +15,7 @@ from .config import Config
 from .live import LiveProcess, scan_live
 from .process import ClaudeProcess, ControlError
 from .projects import ProjectResolver
+from .session_prefs import SessionPrefs
 from .store import SessionStore
 
 if TYPE_CHECKING:
@@ -29,6 +30,7 @@ LIVE_INTERVAL = 1.5
 INDEX_INTERVAL = 3.0
 REAP_INTERVAL = 30.0
 RESET_ITEMS = 160
+EFFORT_LEVELS = {"low", "medium", "high", "xhigh", "max"}
 
 
 class Hub:
@@ -44,6 +46,7 @@ class Hub:
         self._tail_wakeup: dict[str, asyncio.Event] = {}
         self._spawn_locks: dict[str, asyncio.Lock] = {}
         self.delivery: Delivery | None = None
+        self.prefs = SessionPrefs(cfg.state_dir / "session_settings.json")
         self.reload_pending = False
         self.reload_ready = asyncio.Event()
 
@@ -237,12 +240,35 @@ class Hub:
                     "kind": live.kind, "entrypoint": live.entrypoint, "status": live.status, "held": held}
         return None
 
+    def resume_settings(self, session_id: str) -> tuple[str | None, str | None]:
+        """(effort, permission mode) a resumed session should start with: the ones it used last.
+
+        Takes the newer of what this runner remembered for the session and what
+        its transcript recorded (the transcript wins when the session was
+        continued elsewhere afterwards, e.g. in a terminal).
+        """
+        entry = self.store.entries.get(session_id)
+        meta = entry.scanner.meta if entry else None
+        stored = self.prefs.get(session_id) or {}
+        transcript_newer = entry is not None and (not stored or entry.mtime > stored.get("time", 0) + 1.0)
+        if transcript_newer and meta is not None:
+            effort = meta.effort or stored.get("effort")
+            mode = meta.permission_mode or stored.get("permissionMode")
+        else:
+            effort = stored.get("effort") or (meta.effort if meta else None)
+            mode = stored.get("permissionMode") or (meta.permission_mode if meta else None)
+        return (effort if effort in EFFORT_LEVELS else None, mode or None)
+
+    def resume_effort(self, session_id: str) -> str | None:
+        return self.resume_settings(session_id)[0]
+
     def _with_meta(self, session_id: str, state: dict[str, Any]) -> dict[str, Any]:
         """Fill model/effort/mode from the transcript where the process has not reported them."""
         entry = self.store.entries.get(session_id)
         if entry is not None:
             meta = entry.scanner.meta
-            for key, value in (("model", meta.model), ("effort", meta.effort), ("permissionMode", meta.permission_mode)):
+            effort, mode = self.resume_settings(session_id)
+            for key, value in (("model", meta.model), ("effort", effort), ("permissionMode", mode)):
                 if not state.get(key):
                     state[key] = value
         return state
@@ -278,14 +304,20 @@ class Hub:
             self._poke(proc.session_id)
             return
         if ev == "exit":
+            self._remember(proc)
             self._poke(proc.session_id)
             await self.broadcast_global({"ev": "live", "live": self.live_list()})
         if ev == "state":
+            self._remember(proc)
             event = {**event, "state": self._with_meta(proc.session_id, dict(event["state"]))}
         await self.broadcast_session(proc.session_id, event)
         if ev == "state":
             summary_live = self._live_info(proc.session_id)
             await self.broadcast_global({"ev": "session_live", "sessionId": proc.session_id, "live": summary_live})
+
+    def _remember(self, proc: ClaudeProcess) -> None:
+        effort = proc.effort if proc.effort in EFFORT_LEVELS else None
+        self.prefs.remember(proc.session_id, effort=effort, permissionMode=proc.permission_mode)
 
     def get_hosted(self, session_id: str) -> ClaudeProcess | None:
         proc = self.hosted.get(session_id)
@@ -312,6 +344,7 @@ class Hub:
             live = self.live.get(session_id)
             if live is not None:
                 raise ControlError("this session is running in another Claude Code process")
+            self.store.refresh()  # pick up the transcript's latest model/effort/mode
             entry = self.store.get(session_id)
             if entry is None:
                 raise ControlError("unknown session")
@@ -319,14 +352,17 @@ class Hub:
             cwd = meta.cwd
             if not cwd or not Path(cwd).is_dir():
                 raise ControlError("the session's working directory no longer exists")
+            last_effort, last_mode = self.resume_settings(session_id)
+            if last_mode == "bypassPermissions" and not self.cfg.allow_bypass:
+                last_mode = None
             proc = ClaudeProcess(
                 self.cfg,
                 session_id=session_id,
                 cwd=cwd,
                 resume_from=session_id,
                 model=model,
-                permission_mode=permission_mode or meta.permission_mode or self.cfg.default_permission_mode,
-                effort=effort,
+                permission_mode=permission_mode or last_mode or self.cfg.default_permission_mode,
+                effort=effort or last_effort,
                 sink=self._sink,
             )
             self.hosted[session_id] = proc
@@ -384,7 +420,8 @@ class Hub:
             resume_from=session_id,
             fork=True,
             model=model,
-            permission_mode=permission_mode or entry.scanner.meta.permission_mode,
+            permission_mode=permission_mode or self.resume_settings(session_id)[1],
+            effort=self.resume_effort(session_id),
             sink=self._sink,
         )
         self.hosted[new_id] = proc
