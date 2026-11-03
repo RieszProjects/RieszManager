@@ -1,7 +1,7 @@
 /** A conversation: header, transcript, live activity, pending prompts and the composer. */
 import { IconButton, ListItemIcon, Menu, MenuItem } from "@mui/material";
 import {
-  Copy, EllipsisVertical, GitFork, Hand, LoaderCircle, MonitorUp, Power, SquareTerminal, TriangleAlert, X,
+  Copy, EllipsisVertical, GitFork, Hand, LoaderCircle, MonitorUp, Pencil, Power, SquareTerminal, TriangleAlert, X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { api } from "@/api/client";
@@ -20,6 +20,7 @@ import { RightDock, RightPanelButton } from "../layout/RightDock";
 import { MessageList } from "./MessageList";
 import { PendingPrompts } from "./PermissionCard";
 import { SessionContext } from "./SessionContext";
+import { EditableTitle } from "./EditableTitle";
 import { ActivityLine, StreamingView } from "./StreamingView";
 
 function QueueBar({ sessionId, queue }: { sessionId: string; queue: QueueEntry[] }) {
@@ -46,9 +47,10 @@ function QueueBar({ sessionId, queue }: { sessionId: string; queue: QueueEntry[]
   );
 }
 
-function SessionMenu({ sessionId, state, cwd }: { sessionId: string; state: SessionState | null; cwd: string | null }) {
+function SessionMenu({ sessionId, state, cwd, title }: { sessionId: string; state: SessionState | null; cwd: string | null; title: string }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const navigate = useUi((s) => s.navigate);
+  const setRenameTarget = useUi((s) => s.setRenameTarget);
   const close = () => setAnchor(null);
   const run = async (fn: () => Promise<void>) => {
     close();
@@ -63,6 +65,9 @@ function SessionMenu({ sessionId, state, cwd }: { sessionId: string; state: Sess
       <IconButton size="small" onClick={(e) => setAnchor(e.currentTarget)} aria-label="更多"><EllipsisVertical size={18} /></IconButton>
       <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={close} anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
         transformOrigin={{ vertical: "top", horizontal: "right" }}>
+        <MenuItem onClick={() => { close(); setRenameTarget({ sessionId, title }); }}>
+          <ListItemIcon><Pencil size={16} /></ListItemIcon>重命名
+        </MenuItem>
         <MenuItem onClick={() => run(async () => {
           const res = await api<{ sessionId: string }>(`sessions/${sessionId}/fork`, { body: {} });
           navigate({ view: "session", sessionId: res.sessionId });
@@ -177,14 +182,14 @@ export function ChatView({ sessionId }: { sessionId: string }) {
         <header className="rz-chat-head">
           {isMobile && <MobileHeaderButtons side="left" />}
           <div className="rz-chat-title">
-            <div className="clamp-1 rz-chat-title-text">{sessionTitle(summary)}</div>
+            <div className="rz-chat-title-text"><EditableTitle sessionId={sessionId} title={sessionTitle(summary)} /></div>
             <div className="rz-chat-sub">
               <StatusDot live={live} size={7} />
               {project && <span className="clamp-1">{project.name}</span>}
               {summary?.gitBranch && <span className="dim mono clamp-1">⎇ {summary.gitBranch}</span>}
             </div>
           </div>
-          <SessionMenu sessionId={sessionId} state={state} cwd={summary?.cwd ?? null} />
+          <SessionMenu sessionId={sessionId} state={state} cwd={summary?.cwd ?? null} title={sessionTitle(summary)} />
           {isMobile ? <MobileHeaderButtons side="right" /> : <RightPanelButton />}
         </header>
         <div className="rz-chat-row">

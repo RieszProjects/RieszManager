@@ -604,3 +604,33 @@
   box-shadow: 0 22px 60px rgba(0, 0, 0, 0.4); overflow: hidden;
 }
 .rz-right-overlay-paper .rz-right.floating .rz-right-head { padding-top: 12px; }
+
+/* ---- Session rows with an actions button ---- */
+.rz-session-row { position: relative; padding: 0; }
+.rz-session-row-btn {
+  width: 100%; display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 7px 34px 7px 10px;
+  border: none; background: none; color: inherit; font: inherit; cursor: pointer; border-radius: 8px;
+}
+.rz-project-sessions .rz-session-row-btn { padding: 5px 34px 5px 10px; }
+.rz-project-sessions .rz-session-row { padding: 0; }
+.rz-session-more {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center; border: none; border-radius: 7px;
+  background: none; color: var(--text3); cursor: pointer; opacity: 0; transition: opacity 0.12s;
+}
+.rz-session-row:hover .rz-session-more, .rz-session-row:focus-within .rz-session-more,
+.rz-session-row.active .rz-session-more, .rz-session-more.open { opacity: 1; }
+.rz-session-more:hover, .rz-session-more.open { color: var(--text); background: rgba(232, 226, 212, 0.08); }
+@media (hover: none) { .rz-session-more { opacity: 0.7; } }
+
+/* ---- Editable session title ---- */
+.rz-title-button {
+  display: block; max-width: 100%; padding: 0 4px; margin-left: -4px; border: none; border-radius: 6px;
+  background: none; color: inherit; font: inherit; text-align: left; cursor: text;
+}
+.rz-title-button:hover { background: rgba(232, 226, 212, 0.06); }
+.rz-title-input {
+  width: 100%; max-width: 640px; padding: 0 6px; margin-left: -6px; height: 26px; border-radius: 6px;
+  border: 1px solid var(--sage-deep); background: var(--bg); color: var(--text); outline: none;
+  font-family: var(--font-display); font-size: 19px; font-weight: 600;
+}

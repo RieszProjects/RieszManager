@@ -32,7 +32,7 @@ ROUTES: list[tuple[str, re.Pattern[str], str]] = [
         ("GET", rf"^sessions/(?P<sid>{UUID})/items$", "/v1/sessions/{sid}/items"),
         ("GET", rf"^sessions/(?P<sid>{UUID})/commands$", "/v1/sessions/{sid}/commands"),
         ("GET", rf"^sessions/(?P<sid>{UUID})/context$", "/v1/sessions/{sid}/context"),
-        ("POST", rf"^sessions/(?P<sid>{UUID})/(?P<action>messages|start|stop|interrupt|cancel|model|mode|effort|fork|takeover)$",
+        ("POST", rf"^sessions/(?P<sid>{UUID})/(?P<action>messages|start|stop|interrupt|cancel|model|mode|effort|rename|fork|takeover)$",
          "/v1/sessions/{sid}/{action}"),
         ("POST", rf"^sessions/(?P<sid>{UUID})/permissions/(?P<rid>[\w-]{{1,80}})$",
          "/v1/sessions/{sid}/permissions/{rid}"),

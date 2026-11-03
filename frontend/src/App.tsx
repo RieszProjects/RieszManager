@@ -10,6 +10,7 @@ import { FileViewer } from "@/features/files/FileViewer";
 import { HomeView, ProjectView } from "@/features/home/HomeView";
 import { AppShell } from "@/features/layout/AppShell";
 import { NewSessionDialog } from "@/features/sessions/NewSessionDialog";
+import { RenameDialog } from "@/features/sessions/RenameDialog";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
 import { useApp } from "@/store/app";
 import { useAuth } from "@/store/auth";
@@ -88,6 +89,7 @@ export function App() {
       <FileViewer />
       <SettingsDialog />
       <NewSessionDialog />
+      <RenameDialog />
       <Toaster />
     </>
   );

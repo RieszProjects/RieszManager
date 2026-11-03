@@ -381,6 +381,17 @@ async def set_model(request: web.Request) -> web.Response:
     return _json({"state": proc.snapshot()})
 
 
+async def rename_session(request: web.Request) -> web.Response:
+    hub = request.app[HUB]
+    sid = _session_id(request)
+    body = await _body(request)
+    title = " ".join(str(body.get("title") or "").split())[:200]
+    if not title:
+        return _err(400, "title is required")
+    await hub.rename(sid, title)
+    return _json({"session": hub.session_summary(sid)})
+
+
 async def set_effort(request: web.Request) -> web.Response:
     hub = request.app[HUB]
     body = await _body(request)
@@ -610,6 +621,7 @@ def build_app(cfg: Config) -> web.Application:
     r.add_post("/v1/sessions/{sid}/model", set_model)
     r.add_post("/v1/sessions/{sid}/mode", set_mode)
     r.add_post("/v1/sessions/{sid}/effort", set_effort)
+    r.add_post("/v1/sessions/{sid}/rename", rename_session)
     r.add_post("/v1/sessions/{sid}/fork", fork_session)
     r.add_post("/v1/sessions/{sid}/takeover", takeover)
     r.add_get("/v1/history", history)

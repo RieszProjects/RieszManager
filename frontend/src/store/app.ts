@@ -17,6 +17,7 @@ interface AppStore {
   loadProjects: () => Promise<void>;
   loadSessions: () => Promise<void>;
   upsertSession: (s: SessionSummary) => void;
+  renameSession: (sessionId: string, title: string) => Promise<void>;
   handleEvent: (event: ServerEvent) => void;
   setSocketState: (s: AppStore["socketState"]) => void;
 }
@@ -74,6 +75,11 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   upsertSession: (s) => set((st) => ({ sessions: { ...st.sessions, [s.sessionId]: s } })),
+
+  renameSession: async (sessionId, title) => {
+    const res = await api<{ session: SessionSummary }>(`sessions/${sessionId}/rename`, { body: { title } });
+    set((st) => ({ sessions: { ...st.sessions, [sessionId]: { ...st.sessions[sessionId], ...res.session } } }));
+  },
 
   setSocketState: (socketState) => set({ socketState }),
 

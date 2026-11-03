@@ -181,6 +181,34 @@ class SessionStore:
         changed = loaded.view.take_dirty()
         return loaded.view, changed, reset
 
+    def append_record(self, session_id: str, record: dict[str, Any]) -> bool:
+        """Append one JSON record to a transcript (as Claude Code's own SDK does for renames).
+
+        Waits briefly if another process is in the middle of writing a line, so the
+        new record never gets glued onto a partial one.
+        """
+        entry = self.get(session_id)
+        if entry is None:
+            return False
+        line = (json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8")
+        for _ in range(20):
+            with entry.path.open("rb") as fh:
+                fh.seek(0, os.SEEK_END)
+                size = fh.tell()
+                if size:
+                    fh.seek(size - 1)
+                    last = fh.read(1)
+                else:
+                    last = b"\n"
+            if last == b"\n":
+                break
+            time.sleep(0.05)
+        else:
+            line = b"\n" + line
+        with entry.path.open("ab") as fh:
+            fh.write(line)
+        return True
+
     def read_line_at(self, session_id: str, offset: int) -> bytes | None:
         entry = self.get(session_id)
         if entry is None or offset < 0:

@@ -363,6 +363,36 @@ class Hub:
             raise
         return proc
 
+    async def rename(self, session_id: str, title: str) -> None:
+        """Set a session's custom title, through its claude process when we host it."""
+        proc = self.get_hosted(session_id)
+        done = False
+        if proc is not None:
+            try:
+                await proc.control("rename_session", title=title, source="host", session_id=proc.session_id)
+                done = True
+            except ControlError as exc:
+                log.info("rename via claude failed for %s (%s); writing the record directly", session_id, exc)
+        if not done:
+            record = {
+                "type": "custom-title",
+                "customTitle": title,
+                "sessionId": session_id,
+                "uuid": str(uuidlib.uuid4()),
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
+            }
+            if not await asyncio.to_thread(self.store.append_record, session_id, record):
+                raise ControlError("unknown session")
+        # Publish promptly instead of waiting for the next index scan.
+        for _ in range(10):
+            self.store.refresh()
+            entry = self.store.entries.get(session_id)
+            if entry is not None and entry.scanner.meta.custom_title == title:
+                break
+            await asyncio.sleep(0.1)
+        if session_id in self.store.entries:
+            await self.broadcast_global({"ev": "sessions", "sessions": [self.session_summary(session_id)], "removed": []})
+
     async def stop_process(self, session_id: str) -> bool:
         proc = self.hosted.get(session_id)
         if proc is None or not proc.alive:
