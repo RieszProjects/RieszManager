@@ -7,6 +7,7 @@ import { ArrowUp, FileText, LoaderCircle, Mic, Paperclip, Square, X } from "luci
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import { api } from "@/api/client";
 import type { SessionState } from "@/api/types";
+import { composerBus } from "@/lib/composerBus";
 import { fileSize } from "@/lib/format";
 import { storage } from "@/lib/storage";
 import { useIsMobile } from "@/lib/useIsMobile";
@@ -96,6 +97,27 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
   useEffect(() => {
     if (autoFocus && !isCoarse()) ta.current?.focus();
   }, [autoFocus, draftKey]);
+
+  // Text sent from elsewhere on the page, e.g. the doll's quick phrases (see lib/composerBus).
+  // It goes where the caret last was, or at the end; on its own line if the text before it is not empty.
+  const textRef = useRef(text);
+  textRef.current = text;
+  const caretTouched = useRef(false);
+  useEffect(() => composerBus.register((phrase) => {
+    const el = ta.current;
+    const cur = textRef.current;
+    const at = el && caretTouched.current ? Math.min(el.selectionStart, cur.length) : cur.length;
+    const before = cur.slice(0, at);
+    const head = before + (before && !/\s$/.test(before) ? "\n" : "") + phrase;
+    setText(head + cur.slice(at));
+    requestAnimationFrame(() => {
+      if (!el) return;
+      if (!isCoarse()) el.focus();
+      el.setSelectionRange(head.length, head.length);
+      caretTouched.current = true;
+      setCaret(head.length);
+    });
+  }), []);
 
   useLayoutEffect(() => {
     const el = ta.current;
@@ -404,8 +426,12 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
           onChange={(e) => {
             setText(e.target.value);
             setCaret(e.target.selectionStart);
+            caretTouched.current = true;
           }}
-          onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+          onSelect={(e) => {
+            setCaret(e.currentTarget.selectionStart);
+            caretTouched.current = true;
+          }}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
           enterKeyHint={isCoarse() ? "enter" : "send"}

@@ -1,4 +1,4 @@
-"""Archive flags and manual ordering for sessions and projects."""
+"""Archive flags and manual ordering for sessions and projects; quick phrases."""
 
 from __future__ import annotations
 
@@ -7,14 +7,16 @@ import re
 from django.db import transaction
 from django.http import HttpRequest, JsonResponse
 from django.utils import timezone
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from riesz.http import ApiError, api_view, json_body, ok
 
-from .models import ItemState
+from .models import ItemState, QuickPhrase
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 MAX_ORDER_KEYS = 2000
+MAX_PHRASES = 100
+MAX_PHRASE_CHARS = 4000
 
 
 def _validate(kind: object, key: object) -> tuple[str, str]:
@@ -72,3 +74,26 @@ def order(request: HttpRequest) -> JsonResponse:
                 row.position = position
                 row.save(update_fields=["position", "updated_at"])
     return ok({"kind": kind, "count": len(validated)})
+
+
+@require_http_methods(["GET", "POST"])
+@api_view()
+def phrases(request: HttpRequest) -> JsonResponse:
+    """GET lists the quick phrases; POST replaces them with `phrases` (a list of strings, in order)."""
+    if request.method == "POST":
+        items = json_body(request).get("phrases")
+        if not isinstance(items, list) or len(items) > MAX_PHRASES:
+            raise ApiError(400, f"最多 {MAX_PHRASES} 条快捷短语")
+        texts = []
+        for t in items:
+            if not isinstance(t, str):
+                raise ApiError(400, "快捷短语必须是文字")
+            t = t.strip()
+            if len(t) > MAX_PHRASE_CHARS:
+                raise ApiError(400, f"每条快捷短语最多 {MAX_PHRASE_CHARS} 个字")
+            if t:
+                texts.append(t)
+        with transaction.atomic():
+            QuickPhrase.objects.all().delete()
+            QuickPhrase.objects.bulk_create([QuickPhrase(text=t, position=i) for i, t in enumerate(texts)])
+    return ok({"phrases": [{"id": p.id, "text": p.text} for p in QuickPhrase.objects.all()]})

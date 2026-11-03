@@ -1,5 +1,5 @@
 /**
- * The doll widget: the mascot peeking into the window, which can be squeezed
+ * The doll widget: Lisi, the mascot, peeking into the window, which can be squeezed
  * and tells you how much of the Claude plan has been used.
  *
  * - Desktop: she leans in from a bottom corner. Drag her to the other corner.
@@ -12,9 +12,10 @@
  * silhouette, so the page underneath keeps working. Drawers and dialogs stack above her.
  */
 import { ListItemIcon, ListItemText, Menu, MenuItem } from "@mui/material";
-import { Check, EyeOff, RefreshCw, Volume2, VolumeX } from "lucide-react";
+import { Check, EyeOff, MessageSquareText, Pencil, RefreshCw, Volume2, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { DRAGGING_CLASS } from "@/features/organize/SortableList";
+import { composerBus } from "@/lib/composerBus";
 import { storage } from "@/lib/storage";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { sessionTitle, useApp } from "@/store/app";
@@ -22,6 +23,8 @@ import { toast, useUi } from "@/store/ui";
 import { ART, EXPRESSIONS, type Expression } from "./art";
 import { SIZE_LABELS } from "./DollSettings";
 import * as say from "./lines";
+import { phraseLabel, usePhrases } from "./phrases";
+import { PhrasesDialog } from "./PhrasesDialog";
 import { useDollPrefs, type DollSize } from "./prefs";
 import { squeak } from "./sound";
 import { peakWindow, resetLabel, useUsage, windowName, type Usage } from "./usage";
@@ -32,7 +35,7 @@ const DRAG_THRESHOLD = 6;
 const LONG_PRESS_MS = 900;
 const SQUEEZE_MS = 320;
 const SLEEP_AFTER_MS = 3 * 60 * 1000;
-const BUBBLE_MS = { status: 7000, squish: 2600, waiting: 9000, warn: 9000 } as const;
+const BUBBLE_MS = { status: 7000, squish: 2600, waiting: 9000, warn: 9000, phrases: 15000 } as const;
 /** Phones: fraction of her width hidden beyond the edge while she only peeks. */
 const PEEK_HIDDEN = 0.42;
 
@@ -159,6 +162,8 @@ export default function Doll() {
   const [out, setOut] = useState(false);
   const [drag, setDrag] = useState<{ dx: number; dy: number } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [editingPhrases, setEditingPhrases] = useState(false);
+  const phrases = usePhrases((s) => s.phrases);
   const [lastActive, setLastActive] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
   const press = useRef<Press | null>(null);
@@ -223,6 +228,24 @@ export default function Doll() {
   }, []);
 
   useEffect(() => () => window.clearTimeout(bubbleTimer.current), []);
+
+  // ---- quick phrases -----------------------------------------------------------
+  const openPhrases = useCallback(() => {
+    const show = () => {
+      setOut(true);
+      showBubble({ kind: "phrases", text: usePhrases.getState().phrases.length ? "要说什么？" : "还没有快捷短语。" });
+    };
+    if (usePhrases.getState().loaded) show();
+    else usePhrases.getState().load().then(show, () => toast("快捷短语加载失败", "error"));
+  }, [showBubble]);
+
+  const pickPhrase = (text: string) => {
+    if (composerBus.insert(text)) {
+      closeBubble();
+      return;
+    }
+    showBubble({ kind: "squish", text: "先打开一个会话，我才知道填到哪里。" });
+  };
 
   // Close the bubble when tapping elsewhere.
   useEffect(() => {
@@ -437,6 +460,31 @@ export default function Doll() {
               {bubble.action.label} →
             </button>
           )}
+          {bubble.kind === "phrases" && (
+            <>
+              {phrases.length > 0 && (
+                <div className="rz-doll-phrases">
+                  {phrases.map((p) => (
+                    <button key={p.id} type="button" className="rz-doll-phrase" title={p.text} onClick={() => pickPhrase(p.text)}>
+                      {phraseLabel(p.text)}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="rz-doll-foot">
+                <button type="button" className="rz-doll-link" onClick={() => { closeBubble(); setEditingPhrases(true); }}>
+                  <Pencil size={12} /> {phrases.length ? "编辑短语" : "添加短语"}
+                </button>
+              </div>
+            </>
+          )}
+          {(bubble.kind === "status" || bubble.kind === "warn") && (
+            <div className="rz-doll-foot">
+              <button type="button" className="rz-doll-chip" onClick={openPhrases}>
+                <MessageSquareText size={13} /> 快捷短语
+              </button>
+            </div>
+          )}
         </div>
       )}
       <div className="rz-doll-enter">
@@ -484,16 +532,21 @@ export default function Doll() {
           <ListItemIcon>{sound ? <Volume2 size={15} /> : <VolumeX size={15} />}</ListItemIcon>
           <ListItemText>{sound ? "关闭声音" : "打开声音"}</ListItemText>
         </MenuItem>
+        <MenuItem dense onClick={() => { setMenu(null); openPhrases(); }}>
+          <ListItemIcon><MessageSquareText size={15} /></ListItemIcon>
+          <ListItemText>快捷短语</ListItemText>
+        </MenuItem>
         {(Object.keys(SIZE_LABELS) as DollSize[]).map(sizeItem)}
         <MenuItem dense onClick={() => { setMenu(null); void reload(true); showBubble({ kind: "status", text: "刚看了一眼。", usage: true }); }}>
           <ListItemIcon><RefreshCw size={15} /></ListItemIcon>
           <ListItemText>刷新用量</ListItemText>
         </MenuItem>
-        <MenuItem dense onClick={() => { setMenu(null); update({ enabled: false }); toast("看板娘已收起，可以在 设置 → 通用 里重新打开"); }}>
+        <MenuItem dense onClick={() => { setMenu(null); update({ enabled: false }); toast("莉思已收起，可以在 设置 → 通用 里重新打开"); }}>
           <ListItemIcon><EyeOff size={15} /></ListItemIcon>
-          <ListItemText>收起看板娘</ListItemText>
+          <ListItemText>收起莉思</ListItemText>
         </MenuItem>
       </Menu>
+      <PhrasesDialog open={editingPhrases} onClose={() => setEditingPhrases(false)} />
     </div>
   );
 }

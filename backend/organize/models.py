@@ -1,4 +1,5 @@
-"""User-defined organisation of sessions and projects: archive flags and manual order.
+"""User-defined organisation: archive flags and manual order of sessions and
+projects, and the quick phrases offered by the mascot doll.
 
 Sessions are identified by Claude Code's session UUID, projects by the runner's
 project id (a folder name, "~root", or "ext:<encoded path>"). Nothing here is
@@ -24,3 +25,14 @@ class ItemState(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["kind", "key"], name="unique_item_state")]
+
+
+class QuickPhrase(models.Model):
+    """A snippet the doll widget can drop into the composer, in the user's order."""
+
+    text = models.TextField()
+    position = models.IntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["position", "id"]
