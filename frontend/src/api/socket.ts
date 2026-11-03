@@ -16,6 +16,8 @@ class EventSocket {
   private timer: number | null = null;
   private pingTimer: number | null = null;
   private stopped = true;
+  /** Which session this page shows and whether it is in active use (see lib/presence). */
+  private presence: { sessionId: string | null; active: boolean } | null = null;
 
   start(): void {
     if (!this.stopped) return;
@@ -54,6 +56,7 @@ class EventSocket {
       this.emitState("open");
       if (this.wantGlobal) this.send({ op: "sub_global" });
       for (const sid of this.sessionRefs.keys()) this.send({ op: "sub", sessionId: sid });
+      if (this.presence) this.send({ op: "presence", ...this.presence });
       if (this.pingTimer) window.clearInterval(this.pingTimer);
       this.pingTimer = window.setInterval(() => this.send({ op: "ping", t: Date.now() }), 25000);
     };
@@ -94,6 +97,12 @@ class EventSocket {
   onState(listener: (state: "connecting" | "open" | "closed") => void): () => void {
     this.stateListeners.add(listener);
     return () => this.stateListeners.delete(listener);
+  }
+
+  /** Tell the server what this page shows, so it does not push notifications about it. */
+  setPresence(sessionId: string | null, active: boolean): void {
+    this.presence = { sessionId, active };
+    this.send({ op: "presence", sessionId, active });
   }
 
   subscribeGlobal(): void {

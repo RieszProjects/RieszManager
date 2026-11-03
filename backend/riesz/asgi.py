@@ -11,7 +11,25 @@ from channels.security.websocket import AllowedHostsOriginValidator  # noqa: E40
 
 from bridge.routing import websocket_urlpatterns  # noqa: E402
 
-application = ProtocolTypeRouter({
+from push.notifier import notifier  # noqa: E402
+
+router = ProtocolTypeRouter({
     "http": django_asgi_app,
     "websocket": AllowedHostsOriginValidator(AuthMiddlewareStack(URLRouter(websocket_urlpatterns))),
 })
+
+
+async def application(scope, receive, send):
+    """The Channels router, plus the ASGI lifespan that runs the push notifier."""
+    if scope["type"] != "lifespan":
+        await router(scope, receive, send)
+        return
+    while True:
+        message = await receive()
+        if message["type"] == "lifespan.startup":
+            notifier.start()
+            await send({"type": "lifespan.startup.complete"})
+        elif message["type"] == "lifespan.shutdown":
+            await notifier.stop()
+            await send({"type": "lifespan.shutdown.complete"})
+            return

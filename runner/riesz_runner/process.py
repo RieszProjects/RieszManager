@@ -65,6 +65,8 @@ class ClaudeProcess:
         self.last_activity = time.time()
         self.alive = False
         self.exit_code: int | None = None
+        # Set when the runner itself ends the process (idle reaping, takeover, reload).
+        self.stop_requested = False
         self.init_info: dict[str, Any] | None = None
         self.model: str | None = model
         self.permission_mode: str | None = self.requested_permission_mode
@@ -164,6 +166,7 @@ class ClaudeProcess:
         proc = self.proc
         if proc is None or proc.returncode is not None:
             return
+        self.stop_requested = True
         try:
             if proc.stdin and not proc.stdin.is_closing():
                 proc.stdin.close()
@@ -334,6 +337,7 @@ class ClaudeProcess:
     async def _wait_exit(self) -> None:
         assert self.proc
         code = await self.proc.wait()
+        during_turn = self.turn_active
         self.alive = False
         self.exit_code = code
         self.turn_active = False
@@ -345,7 +349,8 @@ class ClaudeProcess:
             if not fut.done():
                 fut.set_exception(ControlError("claude process exited"))
         log.info("claude for %s exited with %s", self.session_id, code)
-        await self.sink(self, {"ev": "exit", "code": code, "stderr": list(self.stderr_tail)[-15:]})
+        await self.sink(self, {"ev": "exit", "code": code, "stderr": list(self.stderr_tail)[-15:],
+                               "duringTurn": during_turn, "requested": self.stop_requested})
         await self._emit_state()
 
     async def _handle(self, msg: dict[str, Any]) -> None:
@@ -392,7 +397,8 @@ class ClaudeProcess:
                 "stopReason": msg.get("stop_reason"),
                 "ts": time.time(),
             }
-            await self.sink(self, {"ev": "result", "result": self.last_result})
+            text = msg.get("result") if isinstance(msg.get("result"), str) else ""
+            await self.sink(self, {"ev": "result", "result": self.last_result, "text": text[:400]})
             await self.sink(self, {"ev": "transcript"})
             await self._emit_state()
             return

@@ -50,6 +50,7 @@ cd RieszManager
 | `RUNNER_ALLOW_BYPASS` | 是否允许在网页中切换到“跳过权限”模式 |
 | `RUNNER_CHROME` | 网页端会话是否连接 Claude in Chrome：`auto`（跟随你在终端里 `/chrome` 的默认设置）、`on`、`off` |
 | `OPENAI_API_KEY` | 可选，启用服务端语音转写 |
+| `RIESZ_VAPID_PRIVATE_KEY` | 可选，推送通知的签名密钥；留空时首次使用会自动生成，保存在 `data/backend/vapid_private.pem` |
 
 所有变量的说明见 `.env.example`。含有 `$` 的值（例如密码哈希）必须用单引号包起来。
 
@@ -155,7 +156,7 @@ git pull
 
 ## 8. 备份
 
-需要备份的只有 `.env` 和 `data/backend/`。会话本身由 Claude Code 保存在 `~/.claude/projects/`；上传的附件在 `~/.local/state/riesz-manager/uploads/`（30 天后自动清理）。
+需要备份的只有 `.env` 和 `data/backend/`（其中包括推送通知的密钥；密钥丢失后，各设备需要在设置里重新打开推送）。会话本身由 Claude Code 保存在 `~/.claude/projects/`；上传的附件在 `~/.local/state/riesz-manager/uploads/`（30 天后自动清理）。
 
 ## 9. 安全说明
 
@@ -164,6 +165,7 @@ git pull
 - runner 只监听 Unix socket（目录权限 0750，socket 0660），并校验 `RUNNER_TOKEN`。
 - 项目文件以只读方式提供，路径会解析符号链接并限制在项目目录内；原始文件以 `Content-Security-Policy: sandbox` 返回，不会在本站源下执行。
 - HTML 文件的渲染预览通过 `/api/view/<令牌>/<路径>` 提供：令牌是签名的只读凭证，只对一个项目有效、一小时后过期；响应带 `Content-Security-Policy: sandbox`（不含 `allow-same-origin`），页面脚本运行在匿名来源中，无法使用本站的 Cookie、存储或接口。页面可以加载外部资源，因此它能读到并外发的最多是该项目内的文件。
+- 推送通知：在“设置 → 通用 → 推送通知”中按设备开启。后端常驻监听 runner 的事件，在 Claude 等待确认、向你提问、完成运行超过 1 分钟的任务或进程意外退出时，经浏览器厂商的推送服务（Chrome 为 Google FCM）发到各设备；你正在任一设备上查看的会话不会推送。推送内容端到端加密，推送服务看不到内容；后端容器需要能访问外网 HTTPS。安卓手机需要能连上 Google 服务；iPhone 需要 iOS 16.4 以上，并从主屏幕打开应用。
 - 莉思玩偶显示的套餐用量来自 runner 定期执行的 `claude -p /usage`：这是 Claude Code 的本地命令，不调用模型、不消耗额度，也不会留下会话记录。
 - `RIESZ_TRUST_CF_HEADER=true` 只应在经由 Cloudflare 访问且网关只监听本机时开启，否则客户端可以伪造 IP 头绕过按 IP 的限流。
 

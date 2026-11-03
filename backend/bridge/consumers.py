@@ -16,6 +16,7 @@ from django.contrib.sessions.models import Session
 from django.utils import timezone
 
 from accounts.services import totp_device
+from push import presence
 
 from . import runner
 
@@ -90,6 +91,11 @@ class EventsConsumer(AsyncWebsocketConsumer):
         except ValueError:
             return
         op = data.get("op") if isinstance(data, dict) else None
+        if op == "presence":
+            # Handled here, not forwarded: which session this browser shows (see push/presence.py).
+            sid = str(data.get("sessionId") or "")
+            presence.report(self.channel_name, sid if _UUID_RE.match(sid) else None, bool(data.get("active")))
+            return
         if op not in ALLOWED_OPS:
             return
         message: dict[str, Any] = {"op": op}
@@ -103,6 +109,7 @@ class EventsConsumer(AsyncWebsocketConsumer):
         await self.upstream.send_str(json.dumps(message))
 
     async def disconnect(self, code: int) -> None:
+        presence.forget(self.channel_name)
         for task in (self.relay_task, self.watch_task):
             if task is not None:
                 task.cancel()

@@ -37,6 +37,8 @@ if len(SECRET_KEY) < 32:
 DEBUG = env_bool("RIESZ_DEBUG", False)
 
 PUBLIC_ORIGIN = env("RIESZ_PUBLIC_ORIGIN").rstrip("/")
+# Web Push: optional fixed key; otherwise one is generated into DATA_DIR (see push/vapid.py).
+VAPID_PRIVATE_KEY = env("RIESZ_VAPID_PRIVATE_KEY")
 _public_host = urlparse(PUBLIC_ORIGIN).hostname if PUBLIC_ORIGIN else None
 ALLOWED_HOSTS = [h.strip() for h in env("RIESZ_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
 if _public_host:
@@ -67,6 +69,7 @@ INSTALLED_APPS = [
     "accounts",
     "bridge",
     "organize",
+    "push",
 ]
 
 MIDDLEWARE = [

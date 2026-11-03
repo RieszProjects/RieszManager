@@ -17,6 +17,7 @@ from .process import ClaudeProcess, ControlError
 from .projects import ProjectResolver
 from .session_prefs import SessionPrefs
 from .usage import UsageMonitor
+from .attention import LONG_TURN_SECONDS, describe_request, session_title
 from .store import SessionStore
 
 if TYPE_CHECKING:
@@ -49,6 +50,8 @@ class Hub:
         self.delivery: Delivery | None = None
         self.prefs = SessionPrefs(cfg.state_dir / "session_settings.json")
         self.usage = UsageMonitor(cfg)
+        # Terminal sessions: when each one started working (to spot long turns finishing).
+        self._external_busy_since: dict[str, float] = {}
         self.reload_pending = False
         self.reload_ready = asyncio.Event()
 
@@ -180,6 +183,7 @@ class Hub:
             before = {sid: (p.pid, p.status) for sid, p in self.live.items()}
             after = {sid: (p.pid, p.status) for sid, p in current.items()}
             self.live = current
+            await self._external_attention(before, current)
             if self.delivery is not None and self.delivery.held:
                 await self.delivery.on_live_changed()
             if before != after:
@@ -308,6 +312,8 @@ class Hub:
         if ev == "rate_limit":
             self.usage.note_rate_limit(event.get("info"))
             await self.broadcast_global({"ev": "usage_changed"})
+        if ev in ("permission", "result", "exit"):
+            await self._attention_from(proc, event)
         if ev == "exit":
             self._remember(proc)
             self._poke(proc.session_id)
@@ -319,6 +325,46 @@ class Hub:
         if ev == "state":
             summary_live = self._live_info(proc.session_id)
             await self.broadcast_global({"ev": "session_live", "sessionId": proc.session_id, "live": summary_live})
+
+    # ---- attention (push notifications) ---------------------------------------
+
+    async def _attention(self, session_id: str, kind: str, **fields: Any) -> None:
+        title = session_title(self.session_summary(session_id))
+        await self.broadcast_global({"ev": "attention", "kind": kind, "sessionId": session_id, "title": title, **fields})
+
+    async def _attention_from(self, proc: ClaudeProcess, event: dict[str, Any]) -> None:
+        ev = event.get("ev")
+        if ev == "permission":
+            kind, detail = describe_request(event.get("request") or {})
+            await self._attention(proc.session_id, kind, detail=detail)
+        elif ev == "result":
+            result = event.get("result") or {}
+            seconds = (result.get("durationMs") or 0) / 1000
+            if seconds >= LONG_TURN_SECONDS:
+                await self._attention(proc.session_id, "done", seconds=round(seconds), isError=bool(result.get("isError")),
+                                      detail=" ".join(str(event.get("text") or "").split())[:160])
+        elif ev == "exit":
+            unexpected = not event.get("requested") and (event.get("code") not in (0, None) or event.get("duringTurn"))
+            if unexpected:
+                await self._attention(proc.session_id, "exited", code=event.get("code"))
+
+    async def _external_attention(self, before: dict[str, Any], current: dict[str, LiveProcess]) -> None:
+        """Terminal sessions: a long stretch of work ending is worth a notification too."""
+        now = time.time()
+        for sid, live in current.items():
+            if sid in self.hosted:
+                continue
+            busy = live.status == "busy"
+            since = self._external_busy_since.get(sid)
+            if busy and since is None:
+                self._external_busy_since[sid] = now
+            elif not busy and since is not None:
+                del self._external_busy_since[sid]
+                if now - since >= LONG_TURN_SECONDS and sid in before:
+                    await self._attention(sid, "done", seconds=round(now - since), isError=False, detail="", external=True)
+        for sid in list(self._external_busy_since):
+            if sid not in current:
+                del self._external_busy_since[sid]
 
     def _remember(self, proc: ClaudeProcess) -> None:
         effort = proc.effort if proc.effort in EFFORT_LEVELS else None

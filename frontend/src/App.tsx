@@ -14,6 +14,8 @@ import { AppShell } from "@/features/layout/AppShell";
 import { NewSessionDialog } from "@/features/sessions/NewSessionDialog";
 import { RenameDialog } from "@/features/sessions/RenameDialog";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
+import { setupPresence } from "@/lib/presence";
+import { syncPush } from "@/lib/push";
 import { useApp } from "@/store/app";
 import { useAuth } from "@/store/auth";
 import { useOrganize } from "@/store/organize";
@@ -44,10 +46,13 @@ function useLiveData(enabled: boolean) {
     });
     socket.start();
     socket.subscribeGlobal();
+    const stopPresence = setupPresence();
+    void syncPush();
     const timer = window.setInterval(() => void useApp.getState().loadProjects().catch(() => undefined), 60000);
     return () => {
       offEvent();
       offState();
+      stopPresence();
       socket.stop();
       window.clearInterval(timer);
     };

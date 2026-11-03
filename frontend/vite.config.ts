@@ -38,7 +38,9 @@ export default defineConfig({
         // Fonts are split into many unicode-range slices; cache them lazily instead of precaching.
         globPatterns: ["**/*.{js,css,html,png,svg,webp}"],
         // The optional doll widget's art is fetched only when it is switched on.
-        globIgnores: ["doll/**"],
+        globIgnores: ["doll/**", "push-sw.js"],
+        // Push notification handlers (shown and tapped), kept as a plain file in public/.
+        importScripts: ["/push-sw.js"],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         runtimeCaching: [
           {

@@ -1,7 +1,7 @@
 /** Inline prompts the agent is waiting on: tool permissions, questions and plan approval. */
 import { Button, TextField } from "@mui/material";
 import { Check, ShieldQuestion, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { api } from "@/api/client";
 import type { PermissionRequest, PermissionSuggestion } from "@/api/types";
 import { CodeBlock } from "@/components/CodeBlock";
@@ -207,16 +207,6 @@ function PlanApproval({ req }: { req: PermissionRequest }) {
 }
 
 export function PendingPrompts({ requests }: { requests: PermissionRequest[] }) {
-  const [, force] = useState(0);
-  useEffect(() => {
-    if (requests.length && document.visibilityState !== "visible" && "Notification" in window && Notification.permission === "granted") {
-      try {
-        new Notification("Riesz", { body: "Claude 正在等待你的确认", tag: "riesz-permission" });
-      } catch {
-        force((n) => n + 1);
-      }
-    }
-  }, [requests.length]);
   if (!requests.length) return null;
   const req = requests[0];
   if (req.toolName === "AskUserQuestion") return <AskQuestion key={req.requestId} req={req} />;
