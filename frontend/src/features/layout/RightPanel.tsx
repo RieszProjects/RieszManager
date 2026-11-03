@@ -9,7 +9,13 @@ import { useUi } from "@/store/ui";
 import { FileTree } from "../files/FileTree";
 import { SessionRow } from "../sessions/SessionRow";
 
-export function RightPanel({ onClose }: { onClose?: () => void }) {
+interface Props {
+  /** "floating": glass card docked below the view header; "drawer": full-height phone drawer. */
+  variant?: "floating" | "drawer";
+  onClose?: () => void;
+}
+
+export function RightPanel({ variant = "drawer", onClose }: Props) {
   const projectId = useUi((s) => s.contextProject);
   const tab = useUi((s) => s.rightTab);
   const setTab = useUi((s) => s.setRightTab);
@@ -30,9 +36,11 @@ export function RightPanel({ onClose }: { onClose?: () => void }) {
     [sessions, projectId],
   );
 
+  const cls = `rz-right${variant === "floating" ? " floating" : ""}`;
+
   if (!projectId || !project) {
     return (
-      <aside className="rz-right">
+      <aside className={cls}>
         <div className="rz-right-empty dim">选择一个会话或项目后，这里会显示它的会话和文件。</div>
       </aside>
     );
@@ -42,9 +50,10 @@ export function RightPanel({ onClose }: { onClose?: () => void }) {
   const branch = detail?.git?.branch;
   const changes = detail?.git?.changes ?? {};
   const changeCount = Object.keys(changes).length;
+  const showFiles = tab === "files" && project.filesAllowed;
 
   return (
-    <aside className="rz-right">
+    <aside className={cls}>
       <div className="rz-right-head">
         <FolderGit2 size={17} className="rz-right-icon" />
         <div className="rz-right-title">
@@ -63,11 +72,11 @@ export function RightPanel({ onClose }: { onClose?: () => void }) {
         </div>
       )}
       <div className="rz-side-tabs rz-right-tabs" role="tablist">
-        <button type="button" className={tab === "sessions" ? "on" : ""} onClick={() => setTab("sessions")}>会话 <span className="dim">{list.length}</span></button>
-        <button type="button" className={tab === "files" ? "on" : ""} onClick={() => setTab("files")} disabled={!project.filesAllowed}>文件</button>
+        <button type="button" className={showFiles ? "on" : ""} onClick={() => setTab("files")} disabled={!project.filesAllowed}>文件</button>
+        <button type="button" className={showFiles ? "" : "on"} onClick={() => setTab("sessions")}>会话 <span className="dim">{list.length}</span></button>
       </div>
       <div className="rz-right-body">
-        {tab === "sessions" || !project.filesAllowed ? (
+        {!showFiles ? (
           <div className="rz-side-list">
             {list.map((s) => <SessionRow key={s.sessionId} session={s} active={s.sessionId === activeSession} />)}
             {list.length === 0 && <div className="rz-side-empty">这个项目还没有会话</div>}

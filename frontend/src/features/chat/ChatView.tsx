@@ -1,7 +1,7 @@
 /** A conversation: header, transcript, live activity, pending prompts and the composer. */
-import { IconButton, ListItemIcon, Menu, MenuItem, Tooltip } from "@mui/material";
+import { IconButton, ListItemIcon, Menu, MenuItem } from "@mui/material";
 import {
-  Copy, EllipsisVertical, GitFork, Hand, LoaderCircle, MonitorUp, PanelRight, Power, SquareTerminal, TriangleAlert, X,
+  Copy, EllipsisVertical, GitFork, Hand, LoaderCircle, MonitorUp, Power, SquareTerminal, TriangleAlert, X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { api } from "@/api/client";
@@ -10,12 +10,13 @@ import type { QueueEntry, SessionState } from "@/api/types";
 import { Mascot } from "@/components/Mascot";
 import { StatusDot } from "@/components/StatusDot";
 import { copyText } from "@/lib/clipboard";
-import { useIsMobile, useIsWide } from "@/lib/useIsMobile";
+import { useIsMobile } from "@/lib/useIsMobile";
 import { sessionTitle, useApp } from "@/store/app";
 import { useSessions } from "@/store/sessions";
 import { toast, useUi } from "@/store/ui";
 import { Composer } from "../composer/Composer";
 import { MobileHeaderButtons } from "../layout/MobileHeaderButtons";
+import { RightDock, RightPanelButton } from "../layout/RightDock";
 import { MessageList } from "./MessageList";
 import { PendingPrompts } from "./PermissionCard";
 import { SessionContext } from "./SessionContext";
@@ -114,11 +115,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
   const data = useSessions((s) => s.data[sessionId]);
   const loadOlder = useSessions((s) => s.loadOlder);
   const setContextProject = useUi((s) => s.setContextProject);
-  const rightOpen = useUi((s) => s.rightOpen);
-  const setRightOpen = useUi((s) => s.setRightOpen);
-  const setRightOverlay = useUi((s) => s.setRightOverlay);
   const isMobile = useIsMobile();
-  const isWide = useIsWide();
   const dropRef = useRef<((files: File[]) => void) | null>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -188,14 +185,10 @@ export function ChatView({ sessionId }: { sessionId: string }) {
             </div>
           </div>
           <SessionMenu sessionId={sessionId} state={state} cwd={summary?.cwd ?? null} />
-          {isMobile ? (
-            <MobileHeaderButtons side="right" />
-          ) : (
-            <Tooltip title={isWide && rightOpen ? "隐藏项目面板" : "显示项目面板"}>
-              <IconButton size="small" onClick={() => (isWide ? setRightOpen(!rightOpen) : setRightOverlay(true))}><PanelRight size={18} /></IconButton>
-            </Tooltip>
-          )}
+          {isMobile ? <MobileHeaderButtons side="right" /> : <RightPanelButton />}
         </header>
+        <div className="rz-chat-row">
+        <div className="rz-chat-col">
         <div className="rz-chat-body">
           {!data?.loaded ? (
             <div className="rz-center"><LoaderCircle className="spin" size={22} /></div>
@@ -227,6 +220,9 @@ export function ChatView({ sessionId }: { sessionId: string }) {
             autoFocus
             dropRef={dropRef}
           />
+        </div>
+        </div>
+        <RightDock />
         </div>
         {dragging && <div className="rz-dropzone">松开以添加附件</div>}
       </div>

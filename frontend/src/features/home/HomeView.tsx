@@ -8,6 +8,7 @@ import { sessionTitle, useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { Composer } from "../composer/Composer";
 import { MobileHeaderButtons } from "../layout/MobileHeaderButtons";
+import { RightDock, RightPanelButton } from "../layout/RightDock";
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -90,8 +91,10 @@ export function ProjectView({ projectId }: { projectId: string }) {
           <div className="clamp-1 rz-chat-title-text">{project?.name ?? (projectsLoaded ? "未知项目" : "")}</div>
           <div className="rz-chat-sub dim mono clamp-1">{project?.path}</div>
         </div>
-        {isMobile && <MobileHeaderButtons side="right" />}
+        {isMobile ? <MobileHeaderButtons side="right" /> : <RightPanelButton />}
       </header>
+      <div className="rz-chat-row">
+      <div className="rz-chat-col">
       <div className="rz-chat-body">
         <div className="rz-project-empty">
           <Mascot pose="working" size={150} />
@@ -108,6 +111,9 @@ export function ProjectView({ projectId }: { projectId: string }) {
           placeholder="描述你想做的事，/ 打开命令，@ 引用文件"
           onCreated={(sid) => navigate({ view: "session", sessionId: sid })}
         />
+      </div>
+      </div>
+      <RightDock />
       </div>
     </div>
   );

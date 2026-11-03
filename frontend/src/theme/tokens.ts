@@ -39,8 +39,8 @@ export const radius = { sm: 6, md: 10, lg: 14, xl: 20 } as const;
 
 export const layout = {
   sidebarWidth: 288,
-  rightPanelWidth: 340,
+  rightPanelWidth: 330,
   mobileBreakpoint: 900,
-  wideBreakpoint: 1320,
+  wideBreakpoint: 1200,
   contentMaxWidth: 860,
 } as const;

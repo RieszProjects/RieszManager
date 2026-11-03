@@ -36,8 +36,7 @@ interface UiStore {
   /** Project shown in the right panel (follows the current session/project). */
   contextProject: string | null;
   leftOpen: boolean;
-  rightOpen: boolean;
-  /** Right panel shown as an overlay drawer (phones and medium widths). */
+  /** Right panel shown as an overlay (phones and medium widths); wide screens always dock it. */
   rightOverlay: boolean;
   desktopLeftCollapsed: boolean;
   rightTab: "sessions" | "files";
@@ -51,7 +50,6 @@ interface UiStore {
   syncFromLocation: () => void;
   setContextProject: (id: string | null) => void;
   setLeftOpen: (open: boolean) => void;
-  setRightOpen: (open: boolean) => void;
   setRightOverlay: (open: boolean) => void;
   toggleDesktopLeft: () => void;
   setRightTab: (tab: UiStore["rightTab"]) => void;
@@ -69,10 +67,9 @@ export const useUi = create<UiStore>((set) => ({
   route: parseRoute(window.location.pathname),
   contextProject: null,
   leftOpen: false,
-  rightOpen: storage.get("rightOpen", true),
   rightOverlay: false,
   desktopLeftCollapsed: storage.get("leftCollapsed", false),
-  rightTab: "sessions",
+  rightTab: "files",
   sidebarTab: storage.get("sidebarTab.v2", "projects"),
   file: null,
   settingsOpen: false,
@@ -90,10 +87,6 @@ export const useUi = create<UiStore>((set) => ({
   syncFromLocation: () => set({ route: parseRoute(window.location.pathname) }),
   setContextProject: (contextProject) => set({ contextProject }),
   setLeftOpen: (leftOpen) => set({ leftOpen }),
-  setRightOpen: (rightOpen) => {
-    storage.set("rightOpen", rightOpen);
-    set({ rightOpen });
-  },
   setRightOverlay: (rightOverlay) => set({ rightOverlay }),
   toggleDesktopLeft: () =>
     set((s) => {

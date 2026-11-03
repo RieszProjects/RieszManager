@@ -35,7 +35,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isWide = useIsWide();
   const leftOpen = useUi((s) => s.leftOpen);
   const setLeftOpen = useUi((s) => s.setLeftOpen);
-  const rightOpen = useUi((s) => s.rightOpen);
   const rightOverlay = useUi((s) => s.rightOverlay);
   const setRightOverlay = useUi((s) => s.setRightOverlay);
   const collapsed = useUi((s) => s.desktopLeftCollapsed);
@@ -75,21 +74,22 @@ export function AppShell({ children }: { children: ReactNode }) {
     );
   }
 
-  const showRightInline = isWide && rightOpen && Boolean(contextProject);
   return (
-    <div
-      className="rz-shell"
-      style={{
-        gridTemplateColumns: `${collapsed ? "56px" : `${layout.sidebarWidth}px`} minmax(0, 1fr) ${showRightInline ? `${layout.rightPanelWidth}px` : ""}`,
-      }}
-    >
+    <div className="rz-shell" style={{ gridTemplateColumns: `${collapsed ? "56px" : `${layout.sidebarWidth}px`} minmax(0, 1fr)` }}>
       {collapsed ? <Rail /> : <Sidebar onCollapse={toggleLeft} />}
       <main className="rz-main">{children}</main>
-      {showRightInline && <RightPanel />}
       {!isWide && (
-        <Drawer anchor="right" open={rightOverlay && Boolean(contextProject)} onClose={() => setRightOverlay(false)}
-          slotProps={{ paper: { sx: { width: layout.rightPanelWidth } } }}>
-          <RightPanel onClose={() => setRightOverlay(false)} />
+        // Medium widths: the same floating card, opened over the content below the header.
+        <Drawer
+          anchor="right"
+          open={rightOverlay && Boolean(contextProject)}
+          onClose={() => setRightOverlay(false)}
+          slotProps={{
+            paper: { className: "rz-right-overlay-paper", sx: { width: layout.rightPanelWidth } },
+            backdrop: { sx: { background: "rgba(0, 0, 0, 0.18)" } },
+          }}
+        >
+          <RightPanel variant="floating" onClose={() => setRightOverlay(false)} />
         </Drawer>
       )}
     </div>
