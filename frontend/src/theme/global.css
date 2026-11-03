@@ -59,8 +59,13 @@ body::before {
 ::selection { background: rgba(198, 150, 107, 0.32); color: var(--text); }
 
 /* Scrollbars */
-* { scrollbar-width: thin; scrollbar-color: #3a423b transparent; }
+/* Chrome 121+ ignores ::-webkit-scrollbar (and falls back to native arrows) once the
+   standard properties are set, so only use them where the webkit ones don't exist. */
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: thin; scrollbar-color: #3a423b transparent; }
+}
 ::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
   background: #343c35;
