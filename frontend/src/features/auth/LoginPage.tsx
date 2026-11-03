@@ -135,7 +135,7 @@ export function LoginPage() {
       <div className="rz-login-panel">
         <div className="rz-login-card">
           <Mascot pose="icon" size={64} className="rz-login-icon" />
-          <h1 className="rz-login-title">RieszManager</h1>
+          <h1 className="rz-login-title">Riesz</h1>
           <p className="rz-login-sub">{status === "totp" ? "两步验证" : "登录以继续"}</p>
           {status === "totp" ? <TotpStep /> : <PasswordStep />}
         </div>

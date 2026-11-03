@@ -1,40 +1,16 @@
 /** Landing view (nothing selected) and the per-project "new session" view. */
-import { FolderGit2 } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { Mascot } from "@/components/Mascot";
-import { relativeTime } from "@/lib/format";
-import { useOrganizeView } from "@/lib/organize";
 import { useIsMobile } from "@/lib/useIsMobile";
-import { sessionTitle, useApp } from "@/store/app";
+import { useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { Composer } from "../composer/Composer";
 import { MobileHeaderButtons } from "../layout/MobileHeaderButtons";
 import { RightDock, RightPanelButton } from "../layout/RightDock";
 
-function greeting(): string {
-  const h = new Date().getHours();
-  if (h < 5) return "这么晚了还不睡吗";
-  if (h < 11) return "早上好";
-  if (h < 14) return "中午好";
-  if (h < 18) return "下午好";
-  return "晚上好";
-}
-
 export function HomeView() {
-  const sessions = useApp((s) => s.sessions);
-  const projects = useApp((s) => s.projects);
-  const navigate = useUi((s) => s.navigate);
   const setContextProject = useUi((s) => s.setContextProject);
   const isMobile = useIsMobile();
-  const view = useOrganizeView();
-  const recent = useMemo(
-    () => Object.values(sessions).filter(view.sessionVisible).sort((a, b) => b.mtime - a.mtime).slice(0, 6),
-    [sessions, view],
-  );
-  const topProjects = useMemo(
-    () => view.orderProjects(projects.filter((p) => !p.external && view.projectVisible(p))).slice(0, 6),
-    [projects, view],
-  );
   useEffect(() => setContextProject(null), [setContextProject]);
 
   return (
@@ -45,36 +21,8 @@ export function HomeView() {
           <div className="rz-spacer" />
         </header>
       )}
-      <div className="rz-home-inner">
-        <div className="rz-home-hero">
-          <Mascot pose="sleepy" className="rz-home-mascot" />
-          <div>
-            <h1 className="rz-home-title">{greeting()}</h1>
-            <p className="rz-home-sub">选一个项目开始新会话，或者继续之前的工作。</p>
-          </div>
-        </div>
-        <div className="rz-home-grid">
-          <section>
-            <div className="rz-side-label">项目</div>
-            {topProjects.map((p) => (
-              <button key={p.id} type="button" className="rz-home-card" onClick={() => navigate({ view: "project", projectId: p.id })}>
-                <FolderGit2 size={16} />
-                <span className="clamp-1">{p.name}</span>
-                <span className="dim">{p.sessionCount ? `${p.sessionCount} 个会话` : ""}</span>
-              </button>
-            ))}
-          </section>
-          <section>
-            <div className="rz-side-label">最近会话</div>
-            {recent.map((s) => (
-              <button key={s.sessionId} type="button" className="rz-home-card" onClick={() => navigate({ view: "session", sessionId: s.sessionId })}>
-                <span className="clamp-1">{sessionTitle(s)}</span>
-                <span className="dim">{relativeTime(s.mtime)}</span>
-              </button>
-            ))}
-            {recent.length === 0 && <div className="rz-side-empty">还没有会话</div>}
-          </section>
-        </div>
+      <div className="rz-home-stage">
+        <Mascot pose="sleepy" className="rz-home-mascot" />
       </div>
     </div>
   );

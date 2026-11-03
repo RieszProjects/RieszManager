@@ -211,7 +211,7 @@ export function PendingPrompts({ requests }: { requests: PermissionRequest[] }) 
   useEffect(() => {
     if (requests.length && document.visibilityState !== "visible" && "Notification" in window && Notification.permission === "granted") {
       try {
-        new Notification("RieszManager", { body: "Claude 正在等待你的确认", tag: "riesz-permission" });
+        new Notification("Riesz", { body: "Claude 正在等待你的确认", tag: "riesz-permission" });
       } catch {
         force((n) => n + 1);
       }

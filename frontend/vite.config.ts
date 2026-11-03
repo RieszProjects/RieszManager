@@ -14,7 +14,7 @@ export default defineConfig({
       injectRegister: "auto",
       includeAssets: ["favicon.png", "icons/apple-touch-icon.png"],
       manifest: {
-        name: "RieszManager",
+        name: "Riesz",
         short_name: "Riesz",
         description: "Claude Code 会话管理",
         lang: "zh-CN",

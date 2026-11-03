@@ -145,9 +145,9 @@ export function ChatView({ sessionId }: { sessionId: string }) {
   const waiting = Boolean(state?.permissions?.length);
 
   useEffect(() => {
-    document.title = `${sessionTitle(summary)} · RieszManager`;
+    document.title = `${sessionTitle(summary)} · Riesz`;
     return () => {
-      document.title = "RieszManager";
+      document.title = "Riesz";
     };
   }, [summary]);
 
