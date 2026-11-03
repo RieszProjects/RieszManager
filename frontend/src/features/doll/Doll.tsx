@@ -72,6 +72,15 @@ function swallowNextClick() {
 
 let bubbleSeq = 0;
 
+/** Phones: a finger covers her face while pressing, so instead she pulls a random face each time she comes out. */
+const REACTIONS: Expression[] = ["happy", "squish", "sleep"];
+let lastReaction: Expression | null = null;
+function randomReaction(): Expression {
+  const choices = REACTIONS.filter((e) => e !== lastReaction);
+  lastReaction = choices[Math.floor(Math.random() * choices.length)];
+  return lastReaction;
+}
+
 function UsageRows({ usage }: { usage: Usage | null }) {
   if (!usage) return <div className="rz-doll-usage dim">正在看用量……</div>;
   if (usage.plan === "api") return <div className="rz-doll-usage dim">这台机器用的是 API 计费，没有套餐额度。</div>;
@@ -160,6 +169,7 @@ export default function Doll() {
   const [boing, setBoing] = useState(false);
   const [bubble, setBubble] = useState<Bubble | null>(null);
   const [out, setOut] = useState(false);
+  const [flash, setFlash] = useState<Expression | null>(null);
   const [drag, setDrag] = useState<{ dx: number; dy: number } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [editingPhrases, setEditingPhrases] = useState(false);
@@ -199,7 +209,8 @@ export default function Doll() {
   const sleeping = !busy && waiting.length === 0 && now - lastActive > SLEEP_AFTER_MS;
 
   let expression: Expression = "normal";
-  if (pressed) expression = "squish";
+  if (pressed && !isMobile) expression = "squish";
+  else if (flash) expression = flash;
   else if (limited || (peak && peak.percent >= 90)) expression = "worried";
   else if (bubble?.kind === "status") expression = "happy";
   else if (waiting.length) expression = "normal";
@@ -217,6 +228,7 @@ export default function Doll() {
       }
       setBubble(null);
       setOut(false);
+      setFlash(null);
     };
     bubbleTimer.current = window.setTimeout(hide, BUBBLE_MS[b.kind]);
   }, []);
@@ -225,6 +237,7 @@ export default function Doll() {
     window.clearTimeout(bubbleTimer.current);
     setBubble(null);
     setOut(false);
+    setFlash(null);
   }, []);
 
   useEffect(() => () => window.clearTimeout(bubbleTimer.current), []);
@@ -365,6 +378,7 @@ export default function Doll() {
     setPressed(false);
     setBoing(true);
     if (sound) squeak.release();
+    if (isMobile) setFlash(randomReaction());
     if (isMobile && !out) {
       setOut(true);
       showBubble({ kind: "status", text: say.statusLine({ peak, limited, sleeping, busy }), usage: true });
