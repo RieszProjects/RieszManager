@@ -1,18 +1,14 @@
 /** Responsive three-pane layout. On phones the side panes become swipeable drawers. */
-import { Drawer, IconButton, SwipeableDrawer, Tooltip } from "@mui/material";
+import { Drawer, IconButton, Tooltip } from "@mui/material";
 import { PanelLeftOpen, Plus, Settings } from "lucide-react";
 import type { ReactNode } from "react";
 import { Mascot } from "@/components/Mascot";
 import { useIsMobile, useIsWide } from "@/lib/useIsMobile";
 import { useUi } from "@/store/ui";
 import { layout } from "@/theme/tokens";
+import { MobileDrawers } from "./MobileDrawers";
 import { RightPanel } from "./RightPanel";
 import { Sidebar } from "./Sidebar";
-
-// Keep the invisible edge-swipe zones clear of the header and composer buttons.
-const SWIPE_AREA = { sx: { top: "calc(64px + var(--safe-top)) !important", bottom: "150px !important", height: "auto !important" } };
-
-const iOS = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent);
 
 function Rail() {
   const toggle = useUi((s) => s.toggleDesktopLeft);
@@ -44,32 +40,16 @@ export function AppShell({ children }: { children: ReactNode }) {
   if (isMobile) {
     return (
       <div className="rz-shell mobile">
-        <SwipeableDrawer
-          anchor="left"
-          open={leftOpen}
-          onOpen={() => setLeftOpen(true)}
-          onClose={() => setLeftOpen(false)}
-          swipeAreaWidth={24}
-          disableBackdropTransition={!iOS}
-          disableDiscovery={iOS}
-          slotProps={{ paper: { sx: { width: "min(86vw, 340px)" } }, swipeArea: SWIPE_AREA }}
-          ModalProps={{ keepMounted: true }}
-        >
-          <Sidebar />
-        </SwipeableDrawer>
         <main className="rz-main">{children}</main>
-        <SwipeableDrawer
-          anchor="right"
-          open={rightOverlay && Boolean(contextProject) && !leftOpen}
-          onOpen={() => contextProject && setRightOverlay(true)}
-          onClose={() => setRightOverlay(false)}
-          swipeAreaWidth={contextProject ? 20 : 0}
-          disableBackdropTransition={!iOS}
-          disableDiscovery={iOS}
-          slotProps={{ paper: { sx: { width: "min(88vw, 360px)" } }, swipeArea: SWIPE_AREA }}
-        >
-          <RightPanel onClose={() => setRightOverlay(false)} />
-        </SwipeableDrawer>
+        <MobileDrawers
+          left={<Sidebar />}
+          right={<RightPanel onClose={() => setRightOverlay(false)} />}
+          leftOpen={leftOpen}
+          rightOpen={rightOverlay && Boolean(contextProject) && !leftOpen}
+          rightEnabled={Boolean(contextProject)}
+          onLeft={setLeftOpen}
+          onRight={setRightOverlay}
+        />
       </div>
     );
   }

@@ -408,7 +408,15 @@
   font: inherit; font-size: 15px; line-height: 1.55; padding: 4px 2px 6px; min-height: 30px; max-height: 40vh; display: block;
 }
 .rz-composer textarea::placeholder { color: var(--text4); }
-.rz-composer-bar { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.rz-composer-bar { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; min-width: 0; }
+.rz-composer-bar > * { flex-shrink: 0; }
+.rz-composer-bar > .rz-chip { flex-shrink: 1; min-width: 0; }
+.rz-composer-bar > .rz-spacer { flex: 1 1 0; min-width: 0; }
+.rz-composer-chips {
+  display: flex; gap: 6px; padding: 0 2px 6px; overflow-x: auto; scrollbar-width: none;
+}
+.rz-composer-chips::-webkit-scrollbar { display: none; }
+.rz-composer-chips .rz-chip { flex-shrink: 0; max-width: none; background: transparent; }
 .rz-chip {
   display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 9px; border-radius: 8px; max-width: 210px;
   border: 1px solid var(--line); background: var(--bg1); color: var(--text2); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap;
@@ -634,3 +642,19 @@
   border: 1px solid var(--sage-deep); background: var(--bg); color: var(--text); outline: none;
   font-family: var(--font-display); font-size: 19px; font-weight: 600;
 }
+
+/* ---- Phone drawers (swipe anywhere) ---- */
+.rz-mdrawer {
+  position: fixed; top: 0; bottom: 0; z-index: 1200; width: min(86vw, 340px); background: var(--bg1);
+  visibility: hidden; will-change: transform; overflow: hidden; touch-action: pan-y;
+  transition: transform 0.28s cubic-bezier(0.22, 0.8, 0.24, 1), visibility 0s linear 0.28s;
+}
+.rz-mdrawer.left { left: 0; transform: translateX(-100%); box-shadow: 12px 0 40px rgba(0, 0, 0, 0.35); }
+.rz-mdrawer.right { right: 0; width: min(88vw, 360px); transform: translateX(100%); box-shadow: -12px 0 40px rgba(0, 0, 0, 0.35); }
+.rz-mdrawer.open { transform: none; visibility: visible; transition: transform 0.28s cubic-bezier(0.22, 0.8, 0.24, 1), visibility 0s; }
+.rz-mdrawer > .rz-sidebar, .rz-mdrawer > .rz-right { height: 100%; }
+.rz-mdrawer-backdrop {
+  position: fixed; inset: 0; z-index: 1199; background: rgba(0, 0, 0, 0.45); opacity: 0; visibility: hidden;
+  transition: opacity 0.28s ease, visibility 0s linear 0.28s;
+}
+.rz-mdrawer-backdrop.show { opacity: 1; visibility: visible; transition: opacity 0.28s ease, visibility 0s; }

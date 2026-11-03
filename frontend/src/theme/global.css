@@ -193,3 +193,23 @@ kbd {
   background: var(--amber);
   animation: rz-caret 1s steps(1) infinite;
 }
+
+/* ---- Touch devices: suppress browser gestures that fight the app ------------ */
+html { overscroll-behavior: none; }           /* pull-to-refresh, horizontal back/forward overscroll */
+@media (pointer: coarse) {
+  html, body { touch-action: pan-y; }         /* no double-tap / pinch zoom; horizontal swipes belong to the app */
+  /* Inner scrollers must not hand their overscroll to the page (that is what triggers pull-to-refresh). */
+  #root * { overscroll-behavior: contain; }
+  /* Things that scroll sideways keep their own horizontal panning. */
+  pre, table, .rz-code, .rz-diff, .rz-codeblock pre, .rz-composer-chips, .rz-tool-output, .md .katex-display {
+    touch-action: pan-x pan-y;
+  }
+  /* No long-press callouts or accidental text selection on app chrome. */
+  button, a, .rz-sidebar, .rz-right, .rz-chat-head, .rz-composer-bar, .rz-composer-chips, .rz-mdrawer, img {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  /* iOS zooms into any focused field whose text is smaller than 16px. */
+  input, textarea, select { font-size: 16px !important; }
+}

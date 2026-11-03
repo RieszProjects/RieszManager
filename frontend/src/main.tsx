@@ -22,6 +22,13 @@ if (import.meta.env.DEV) {
   (window as unknown as { __rz: unknown }).__rz = { useApp, useSessions, useUi };
 }
 
+// iOS Safari ignores user-scalable=no; block its pinch-zoom gestures directly.
+if (window.matchMedia("(pointer: coarse)").matches) {
+  for (const type of ["gesturestart", "gesturechange", "gestureend"]) {
+    document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+  }
+}
+
 // Keep the install prompt so the settings page can offer "install app" later.
 window.addEventListener("beforeinstallprompt", (e) => {
   e.preventDefault();

@@ -9,6 +9,7 @@ import { api } from "@/api/client";
 import type { SessionState } from "@/api/types";
 import { fileSize } from "@/lib/format";
 import { storage } from "@/lib/storage";
+import { useIsMobile } from "@/lib/useIsMobile";
 import { uuid4 } from "@/lib/uuid";
 import { useApp } from "@/store/app";
 import { toast } from "@/store/ui";
@@ -50,6 +51,7 @@ function mentionToken(text: string, caret: number): { query: string; start: numb
 
 export function Composer({ sessionId, projectId, state, defaultModel, defaultMode, onCreated, autoFocus, placeholder, dropRef }: Props) {
   const config = useApp((s) => s.config);
+  const isMobile = useIsMobile();
   const draftKey = `draft:${sessionId ?? `new:${projectId ?? ""}`}`;
   const [text, setText] = useState(() => storage.get(draftKey, ""));
   const [caret, setCaret] = useState(0);
@@ -357,8 +359,17 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
       ? "继续输入，消息会在合适时机送达…"
       : "给 Claude 发消息，/ 打开命令，@ 引用文件";
 
+  const chips = (
+    <>
+      <ModePicker value={mode} allowBypass={Boolean(config?.allowBypass)} onChange={changeMode} />
+      <ModelPicker value={model} effort={effort} models={models} onChange={changeModel} onEffort={changeEffort} />
+    </>
+  );
+
   return (
     <div className="rz-composer-wrap">
+      {/* Phones: session controls sit above the box so the input row never wraps. */}
+      {isMobile && <div className="rz-composer-chips">{chips}</div>}
       {menu && (menu === "slash" ? true : mentionResults.length > 0) && (
         <SuggestMenu
           items={menuItems}
@@ -413,8 +424,7 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
               e.target.value = "";
             }}
           />
-          <ModePicker value={mode} allowBypass={Boolean(config?.allowBypass)} onChange={changeMode} />
-          <ModelPicker value={model} effort={effort} models={models} onChange={changeModel} onEffort={changeEffort} />
+          {!isMobile && chips}
           <div className="rz-spacer" />
           {voice.available && (
             <Tooltip title={voice.recording ? "停止录音" : "语音输入"}>
