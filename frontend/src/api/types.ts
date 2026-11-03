@@ -326,5 +326,6 @@ export type ServerEvent =
   | { ev: "forked"; sessionId: string; to: string }
   | { ev: "commands"; sessionId: string }
   | { ev: "rate_limit"; sessionId: string; info: unknown }
+  | { ev: "usage_changed" }
   | { ev: "pong"; t: number }
   | { ev: "runner_unavailable" };

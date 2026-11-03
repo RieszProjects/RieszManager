@@ -92,6 +92,12 @@ async def health(request: web.Request) -> web.Response:
                   "defaultPermissionMode": cfg.default_permission_mode, "time": time.time()})
 
 
+async def plan_usage(request: web.Request) -> web.Response:
+    """Subscription usage windows (see usage.py). `?refresh=1` bypasses the cache."""
+    force = request.query.get("refresh") in ("1", "true")
+    return _json(await request.app[HUB].usage.get(force=force))
+
+
 async def list_projects(request: web.Request) -> web.Response:
     hub = request.app[HUB]
     hub.store.refresh()
@@ -601,6 +607,7 @@ def build_app(cfg: Config) -> web.Application:
 
     r = app.router
     r.add_get("/v1/health", health)
+    r.add_get("/v1/usage", plan_usage)
     r.add_get("/v1/projects", list_projects)
     r.add_get("/v1/projects/{pid}", project_detail)
     r.add_get("/v1/sessions", list_sessions)

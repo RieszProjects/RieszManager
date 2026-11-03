@@ -16,6 +16,7 @@ from .live import LiveProcess, scan_live
 from .process import ClaudeProcess, ControlError
 from .projects import ProjectResolver
 from .session_prefs import SessionPrefs
+from .usage import UsageMonitor
 from .store import SessionStore
 
 if TYPE_CHECKING:
@@ -47,6 +48,7 @@ class Hub:
         self._spawn_locks: dict[str, asyncio.Lock] = {}
         self.delivery: Delivery | None = None
         self.prefs = SessionPrefs(cfg.state_dir / "session_settings.json")
+        self.usage = UsageMonitor(cfg)
         self.reload_pending = False
         self.reload_ready = asyncio.Event()
 
@@ -303,6 +305,9 @@ class Hub:
         if ev == "transcript":
             self._poke(proc.session_id)
             return
+        if ev == "rate_limit":
+            self.usage.note_rate_limit(event.get("info"))
+            await self.broadcast_global({"ev": "usage_changed"})
         if ev == "exit":
             self._remember(proc)
             self._poke(proc.session_id)

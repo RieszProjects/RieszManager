@@ -37,12 +37,19 @@ export default defineConfig({
         navigateFallbackDenylist: [/^\/api\//, /^\/ws\//],
         // Fonts are split into many unicode-range slices; cache them lazily instead of precaching.
         globPatterns: ["**/*.{js,css,html,png,svg,webp}"],
+        // The optional doll widget's art is fetched only when it is switched on.
+        globIgnores: ["doll/**"],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.pathname.startsWith("/assets/") && /\.(woff2?|ttf)$/.test(url.pathname),
             handler: "CacheFirst",
             options: { cacheName: "fonts", expiration: { maxEntries: 400, maxAgeSeconds: 60 * 60 * 24 * 365 } },
+          },
+          {
+            urlPattern: ({ url }) => url.pathname.startsWith("/doll/"),
+            handler: "StaleWhileRevalidate",
+            options: { cacheName: "doll", expiration: { maxEntries: 40 } },
           },
         ],
       },

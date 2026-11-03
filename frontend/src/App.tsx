@@ -7,6 +7,7 @@ import { Toaster } from "@/components/Toaster";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { LoginPage } from "@/features/auth/LoginPage";
 import { ChatView } from "@/features/chat/ChatView";
+import { DollSlot } from "@/features/doll/DollSlot";
 import { FileViewer } from "@/features/files/FileViewer";
 import { HomeView, ProjectView } from "@/features/home/HomeView";
 import { AppShell } from "@/features/layout/AppShell";
@@ -93,6 +94,7 @@ export function App() {
       <SettingsDialog />
       <NewSessionDialog />
       <RenameDialog />
+      <DollSlot />
       <Toaster />
       <UpdateBanner />
     </>

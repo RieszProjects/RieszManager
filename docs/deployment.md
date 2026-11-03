@@ -164,6 +164,7 @@ git pull
 - runner 只监听 Unix socket（目录权限 0750，socket 0660），并校验 `RUNNER_TOKEN`。
 - 项目文件以只读方式提供，路径会解析符号链接并限制在项目目录内；原始文件以 `Content-Security-Policy: sandbox` 返回，不会在本站源下执行。
 - HTML 文件的渲染预览通过 `/api/view/<令牌>/<路径>` 提供：令牌是签名的只读凭证，只对一个项目有效、一小时后过期；响应带 `Content-Security-Policy: sandbox`（不含 `allow-same-origin`），页面脚本运行在匿名来源中，无法使用本站的 Cookie、存储或接口。页面可以加载外部资源，因此它能读到并外发的最多是该项目内的文件。
+- 看板娘玩偶显示的套餐用量来自 runner 定期执行的 `claude -p /usage`：这是 Claude Code 的本地命令，不调用模型、不消耗额度，也不会留下会话记录。
 - `RIESZ_TRUST_CF_HEADER=true` 只应在经由 Cloudflare 访问且网关只监听本机时开启，否则客户端可以伪造 IP 头绕过按 IP 的限流。
 
 ## 10. 排错

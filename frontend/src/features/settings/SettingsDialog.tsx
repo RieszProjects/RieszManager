@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/api/client";
 import { copyText } from "@/lib/clipboard";
 import { clockTime } from "@/lib/format";
+import { DollSettings } from "@/features/doll/DollSettings";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { useApp } from "@/store/app";
 import { useAuth } from "@/store/auth";
@@ -231,6 +232,7 @@ function GeneralSection() {
         </div>
         <Switch checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
       </div>
+      <DollSettings />
       {installEvent && (
         <div className="rz-settings-row">
           <div>
