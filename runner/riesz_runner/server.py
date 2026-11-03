@@ -17,6 +17,7 @@ from aiohttp import WSMsgType, web
 from . import files as files_mod
 from .claude_settings import user_defaults
 from .config import Config
+from .context_limits import ContextLimits, limits_from_usage
 from .delivery import Delivery
 from .history import PromptHistory
 from .hub import Hub
@@ -40,6 +41,7 @@ UPLOADS = web.AppKey("uploads", UploadStore)
 HISTORY = web.AppKey("history", PromptHistory)
 PROBE = web.AppKey("probe", CapabilityProbe)
 DELIVERY = web.AppKey("delivery", Delivery)
+LIMITS = web.AppKey("limits", ContextLimits)
 EFFORT_LEVELS = {"low", "medium", "high", "xhigh", "max"}
 
 
@@ -231,6 +233,32 @@ async def context_usage(request: web.Request) -> web.Response:
     if proc is None:
         return _err(409, "session is not running here")
     return _json({"context": await proc.control("get_context_usage")})
+
+
+async def context_limits(request: web.Request) -> web.Response:
+    """Context window and auto-compact point for a session (for the composer's context meter).
+
+    A session running here answers exactly (and also reports its current size);
+    otherwise the model's defaults are used, the model being `?model=` or the one
+    the transcript last used.
+    """
+    hub = request.app[HUB]
+    sid = _session_id(request)
+    proc = hub.get_hosted(sid)
+    if proc is not None and proc.alive:
+        try:
+            usage = await proc.control("get_context_usage", timeout=8)
+            return _json({**limits_from_usage(usage), "liveTokens": usage.get("totalTokens"), "source": "live"})
+        except (ControlError, asyncio.TimeoutError):
+            pass
+    model = request.query.get("model") or hub.session_summary(sid).get("model")
+    if model == "<synthetic>":
+        model = None
+    try:
+        limits = await request.app[LIMITS].get(model)
+    except Exception as exc:  # probe failed: the meter simply stays hidden
+        return _err(503, f"context window unknown: {exc}")
+    return _json({**limits, "model": model, "source": "model"})
 
 
 # ---- actions -----------------------------------------------------------------
@@ -593,6 +621,7 @@ def build_app(cfg: Config) -> web.Application:
     app[HISTORY] = PromptHistory(cfg.history_file, cfg.own_history_file)
     app[PROBE] = CapabilityProbe(cfg)
     app[DELIVERY] = Delivery(hub, app[HISTORY])
+    app[LIMITS] = ContextLimits(cfg)
     hub.delivery = app[DELIVERY]
 
     async def on_startup(app: web.Application) -> None:
@@ -619,6 +648,7 @@ def build_app(cfg: Config) -> web.Application:
     r.add_get("/v1/sessions/{sid}/image", session_image)
     r.add_get("/v1/sessions/{sid}/commands", session_commands)
     r.add_get("/v1/sessions/{sid}/context", context_usage)
+    r.add_get("/v1/sessions/{sid}/context-limits", context_limits)
     r.add_post("/v1/sessions/{sid}/messages", send_message)
     r.add_post("/v1/sessions/{sid}/start", start_session)
     r.add_post("/v1/sessions/{sid}/stop", stop_session)

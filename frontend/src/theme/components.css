@@ -693,3 +693,22 @@ body.rz-dragging, body.rz-dragging * { cursor: grabbing !important; user-select:
 
 /* Rendered HTML preview (sandboxed iframe); white canvas like a normal browser page. */
 .rz-fileviewer-page { display: block; width: 100%; height: 100%; border: none; background: #fff; }
+
+/* Context meter next to the send button: a ring with a pie filled by the share of context used. */
+.rz-ctx-wrap { display: inline-flex; }
+.rz-ctx-meter {
+  --c: var(--sage);
+  display: grid; place-items: center; width: 30px; height: 30px; padding: 0;
+  border: 0; border-radius: 50%; background: none; cursor: default; -webkit-tap-highlight-color: transparent;
+}
+.rz-ctx-meter:hover { background: rgba(232, 226, 212, 0.05); }
+.rz-ctx-meter span {
+  width: 17px; height: 17px; padding: 1.5px; border-radius: 50%;
+  border: 1.5px solid var(--text3);
+  background: conic-gradient(var(--c) calc(var(--p) * 1turn), transparent 0) content-box;
+}
+.rz-ctx-meter.mid { --c: var(--amber); }
+.rz-ctx-meter.high { --c: var(--danger); }
+.rz-ctx-meter.mid span, .rz-ctx-meter.high span { border-color: var(--c); }
+.rz-ctx-tip { font-size: 12px; line-height: 1.6; }
+.rz-ctx-tip b { font-weight: 600; }

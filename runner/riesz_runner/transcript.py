@@ -541,6 +541,7 @@ class TranscriptView:
             meta = rec.get("compactMetadata") or {}
             item["trigger"] = meta.get("trigger")
             item["preTokens"] = meta.get("preTokens")
+            item["postTokens"] = meta.get("postTokens")
             item["summary"] = None
             self._add(item)
             return

@@ -13,6 +13,7 @@ import { useIsMobile } from "@/lib/useIsMobile";
 import { uuid4 } from "@/lib/uuid";
 import { useApp } from "@/store/app";
 import { toast } from "@/store/ui";
+import { ContextMeter } from "./ContextMeter";
 import { useCommands } from "./useCommands";
 import { cycleMode, ModelPicker, ModePicker } from "./SessionControls";
 import { SuggestMenu, type Suggestion } from "./SuggestMenu";
@@ -426,6 +427,7 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
           />
           {!isMobile && chips}
           <div className="rz-spacer" />
+          {sessionId && <ContextMeter sessionId={sessionId} model={state?.model} hosted={hosted} />}
           {voice.available && (
             <Tooltip title={voice.recording ? "停止录音" : "语音输入"}>
               <IconButton size="small" className={voice.recording ? "rz-mic-on" : ""} onClick={() => void voice.toggle()} disabled={voice.transcribing}>

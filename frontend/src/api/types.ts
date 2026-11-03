@@ -111,6 +111,13 @@ export interface AssistantItem extends ItemBase {
   blocks: AssistantBlock[];
   stopReason: string | null;
   isError?: boolean;
+  /** Token usage reported by the API for this message. */
+  usage?: {
+    input_tokens?: number | null;
+    output_tokens?: number | null;
+    cache_read_input_tokens?: number | null;
+    cache_creation_input_tokens?: number | null;
+  };
 }
 
 export interface CommandItem extends ItemBase { kind: "command"; name: string; args: string }
@@ -122,6 +129,8 @@ export interface CompactItem extends ItemBase {
   summary: string | null;
   trigger?: string | null;
   preTokens?: number | null;
+  /** Context size right after compaction (recent Claude Code versions only). */
+  postTokens?: number | null;
 }
 export interface InterruptedItem extends ItemBase { kind: "interrupted"; forTool?: boolean }
 export interface TaskItem extends ItemBase { kind: "task"; taskId: string; status: string; summary: string }
