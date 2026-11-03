@@ -53,6 +53,16 @@ export function MessageList({ sessionKey, items, hasMore, loadingOlder, onLoadOl
   const atBottomRef = useRef(true);
   atBottomRef.current = atBottom;
 
+  // While a finger or the wheel is moving the list (including the momentum after
+  // the finger lifts), never pull it back to the bottom: on phones that made the
+  // first swipes of a running session snap back, as if the list were stuck.
+  const touching = useRef(false);
+  const handsOffUntil = useRef(0);
+  const userScrolling = () => touching.current || Date.now() < handsOffUntil.current;
+  const handsOff = (ms: number) => {
+    handsOffUntil.current = Math.max(handsOffUntil.current, Date.now() + ms);
+  };
+
   useEffect(() => {
     ready.current = false;
     setSettled(false);
@@ -71,7 +81,7 @@ export function MessageList({ sessionKey, items, hasMore, loadingOlder, onLoadOl
   const toEnd = useCallback(() => ref.current?.scrollTo({ top: Number.MAX_SAFE_INTEGER }), []);
 
   const settle = useCallback(() => {
-    if (!ready.current) return;
+    if (!ready.current || userScrolling()) return;
     if (atBottomRef.current || Date.now() < pinnedUntil.current) requestAnimationFrame(toEnd);
   }, [toEnd]);
 
@@ -109,7 +119,14 @@ export function MessageList({ sessionKey, items, hasMore, loadingOlder, onLoadOl
   }
 
   return (
-    <div className={`rz-msg-wrap${settled ? "" : " settling"}`}>
+    <div
+      className={`rz-msg-wrap${settled ? "" : " settling"}`}
+      onTouchStart={() => { touching.current = true; }}
+      onTouchEnd={() => { touching.current = false; handsOff(700); }}
+      onTouchCancel={() => { touching.current = false; handsOff(700); }}
+      onWheel={() => handsOff(350)}
+      onScrollCapture={() => Date.now() < handsOffUntil.current && handsOff(150)}
+    >
       <Virtuoso
         key={sessionKey}
         ref={ref}
@@ -122,7 +139,7 @@ export function MessageList({ sessionKey, items, hasMore, loadingOlder, onLoadOl
             <ItemView item={item} />
           </div>
         )}
-        followOutput={(bottom) => (bottom ? "auto" : false)}
+        followOutput={(bottom) => (bottom && !userScrolling() ? "auto" : false)}
         atBottomStateChange={setAtBottom}
         atBottomThreshold={80}
         startReached={() => hasMore && onLoadOlder()}

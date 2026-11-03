@@ -198,8 +198,13 @@ kbd {
 html { overscroll-behavior: none; }           /* pull-to-refresh, horizontal back/forward overscroll */
 @media (pointer: coarse) {
   html, body { touch-action: pan-y; }         /* no double-tap / pinch zoom; horizontal swipes belong to the app */
-  /* Inner scrollers must not hand their overscroll to the page (that is what triggers pull-to-refresh). */
-  #root * { overscroll-behavior: contain; }
+  /*
+   * Overscroll of the main lists stays inside them. This must not be applied to
+   * everything: code blocks, tables and tool output are scroll containers too
+   * (they scroll sideways), and with `contain` a vertical swipe that starts on
+   * one of them would not be handed on to the conversation, so it would not scroll.
+   */
+  .rz-msg-scroller { overscroll-behavior-y: contain; }
   /* Things that scroll sideways keep their own horizontal panning. */
   pre, table, .rz-code, .rz-diff, .rz-codeblock pre, .rz-composer-chips, .rz-tool-output, .md .katex-display {
     touch-action: pan-x pan-y;
