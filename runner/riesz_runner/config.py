@@ -102,7 +102,9 @@ def load_config(env_file: str | None = None) -> Config:
 
     home = Path.home()
     state_dir = Path(os.path.expanduser(env.get("RUNNER_STATE_DIR") or "~/.local/state/riesz-manager"))
-    socket_path = Path(os.path.expanduser(env.get("RUNNER_SOCKET") or str(state_dir / "run" / "runner.sock")))
+    socket_dir = env.get("RUNNER_SOCKET_DIR")
+    default_socket = Path(os.path.expanduser(socket_dir)) / "runner.sock" if socket_dir else state_dir / "run" / "runner.sock"
+    socket_path = Path(os.path.expanduser(env.get("RUNNER_SOCKET") or str(default_socket)))
     token = env.get("RUNNER_TOKEN", "")
     if len(token) < 24:
         raise SystemExit("RUNNER_TOKEN must be set to a random string of at least 24 characters")

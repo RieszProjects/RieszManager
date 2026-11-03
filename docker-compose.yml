@@ -1,0 +1,37 @@
+# RieszManager: frontend (static SPA), backend (Django ASGI) and an nginx gateway.
+# The host runner (see runner/) runs outside Docker and is reached over a Unix socket.
+name: riesz-manager
+
+services:
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    # Must match the host user that runs the runner, so the socket is accessible.
+    user: "${RIESZ_UID:-1000}:${RIESZ_GID:-1000}"
+    environment:
+      RIESZ_ENV_FILE: /config/.env
+      RIESZ_DATA_DIR: /data
+      RUNNER_CONTAINER_SOCKET: /run/riesz/runner.sock
+    volumes:
+      - ./.env:/config/.env:ro
+      - ./data/backend:/data
+      - ${RUNNER_SOCKET_DIR:?set RUNNER_SOCKET_DIR in .env}:/run/riesz
+    networks: [internal]
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    networks: [internal]
+
+  gateway:
+    image: nginx:1.29-alpine
+    restart: unless-stopped
+    depends_on: [backend, frontend]
+    ports:
+      - "${RIESZ_BIND:-127.0.0.1}:${RIESZ_PORT:-18573}:8080"
+    volumes:
+      - ./nginx/gateway.conf:/etc/nginx/conf.d/default.conf:ro
+    networks: [internal]
+
+networks:
+  internal: {}
