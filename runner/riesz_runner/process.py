@@ -72,6 +72,8 @@ class ClaudeProcess:
         self.status: str | None = None
         self.queue: dict[str, dict[str, Any]] = {}
         self.permissions: dict[str, dict[str, Any]] = {}
+        # Top-level tasks claude is running (foreground tool runs, subagents, background jobs).
+        self.tasks: dict[str, dict[str, Any]] = {}
         self.partial: dict[str, Any] | None = None
         self.last_result: dict[str, Any] | None = None
         self.stderr_tail: deque[str] = deque(maxlen=STDERR_TAIL_LINES)
@@ -201,6 +203,7 @@ class ClaudeProcess:
             "effort": self.effort,
             "queue": list(self.queue.values()),
             "permissions": list(self.permissions.values()),
+            "tasks": list(self.tasks.values()),
             "partial": self.partial,
             "lastResult": self.last_result,
             "startedAt": self.started_at,
@@ -336,6 +339,7 @@ class ClaudeProcess:
         self.turn_active = False
         self.permissions.clear()
         self.queue.clear()
+        self.tasks.clear()
         self.partial = None
         for fut in self._pending_controls.values():
             if not fut.done():
@@ -426,11 +430,59 @@ class ClaudeProcess:
             await self.sink(self, {"ev": "notice", "level": "warning", "text": _retry_text(msg)})
         elif subtype in ("compact_boundary", "local_command_output", "informational"):
             await self.sink(self, {"ev": "transcript"})
+        elif subtype in ("task_started", "task_updated", "task_notification", "background_tasks_changed"):
+            if self._track_task(subtype, msg):
+                await self._emit_state()
+            if subtype == "task_notification":
+                await self.sink(self, {"ev": "transcript"})
         elif subtype == "commands_changed" and self.init_info is not None:
             commands = msg.get("commands")
             if isinstance(commands, list):
                 self.init_info["commands"] = commands
                 await self.sink(self, {"ev": "commands"})
+
+    def _track_task(self, subtype: str, msg: dict[str, Any]) -> bool:
+        """Update `self.tasks` from a task event; returns True if anything changed."""
+        task_id = msg.get("task_id")
+        if subtype == "task_started" and task_id and not msg.get("parent_task_id"):
+            self.tasks[task_id] = {
+                "id": task_id,
+                "description": msg.get("description") or "",
+                "type": msg.get("subagent_type") or msg.get("task_type") or "task",
+                "background": bool(msg.get("is_backgrounded")),
+                "toolUseId": msg.get("tool_use_id"),
+                "startedAt": time.time(),
+            }
+            return True
+        if subtype == "task_updated" and task_id in self.tasks:
+            patch = msg.get("patch") or {}
+            if patch.get("status") in ("completed", "failed", "killed"):
+                del self.tasks[task_id]
+                return True
+            if "is_backgrounded" in patch:
+                self.tasks[task_id]["background"] = bool(patch["is_backgrounded"])
+                return True
+            return False
+        if subtype == "task_notification" and task_id:
+            return self.tasks.pop(task_id, None) is not None
+        if subtype == "background_tasks_changed" and isinstance(msg.get("tasks"), list):
+            listed = {t.get("task_id"): t for t in msg["tasks"] if isinstance(t, dict) and not t.get("parent_task_id")}
+            changed = False
+            for tid, task in list(self.tasks.items()):
+                if task["background"] and tid not in listed:
+                    del self.tasks[tid]
+                    changed = True
+            for tid, t in listed.items():
+                if tid and tid not in self.tasks:
+                    self.tasks[tid] = {"id": tid, "description": t.get("description") or "",
+                                       "type": t.get("subagent_type") or t.get("task_type") or "task",
+                                       "background": True, "toolUseId": None, "startedAt": time.time()}
+                    changed = True
+                elif tid:
+                    changed |= not self.tasks[tid]["background"]
+                    self.tasks[tid]["background"] = True
+            return changed
+        return False
 
     async def _handle_lifecycle(self, msg: dict[str, Any]) -> None:
         cmd_uuid = msg.get("command_uuid")

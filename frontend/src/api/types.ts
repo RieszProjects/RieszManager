@@ -191,6 +191,15 @@ export interface TurnResult {
   ts: number;
 }
 
+export interface TaskInfo {
+  id: string;
+  description: string;
+  type: string;
+  background: boolean;
+  toolUseId?: string | null;
+  startedAt: number;
+}
+
 export interface SessionState {
   hosted: boolean;
   alive: boolean;
@@ -204,6 +213,7 @@ export interface SessionState {
   permissionMode?: string | null;
   queue: QueueEntry[];
   permissions: PermissionRequest[];
+  tasks?: TaskInfo[];
   partial: PartialMessage | null;
   lastResult?: TurnResult | null;
   startedAt?: number;

@@ -1,4 +1,4 @@
-import { CheckCircle2, ChevronRight, Circle, CircleDot, LoaderCircle, TriangleAlert } from "lucide-react";
+import { CheckCircle2, ChevronRight, Circle, CircleDot, CircleSlash, LoaderCircle, TriangleAlert } from "lucide-react";
 import { memo, useState, type ReactNode } from "react";
 import { imageUrl } from "@/api/client";
 import type { ToolBlock as ToolBlockType, ToolResult } from "@/api/types";
@@ -195,23 +195,24 @@ function headExtra(tool: ToolBlockType): ReactNode {
 }
 
 function ToolBlockImpl({ tool }: { tool: ToolBlockType }) {
-  const { cwd } = useSessionContext();
+  const { cwd, pendingTools } = useSessionContext();
   const meta = toolMeta(tool.name, tool.input ?? {}, cwd);
   const [open, setOpen] = useState(OPEN_BY_DEFAULT.has(tool.name));
-  const pending = !tool.result;
+  const pending = !tool.result && pendingTools.has(tool.id);
+  const terminated = !tool.result && !pending;
   const error = tool.result?.isError;
   const Icon = meta.icon;
   const mcp = mcpParts(tool.name);
   return (
-    <div className={`rz-tool${error ? " error" : ""}${pending ? " pending" : ""}${open ? " open" : ""}`}>
+    <div className={`rz-tool${error ? " error" : ""}${pending ? " pending" : ""}${terminated ? " terminated" : ""}${open ? " open" : ""}`}>
       <button type="button" className="rz-tool-head" onClick={() => setOpen(!open)}>
         <span className="rz-tool-icon">
-          {pending ? <LoaderCircle size={15} className="spin" /> : error ? <TriangleAlert size={15} /> : <Icon size={15} />}
+          {pending ? <LoaderCircle size={15} className="spin" /> : terminated ? <CircleSlash size={15} /> : error ? <TriangleAlert size={15} /> : <Icon size={15} />}
         </span>
         <span className="rz-tool-label">{meta.label}</span>
         {mcp && <span className="rz-tool-server">{mcp.server}</span>}
         <span className="rz-tool-summary mono">{meta.summary}</span>
-        {headExtra(tool)}
+        {terminated ? <span className="rz-tool-terminated">已终止</span> : headExtra(tool)}
         <ChevronRight size={14} className="rz-chevron" />
       </button>
       {open && (

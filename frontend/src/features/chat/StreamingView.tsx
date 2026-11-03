@@ -63,22 +63,27 @@ interface ActivityProps {
   busy: boolean;
   since: number | null;
   status?: string | null;
+  /** Waiting for the user to answer a prompt. */
   waiting: boolean;
+  /** Overrides the wording, e.g. while a command or background task runs. */
+  label?: string | null;
+  /** Whether Esc can interrupt (only for sessions hosted here). */
+  interruptible?: boolean;
   compact?: boolean;
 }
 
-export function ActivityLine({ busy, since, status, waiting, compact }: ActivityProps) {
+export function ActivityLine({ busy, since, status, waiting, label: override, interruptible = true, compact }: ActivityProps) {
   const now = useTicker(busy);
   const [verb] = useState(() => VERBS[Math.floor(Math.random() * VERBS.length)]);
   if (!busy) return null;
-  const elapsed = since ? duration(now - since) : "";
-  const label = waiting ? "等待你的确认" : status === "compacting" ? "正在压缩上下文" : verb;
+  const elapsed = since ? duration(Math.max(0, now - since)) : "";
+  const label = waiting ? "等待你的确认" : status === "compacting" ? "正在压缩上下文" : override ?? verb;
   return (
     <div className="rz-activity">
       {compact ? <LoaderCircle size={14} className="spin" /> : <Mascot pose="working" size={50} className="rz-activity-mascot" />}
       <span className="rz-activity-verb">{label}…</span>
       {elapsed && <span className="dim">{elapsed}</span>}
-      {!waiting && <span className="dim rz-activity-hint"><kbd>Esc</kbd> 中断</span>}
+      {!waiting && interruptible && <span className="dim rz-activity-hint"><kbd>Esc</kbd> 中断</span>}
     </div>
   );
 }

@@ -23,6 +23,7 @@ import { PendingPrompts } from "./PermissionCard";
 import { SessionContext } from "./SessionContext";
 import { EditableTitle } from "./EditableTitle";
 import { ActivityLine, StreamingView } from "./StreamingView";
+import { turnStatus, waitingLabel } from "./turnStatus";
 
 function QueueBar({ sessionId, queue }: { sessionId: string; queue: QueueEntry[] }) {
   const visible = queue.filter((q) => q.preview);
@@ -141,7 +142,14 @@ export function ChatView({ sessionId }: { sessionId: string }) {
   const state = data?.state ?? null;
   const items = data?.items ?? [];
   const project = projects.find((p) => p.id === projectId);
-  const ctx = useMemo(() => ({ sessionId, cwd: summary?.cwd ?? null, projectId }), [sessionId, summary?.cwd, projectId]);
+  const turn = useMemo(() => turnStatus(items, state), [items, state]);
+  const ctx = useMemo(
+    () => ({ sessionId, cwd: summary?.cwd ?? null, projectId, pendingTools: turn.pendingTools }),
+    [sessionId, summary?.cwd, projectId, turn.pendingTools],
+  );
+  const hostedHere = Boolean(state?.hosted && state.alive);
+  const waitingSince = turn.waitingSince ? Date.parse(turn.waitingSince) : null;
+  const background = turn.backgroundTasks;
   const waiting = Boolean(state?.permissions?.length);
 
   useEffect(() => {
@@ -169,7 +177,24 @@ export function ChatView({ sessionId }: { sessionId: string }) {
           {data.exited.stderr.length > 0 && <pre>{data.exited.stderr.join("\n")}</pre>}
         </div>
       )}
-      <ActivityLine busy={Boolean(state?.busy)} since={data?.turnStartedAt ?? null} status={state?.status} waiting={waiting} />
+      <ActivityLine
+        busy={turn.working}
+        since={turn.waitingTool && waitingSince ? waitingSince : data?.turnStartedAt ?? null}
+        status={state?.status}
+        waiting={waiting}
+        label={turn.waitingTool ? waitingLabel(turn.waitingTool) : null}
+        interruptible={hostedHere}
+      />
+      {!turn.working && background.length > 0 && (
+        <ActivityLine
+          busy
+          since={Math.min(...background.map((t) => t.startedAt)) * 1000}
+          waiting={false}
+          label={`等待后台任务${background.length > 1 ? `（${background.length} 个）` : ""}：${background[0].description || background[0].type}`}
+          interruptible={false}
+        />
+      )}
+      {turn.terminated && <div className="rz-terminated">已终止 · 上次运行没有完成</div>}
     </>
   );
 
