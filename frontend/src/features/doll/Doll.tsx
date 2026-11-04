@@ -1,5 +1,5 @@
 /**
- * The doll widget: Lisi, the mascot, peeking into the window, which can be squeezed
+ * The doll widget: Riesz, the mascot, peeking into the window, which can be squeezed
  * and tells you how much of the Claude plan has been used.
  *
  * - Desktop: she leans in from a bottom corner. Drag her to the other corner.

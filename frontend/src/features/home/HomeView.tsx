@@ -30,7 +30,7 @@ const GREETING: Record<DayPart, string> = {
   evening: "晚上好",
 };
 
-/** What Lisi (the mascot, perpetually sleepy and short on words) says when nothing needs you. */
+/** What Riesz (the mascot, perpetually sleepy and short on words) says when nothing needs you. */
 const IDLE_LINES: Record<DayPart, string[]> = {
   night: ["我先眯一会儿。你忙完也早点睡。", "……这个点还在写代码吗。", "夜里安静，适合把事情做完。别熬太晚。"],
   morning: ["……早。我还没完全醒。", "新的一天。先从哪个项目开始？", "选一个项目开始新会话，或者接着昨天的工作。"],
