@@ -1,23 +1,81 @@
 /** Landing view (nothing selected) and the per-project "new session" view. */
 import { ChevronRight } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Mascot } from "@/components/Mascot";
 import { useOrganizeView } from "@/lib/organize";
 import { useIsMobile } from "@/lib/useIsMobile";
-import { useApp } from "@/store/app";
+import { sessionTitle, useApp } from "@/store/app";
 import { useUi } from "@/store/ui";
 import { SessionRow } from "../sessions/SessionRow";
 import { Composer } from "../composer/Composer";
 import { MobileHeaderButtons } from "../layout/MobileHeaderButtons";
 import { RightDock, RightPanelButton } from "../layout/RightDock";
 
-function greeting(): string {
+type DayPart = "night" | "morning" | "noon" | "afternoon" | "evening";
+
+function dayPart(): DayPart {
   const h = new Date().getHours();
-  if (h < 5) return "这么晚了还不睡吗";
-  if (h < 11) return "早上好";
-  if (h < 14) return "中午好";
-  if (h < 18) return "下午好";
-  return "晚上好";
+  if (h < 5) return "night";
+  if (h < 11) return "morning";
+  if (h < 14) return "noon";
+  if (h < 18) return "afternoon";
+  return "evening";
+}
+
+const GREETING: Record<DayPart, string> = {
+  night: "这么晚了还不睡吗",
+  morning: "早上好",
+  noon: "中午好",
+  afternoon: "下午好",
+  evening: "晚上好",
+};
+
+/** What Lisi (the mascot, perpetually sleepy and short on words) says when nothing needs you. */
+const IDLE_LINES: Record<DayPart, string[]> = {
+  night: ["我先眯一会儿。你忙完也早点睡。", "……这个点还在写代码吗。", "夜里安静，适合把事情做完。别熬太晚。"],
+  morning: ["……早。我还没完全醒。", "新的一天。先从哪个项目开始？", "选一个项目开始新会话，或者接着昨天的工作。"],
+  noon: ["吃过饭再开始也来得及。", "中午容易犯困。我是说，我。", "选一个项目，或者接着上午的会话。"],
+  afternoon: ["……刚才没睡着。你说。", "下午了。有什么想交给 Claude 的？", "选一个项目开始新会话，或者继续之前的工作。"],
+  evening: ["今天辛苦了。还要继续吗？", "晚上了。把剩下的收个尾？", "选一个项目开始新会话，或者继续之前的工作。"],
+};
+
+/** The landing view's greeting: the time of day, then a line about what is going on. */
+function HomeGreeting() {
+  const live = useApp((s) => s.live);
+  const sessions = useApp((s) => s.sessions);
+  const navigate = useUi((s) => s.navigate);
+  const part = dayPart();
+  // One idle line per visit, so it does not change while you look at it.
+  const [pick] = useState(() => Math.random());
+  const { running, waiting } = useMemo(() => {
+    const entries = Object.entries(live);
+    return {
+      running: entries.filter(([, l]) => l.busy).length,
+      waiting: entries.filter(([, l]) => l.waiting).map(([sid]) => sid),
+    };
+  }, [live]);
+
+  let line: string;
+  if (waiting.length) line = waiting.length > 1 ? `有 ${waiting.length} 个会话在等你点头。` : "有个会话在等你点头。";
+  else if (running) line = running > 1 ? `有 ${running} 个会话还在跑，我替你看着。` : "有个会话还在跑，我替你看着。";
+  else {
+    const lines = IDLE_LINES[part];
+    line = lines[Math.floor(pick * lines.length)];
+  }
+
+  return (
+    <div className="rz-home-words">
+      <h1 className="rz-home-title rz-home-greeting">{GREETING[part]}</h1>
+      <p className="rz-home-line">
+        {line}
+        {waiting.length > 0 && (
+          <button type="button" className="rz-home-action" onClick={() => navigate({ view: "session", sessionId: waiting[0] })}>
+            去看看「{sessionTitle(sessions[waiting[0]])}」
+          </button>
+        )}
+      </p>
+    </div>
+  );
 }
 
 const HOME_RECENT = 3;
@@ -68,7 +126,7 @@ export function HomeView() {
       )}
       <div className="rz-home-stage">
         <Mascot pose="sleepy" className="rz-home-mascot" />
-        <h1 className="rz-home-title rz-home-greeting">{greeting()}</h1>
+        <HomeGreeting />
       </div>
       {isMobile && <HomeRecent />}
     </div>
