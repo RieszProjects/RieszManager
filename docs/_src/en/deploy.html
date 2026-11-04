@@ -67,7 +67,7 @@ cd RieszManager
 ./rieszctl runner logs
 ./rieszctl runner reload      <span class="c"># Apply new code or .env changes: reloads once all managed sessions are idle</span>
 ./rieszctl runner restart     <span class="c"># Restart immediately: interrupts any session currently running a turn</span></code></pre>
-<p><code>reload</code> waits until every Claude session managed by the runner is idle (no turn in progress, no pending permission prompt, and no queued messages), then stops those idle processes and reloads itself; session history lives on disk and resumes automatically on the next message. <code>restart</code> takes effect immediately and interrupts active turns, so it is normally only needed if the runner is stuck. Other subcommands include <code>start</code>, <code>stop</code>, <code>uninstall</code>, and <code>run</code> (run in the foreground).</p>
+<p><code>reload</code> waits until every Claude session managed by the runner is idle (no turn in progress, no pending permission prompt, no queued messages, and no background commands, subagents or monitors still running), then stops those idle processes and reloads itself; session history lives on disk and resumes automatically on the next message. <code>restart</code> takes effect immediately and interrupts active turns, so it is normally only needed if the runner is stuck. Other subcommands include <code>start</code>, <code>stop</code>, <code>uninstall</code>, and <code>run</code> (run in the foreground).</p>
 
 <h2 id="containers">Start the containers</h2>
 <p>Build and start the three containers, then check overall status:</p>
@@ -237,7 +237,7 @@ cd RieszManager
 <tr><td><code>RUNNER_CLAUDE_BIN</code></td><td>empty (auto-detected)</td><td>Path to the <code>claude</code> executable</td></tr>
 <tr><td><code>RUNNER_DEFAULT_PERMISSION_MODE</code></td><td><code>default</code></td><td>Default permission mode for new sessions: <code>default</code>, <code>acceptEdits</code>, <code>plan</code>, <code>auto</code>, or <code>bypassPermissions</code></td></tr>
 <tr><td><code>RUNNER_ALLOW_BYPASS</code></td><td><code>false</code></td><td>Whether the web UI is allowed to switch sessions into <code>bypassPermissions</code> mode</td></tr>
-<tr><td><code>RUNNER_IDLE_TIMEOUT</code></td><td><code>1800</code></td><td>Seconds of inactivity before an idle <code>claude</code> process is stopped (it resumes automatically on the next message)</td></tr>
+<tr><td><code>RUNNER_IDLE_TIMEOUT</code></td><td><code>1800</code></td><td>Seconds of inactivity before an idle <code>claude</code> process is stopped (it resumes automatically on the next message). A process that still has background commands, subagents or monitors running is not idle.</td></tr>
 <tr><td><code>RUNNER_LOGIN_SHELL</code></td><td><code>true</code></td><td>Whether to launch <code>claude</code> through a login shell so it sees the same environment as your terminal</td></tr>
 <tr><td><code>RUNNER_CHROME</code></td><td><code>auto</code></td><td>Whether sessions started from the web UI connect to Claude in Chrome: <code>auto</code> (follows the <code>/chrome</code> default in <code>~/.claude.json</code>), <code>on</code>, or <code>off</code>. Non-interactive <code>claude</code> only connects when passed <code>--chrome</code></td></tr>
 <tr><td><code>RUNNER_ALLOW_EXTERNAL_FILES</code></td><td><code>false</code></td><td>Whether to allow browsing files for sessions whose working directory is outside <code>WORKSPACE_ROOT</code></td></tr>

@@ -101,7 +101,7 @@ cd RieszManager
 ./rieszctl runner logs
 ./rieszctl runner reload      <span class="c"># 应用新代码或修改后的 .env：等所有托管会话空闲后再重载</span>
 ./rieszctl runner restart     <span class="c"># 立即重启：会中断正在工作的会话</span></code></pre>
-<p><code>reload</code>会等到runner托管的所有Claude会话都空闲（没有进行中的回合、待确认的权限或排队消息）时，才结束这些空闲进程并重新加载自己；会话记录都在磁盘上，下次发消息时会自动恢复。<code>restart</code>则立即生效，正在工作的会话会被打断，一般只在runner卡住时使用。完整子命令还包括<code>start</code>、<code>stop</code>、<code>uninstall</code>和<code>run</code>（在前台直接运行）。</p>
+<p><code>reload</code>会等到runner托管的所有Claude会话都空闲（没有进行中的回合、待确认的权限和排队消息，也没有仍在运行的后台命令、子代理或监视任务）时，才结束这些空闲进程并重新加载自己；会话记录都在磁盘上，下次发消息时会自动恢复。<code>restart</code>则立即生效，正在工作的会话会被打断，一般只在runner卡住时使用。完整子命令还包括<code>start</code>、<code>stop</code>、<code>uninstall</code>和<code>run</code>（在前台直接运行）。</p>
 
 <h2 id="containers">启动容器</h2>
 <p>构建并启动三个容器，然后检查整体状态：</p>
@@ -271,7 +271,7 @@ cd RieszManager
 <tr><td><code>RUNNER_CLAUDE_BIN</code></td><td>空（自动检测）</td><td><code>claude</code>可执行文件的路径</td></tr>
 <tr><td><code>RUNNER_DEFAULT_PERMISSION_MODE</code></td><td><code>default</code></td><td>新会话的默认权限模式：<code>default</code>、<code>acceptEdits</code>、<code>plan</code>、<code>auto</code>或<code>bypassPermissions</code></td></tr>
 <tr><td><code>RUNNER_ALLOW_BYPASS</code></td><td><code>false</code></td><td>是否允许在网页界面中将会话切换到<code>bypassPermissions</code>模式</td></tr>
-<tr><td><code>RUNNER_IDLE_TIMEOUT</code></td><td><code>1800</code></td><td><code>claude</code>进程空闲多少秒后自动停止（下次发消息时会自动恢复）</td></tr>
+<tr><td><code>RUNNER_IDLE_TIMEOUT</code></td><td><code>1800</code></td><td><code>claude</code>进程空闲多少秒后自动停止（下次发消息时会自动恢复）。还有后台命令、子代理或监视任务在运行的进程不算空闲</td></tr>
 <tr><td><code>RUNNER_LOGIN_SHELL</code></td><td><code>true</code></td><td>是否通过登录shell启动<code>claude</code>，使它看到与你终端相同的环境</td></tr>
 <tr><td><code>RUNNER_CHROME</code></td><td><code>auto</code></td><td>从网页端运行的会话是否连接Claude in Chrome：<code>auto</code>（跟随<code>~/.claude.json</code>里的<code>/chrome</code>默认设置）、<code>on</code>或<code>off</code>。非交互式<code>claude</code>只有带<code>--chrome</code>参数时才会连接</td></tr>
 <tr><td><code>RUNNER_ALLOW_EXTERNAL_FILES</code></td><td><code>false</code></td><td>是否允许浏览目录位于<code>WORKSPACE_ROOT</code>之外的会话的文件</td></tr>

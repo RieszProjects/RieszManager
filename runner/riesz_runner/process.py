@@ -15,6 +15,7 @@ from typing import Any, Awaitable, Callable
 
 from .claude_settings import chrome_enabled_by_default
 from .config import Config
+from .procs import running_commands
 
 log = logging.getLogger(__name__)
 
@@ -191,6 +192,18 @@ class ClaudeProcess:
     @property
     def busy(self) -> bool:
         return self.turn_active or bool(self.permissions)
+
+    @property
+    def working(self) -> bool:
+        """Whether ending the process now would cut something off.
+
+        Besides a turn in progress, a pending permission prompt and queued
+        messages, this counts tasks claude is still running between turns:
+        background commands, subagents and monitors. Those belong to the claude
+        process and die with it, even though the session looks idle. Running
+        commands are also read from the process tree, in case an event was missed.
+        """
+        return self.busy or bool(self.queue) or bool(self.tasks) or running_commands(self.pid) > 0
 
     def snapshot(self) -> dict[str, Any]:
         info = self.init_info or {}

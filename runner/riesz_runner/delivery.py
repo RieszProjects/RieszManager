@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from .history import PromptHistory
+from .procs import running_commands
 from .process import ClaudeProcess, ControlError
 from .uploads import compose_content
 
@@ -72,7 +73,7 @@ class Delivery:
         proc = self.hub.get_hosted(session_id)
         if proc is None:
             live = self.hub.live.get(session_id)
-            if live is not None and live.status == "busy":
+            if live is not None and self._external_working(live):
                 preview = text.strip() or f"[{len(attachments)} 个附件]"
                 self.held.setdefault(session_id, []).append(
                     HeldPrompt(message_uuid, text, attachments, preview, options)
@@ -96,6 +97,9 @@ class Delivery:
         if live is not None:
             if live.status == "busy":
                 raise ControlError("the session is busy in another process; wait until it is idle")
+            if running_commands(live.pid):
+                raise ControlError("the session still has commands running in the background in another "
+                                   "process; wait until they finish")
             await self._stop_external(live.pid)
             self.hub.live.pop(session_id, None)
         return await self.hub.ensure_process(session_id, **options)
@@ -119,10 +123,16 @@ class Delivery:
         """Flush held prompts of sessions whose external process went idle or exited."""
         for session_id in list(self.held):
             live = self.hub.live.get(session_id)
-            if live is None or live.status != "busy":
+            if live is None or not self._external_working(live):
                 asyncio.create_task(self._flush(session_id))
 
     # ---- internals --------------------------------------------------------------
+
+    @staticmethod
+    def _external_working(live: Any) -> bool:
+        """A terminal session is busy, or idle between turns with commands still running
+        in the background (taking it over would end its claude process and kill them)."""
+        return live.status == "busy" or running_commands(live.pid) > 0
 
     async def _flush(self, session_id: str) -> None:
         lock = self._lock(session_id)

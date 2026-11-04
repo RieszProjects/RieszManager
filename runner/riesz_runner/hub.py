@@ -77,10 +77,16 @@ class Hub:
     def _all_idle(self) -> bool:
         if self.delivery is not None and self.delivery.held:
             return False
-        return all(not p.alive or (not p.busy and not p.queue) for p in self.hosted.values())
+        return all(not p.alive or not p.working for p in self.hosted.values())
 
     async def _reload_when_idle(self) -> None:
+        last_note = 0.0
         while True:
+            if time.time() - last_note > 300:
+                working = [sid[:8] for sid, p in self.hosted.items() if p.alive and p.working]
+                if working:
+                    log.info("reload waiting for sessions with work in progress: %s", ", ".join(working))
+                last_note = time.time()
             if self._all_idle():
                 # Two consecutive idle observations, so a turn that is just starting is not cut off.
                 await asyncio.sleep(1.0)
@@ -212,7 +218,9 @@ class Hub:
             now = time.time()
             for sid, proc in list(self.hosted.items()):
                 idle = now - proc.last_activity
-                if proc.alive and not proc.busy and not proc.queue and idle > self.cfg.idle_timeout:
+                # last_activity moves with every message from claude, including the
+                # task events, so the idle time counts from when the last task ended.
+                if proc.alive and not proc.working and idle > self.cfg.idle_timeout:
                     log.info("stopping idle claude process for %s", sid)
                     await proc.stop()
 
