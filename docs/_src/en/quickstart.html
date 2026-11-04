@@ -1,8 +1,8 @@
 <h1>Quickstart</h1>
-<p class="lede">This guide walks you through getting RieszManager running on a Linux machine, opening the web UI locally (or over SSH port forwarding), and starting your first conversation. To access it from your phone or over the internet, or to set up HTTPS, see the <a href="deploy.html">Deployment Guide</a>.</p>
+<p class="lede">This guide walks you through getting Riesz Manager running on a Linux machine, opening the web UI locally (or over SSH port forwarding), and starting your first conversation. To access it from your phone or over the internet, or to set up HTTPS, see the <a href="deploy.html">Deployment Guide</a>.</p>
 
 <h2 id="before">Prerequisites</h2>
-<p>Before you begin, make sure the machine where you are installing RieszManager meets these requirements:</p>
+<p>Before you begin, make sure the machine where you are installing Riesz Manager meets these requirements:</p>
 <ul>
   <li><b>Operating system</b>: Linux with systemd.</li>
   <li><b>Claude Code</b>: Installed and logged in, so that running <code>claude</code> as the current user starts a conversation normally.</li>
@@ -38,7 +38,7 @@ cd RieszManager</code></pre>
 <h2 id="configure">Edit the Configuration</h2>
 <p>Open the newly generated <code>.env</code> file in an editor and check these two settings in particular:</p>
 <ul>
-  <li><b><code>WORKSPACE_ROOT</code></b>: The root directory of your workspace; must be an absolute path. Every top-level folder inside it is recognized as a project in RieszManager. For example, if you set <code>WORKSPACE_ROOT</code> to <code>/home/alice/work</code>, then <code>~/work/blog</code> and <code>~/work/weather-cli</code> appear as two separate projects.</li>
+  <li><b><code>WORKSPACE_ROOT</code></b>: The root directory of your workspace; must be an absolute path. Every top-level folder inside it is recognized as a project in Riesz Manager. For example, if you set <code>WORKSPACE_ROOT</code> to <code>/home/alice/work</code>, then <code>~/work/blog</code> and <code>~/work/weather-cli</code> appear as two separate projects.</li>
   <li><b><code>RIESZ_PUBLIC_ORIGIN</code></b>: The external URL of the gateway. While trying it out locally, change this to <code>http://127.0.0.1:18573</code> (the default is a placeholder domain, and login will fail if you leave it unchanged). Once you set up a domain and HTTPS later, change it to <code>https://your-domain</code> (see <a href="deploy.html#https">Configuring HTTPS</a>).</li>
 </ul>
 <div class="note warn"><p><code>RIESZ_PUBLIC_ORIGIN</code> must match the exact URL you type into the browser's address bar (including scheme, domain or IP, and port), or login will fail.</p></div>
@@ -65,10 +65,10 @@ cd RieszManager</code></pre>
 
 <h2 id="open">Open the Web UI and Sign In</h2>
 <p>If you are working directly on the Linux machine's desktop, open your browser and go to <code>http://127.0.0.1:18573</code>.</p>
-<p>If RieszManager is installed on a remote machine (such as a cloud server), run the following command in a terminal on your own computer to set up local SSH port forwarding, and keep the connection open:</p>
+<p>If Riesz Manager is installed on a remote machine (such as a cloud server), run the following command in a terminal on your own computer to set up local SSH port forwarding, and keep the connection open:</p>
 <pre><code>ssh -L 18573:127.0.0.1:18573 user@server-address</code></pre>
 <p>Then open a browser on your own computer and go to <code>http://127.0.0.1:18573</code>.</p>
-<figure><img class="shot medium" src="assets/shots/login.webp" alt="The RieszManager login page, showing the username field, password field, “Stay signed in on this device” (在此设备上保持登录) checkbox, and login button" loading="lazy"><figcaption>The login page. Enter your username and the temporary password generated during initialization.</figcaption></figure>
+<figure><img class="shot medium" src="assets/shots/login.webp" alt="The Riesz Manager login page, showing the username field, password field, “Stay signed in on this device” (在此设备上保持登录) checkbox, and login button" loading="lazy"><figcaption>The login page. Enter your username and the temporary password generated during initialization.</figcaption></figure>
 <p>On the login page, enter your “Username” (用户名) (<code>admin</code> by default, or whatever you set in <code>.env</code>) and “Password” (密码) (the temporary password printed by <code>./rieszctl init</code>). You can also check “Stay signed in on this device” (在此设备上保持登录).</p>
 
 <h2 id="first-session">Your First Session</h2>
@@ -79,15 +79,15 @@ cd RieszManager</code></pre>
   <li>After you send the message, Claude starts working, and the status line at the bottom shows its current progress. When Claude needs to run a terminal command or edit a file, a confirmation card appears at the bottom of the conversation. Click “Allow” (允许) to let it proceed; see <a href="guide.html#prompts">Confirmations and Questions</a> for details.</li>
   <li>Open the “Files” (文件) tab in the project panel on the right to see the files in the project directory. Click any file name to preview its contents; see <a href="guide.html#files">Project Files</a> for details.</li>
 </ol>
-<figure><img class="shot" src="assets/shots/chat.webp" alt="The RieszManager session view: projects and sessions on the left, conversation and tool cards in the middle, and project files on the right" loading="lazy"><figcaption>A session: the conversation in the middle, with the “Files” (文件) tab on the right listing the project's files.</figcaption></figure>
-<p>Sessions created in RieszManager are saved in the machine's <code>~/.claude</code> directory just like CLI sessions. You can return to the terminal at any time and run <code>claude --resume &lt;session-id&gt;</code> to continue working in the same session.</p>
+<figure><img class="shot" src="assets/shots/chat.webp" alt="The Riesz Manager session view: projects and sessions on the left, conversation and tool cards in the middle, and project files on the right" loading="lazy"><figcaption>A session: the conversation in the middle, with the “Files” (文件) tab on the right listing the project's files.</figcaption></figure>
+<p>Sessions created in Riesz Manager are saved in the machine's <code>~/.claude</code> directory just like CLI sessions. You can return to the terminal at any time and run <code>claude --resume &lt;session-id&gt;</code> to continue working in the same session.</p>
 
 <h2 id="next">Next Steps</h2>
 <p>Once you've confirmed the basics are working, you can tailor the setup to your needs:</p>
 <ul>
   <li><b>Replace the temporary password</b>: Run <code>./rieszctl hash-password</code> in the terminal to generate a <code>RIESZ_PASSWORD_HASH</code>, put it into <code>.env</code>, remove the plain-text <code>RIESZ_PASSWORD</code>, and run <code>./rieszctl restart</code> to apply. You can also enable two-factor authentication in the web UI; see <a href="deploy.html#account">Account and Two-Factor Authentication</a>.</li>
   <li><b>Set up HTTPS for mobile or remote access</b>: By default, the gateway only listens on the loopback address. To access it from your phone while away from your desk, set up a reverse proxy and an HTTPS certificate; see <a href="deploy.html#https">Configuring HTTPS</a>.</li>
-  <li><b>Add the web app to your phone's home screen</b>: Once HTTPS is set up, you can add RieszManager to your phone's home screen and use it full-screen like a native app; see <a href="guide.html#mobile">Using on Mobile</a>.</li>
+  <li><b>Add the web app to your phone's home screen</b>: Once HTTPS is set up, you can add Riesz Manager to your phone's home screen and use it full-screen like a native app; see <a href="guide.html#mobile">Using on Mobile</a>.</li>
   <li><b>Enable push notifications</b>: Have Claude send notifications to your phone when it finishes a task or stops to wait for your confirmation; see <a href="guide.html#push">Push Notifications</a>.</li>
   <li><b>Explore all features</b>: Read the full <a href="guide.html">User Guide</a> to learn about permission modes, terminal sessions, file previews, push notifications, the Lisi doll, and more.</li>
 </ul>

@@ -223,9 +223,42 @@ ol.steps > li::before { content: counter(step); position: absolute; left: 0; top
 .hero-art { position: relative; border-radius: 16px; overflow: hidden; box-shadow: var(--shadow); background: radial-gradient(ellipse at 50% 40%, #33402f 0%, #1b211c 58%, #121513 100%); aspect-ratio: 4 / 5; display: flex; align-items: flex-end; justify-content: center; }
 .hero-art img { height: 94%; width: auto; filter: drop-shadow(0 24px 40px rgba(0, 0, 0, 0.5)); }
 .hero-art .shine { position: absolute; inset: 0; background: radial-gradient(circle at 70% 12%, rgba(201, 153, 108, 0.25), transparent 45%); pointer-events: none; }
+
+/* A handwritten note beside the portrait, with an arrow pointing at her face
+   (about 17% from the top and a third of the way in). On phones the note moves
+   into the portrait's top-left corner. */
+.hero-figure { position: relative; }
+.hero-note { position: absolute; top: calc(17% - 70px); right: calc(100% + 26px); display: flex; flex-direction: column; align-items: flex-end; color: var(--brass); white-space: nowrap; pointer-events: none; transform: rotate(-4deg); }
+.hero-note .name { font-family: "Long Cang", "Caveat", cursive; font-size: 46px; line-height: 1; }
+.hero-note .sub { font-family: "Long Cang", "Caveat", cursive; font-size: 19px; line-height: 1.1; color: var(--ink-3); margin-top: 4px; }
+:lang(en) .hero-note .name { font-family: "Caveat", cursive; font-weight: 600; font-size: 50px; }
+:lang(en) .hero-note { right: calc(100% + 34px); }
+:lang(en) .hero-note .sub { font-family: "Caveat", cursive; font-weight: 600; font-size: 22px; margin-top: -2px; }
+.hero-arrow { position: absolute; left: -46px; top: calc(17% - 62px); width: 200px; height: 100px; overflow: visible; pointer-events: none; }
+.hero-arrow path { fill: none; stroke: var(--brass); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; animation: hero-draw .9s .35s ease-out forwards; }
+.hero-arrow .head { animation-delay: 1.2s; animation-duration: .25s; }
+.hero-note { animation: hero-fade .6s .1s ease-out both; }
+@keyframes hero-draw { to { stroke-dashoffset: 0; } }
+@keyframes hero-fade { from { opacity: 0; transform: rotate(-4deg) translateY(6px); } }
+@media (prefers-reduced-motion: reduce) {
+  .hero-arrow path { animation: none; stroke-dashoffset: 0; }
+  .hero-note { animation: none; }
+}
+.hero-arrow.narrow { display: none; }
+@media (max-width: 820px) {
+  /* Her head is close to the left edge here: the note sits in the top-right corner instead. */
+  .hero-note, :lang(en) .hero-note { top: calc(19% - 63px); right: 11px; color: #d6ad80; z-index: 1; transform: rotate(-3deg); }
+  .hero-note .sub { color: #a9a294; font-size: 16px; }
+  .hero-note .name { font-size: 38px; }
+  :lang(en) .hero-note .name { font-size: 42px; }
+  :lang(en) .hero-note .sub { font-size: 19px; }
+  .hero-arrow.wide { display: none; }
+  .hero-arrow.narrow { display: block; left: calc(54% - 8px); top: calc(19% - 49px); width: 84px; height: 59px; z-index: 1; }
+  .hero-arrow path { stroke: #d6ad80; stroke-width: 2.2; }
+}
 @media (max-width: 960px) {
   .hero { grid-template-columns: 1fr; gap: 28px; padding-top: 18px; }
-  .hero-art { max-width: 420px; width: 100%; margin: 0 auto; }
+  .hero-figure { max-width: 420px; width: 100%; margin: 0 auto; }
   .hero-logo { width: 76px; height: 76px; }
 }
 

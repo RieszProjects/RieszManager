@@ -2,7 +2,7 @@
 <p class="lede">这一篇是完整的部署说明，包括组件、配置、HTTPS、账号安全、推送通知、升级、备份和排错；只想先跑起来试试的话看<a href="quickstart.html">快速上手</a>；部署好以后的日常使用见<a href="guide.html">使用指南</a>。</p>
 
 <h2 id="overview">组件与要求</h2>
-<p>RieszManager由宿主机上的runner和三个Docker容器组成：</p>
+<p>Riesz Manager由宿主机上的runner和三个Docker容器组成：</p>
 <div class="wrap"><table style="--first-col: 6em">
 <tr><th>组件</th><th>运行位置</th><th>说明</th></tr>
 <tr><td><code>runner</code></td><td>宿主机（systemd用户服务）</td><td>读取<code>~/.claude</code>、浏览工作区、启动和驱动<code>claude</code>进程</td></tr>
@@ -129,7 +129,7 @@ cd RieszManager
 <p>登录接口带有失败限流：同一客户端IP在<code>RIESZ_LOGIN_LOCKOUT_MINUTES</code>分钟内连续失败达到<code>RIESZ_LOGIN_MAX_FAILURES</code>次后会被暂时锁定；如果所有IP的累计失败次数达到<code>RIESZ_LOGIN_MAX_FAILURES_GLOBAL</code>，整个站点的登录都会暂缓。</p>
 
 <h2 id="push">推送通知</h2>
-<p>RieszManager使用浏览器标准的Web Push推送消息：当你在某个浏览器里开启推送时，由该浏览器厂商的推送服务（Chrome为Google FCM、Firefox为Mozilla、Safari/iPhone为Apple）分配一个推送地址，backend容器在需要通知时把端到端加密后的消息直接发往这个地址。整个过程不需要注册任何第三方账号或API key，也不经过RieszManager作者的任何服务器，每个部署都使用自己生成的密钥。</p>
+<p>Riesz Manager使用浏览器标准的Web Push推送消息：当你在某个浏览器里开启推送时，由该浏览器厂商的推送服务（Chrome为Google FCM、Firefox为Mozilla、Safari/iPhone为Apple）分配一个推送地址，backend容器在需要通知时把端到端加密后的消息直接发往这个地址。整个过程不需要注册任何第三方账号或API key，也不经过Riesz Manager作者的任何服务器，每个部署都使用自己生成的密钥。</p>
 <p>部署侧需要满足的条件：</p>
 <ul>
   <li><b>HTTPS</b>：浏览器只在HTTPS站点（或本机<code>127.0.0.1</code>）下开放Web Push；<code>RIESZ_PUBLIC_ORIGIN</code>会被用作VAPID推送的联系地址。</li>
@@ -146,7 +146,7 @@ cd RieszManager
 ./rieszctl up                 <span class="c"># 重新构建并启动容器</span></code></pre>
 
 <h2 id="backup">备份</h2>
-<p>属于RieszManager自身、需要备份的只有两处：</p>
+<p>属于Riesz Manager自身、需要备份的只有两处：</p>
 <ul>
   <li><code>.env</code>：全部配置与密钥；</li>
   <li><code>data/backend/</code>：后端SQLite数据库（含两步验证密钥、登录会话与设备推送订阅）以及自动生成的<code>vapid_private.pem</code>推送签名密钥。如果这把密钥丢失，各设备需要在设置里重新开启推送。</li>
@@ -154,7 +154,7 @@ cd RieszManager
 <p>对话记录本身由Claude Code保存在<code>~/.claude/projects/</code>下；网页端上传的附件保存在<code>~/.local/state/riesz-manager/uploads/</code>（超过30天会自动清理）。</p>
 
 <h2 id="security">安全说明</h2>
-<div class="note warn"><p>任何能登录RieszManager的人，都能以宿主机用户的身份让Claude执行命令、读写该用户有权访问的文件。请务必使用强密码并启用两步验证。</p></div>
+<div class="note warn"><p>任何能登录Riesz Manager的人，都能以宿主机用户的身份让Claude执行命令、读写该用户有权访问的文件。请务必使用强密码并启用两步验证。</p></div>
 <ul>
   <li><b>网关绑定本机</b>：gateway默认只监听<code>127.0.0.1</code>；不要把<code>RIESZ_BIND</code>改成<code>0.0.0.0</code>后直接暴露到公网，务必在前面放置TLS终端。</li>
   <li><b>Cloudflare IP头信任条件</b>：<code>RIESZ_TRUST_CF_HEADER=true</code>只应在流量确实经由Cloudflare转发、且网关只监听本机时开启；否则客户端可以伪造<code>CF-Connecting-IP</code>请求头，绕过按IP的登录限流。</li>
@@ -184,7 +184,7 @@ cd RieszManager
   <li>仓库目录里的<code>data/</code>和<code>.env</code>（或直接删除整个仓库目录）；</li>
   <li><code>~/.local/state/riesz-manager</code>（存放上传的附件、输入历史等runner状态）。</li>
 </ul>
-<p>所有会话记录都保存在<code>~/.claude/projects/</code>下，属于Claude Code本身的数据，卸载RieszManager不会删除它们。</p>
+<p>所有会话记录都保存在<code>~/.claude/projects/</code>下，属于Claude Code本身的数据，卸载Riesz Manager不会删除它们。</p>
 
 <h2 id="env">环境变量参考</h2>
 <p>下面是<code>.env.example</code>中全部变量的说明。所有配置都写在同一份<code>.env</code>里，含有<code>$</code>的值必须用单引号包起来。</p>

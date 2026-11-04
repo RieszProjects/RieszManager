@@ -22,21 +22,22 @@ OUT = SRC.parent
 REPO = "https://github.com/RieszProjects/RieszManager"
 FONTS = ("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700"
          "&family=Inter:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700"
-         "&family=Noto+Serif+SC:wght@500;600&family=JetBrains+Mono:wght@400&display=swap")
+         "&family=Noto+Serif+SC:wght@500;600&family=JetBrains+Mono:wght@400"
+         "&family=Long+Cang&family=Caveat:wght@600&display=swap")
 PAGES = ["index", "quickstart", "guide", "deploy"]
 
 TEXT = {
     "zh": {
-        "lang": "zh-CN", "site": "RieszManager 文档", "sub": "文档", "other": "English",
+        "lang": "zh-CN", "site": "Riesz Manager 文档", "sub": "文档", "other": "English",
         "names": {"index": "前言", "quickstart": "快速上手", "guide": "使用指南", "deploy": "部署教程"},
         "docs": "文档", "this_page": "本页", "prev": "上一篇", "next": "下一篇", "menu": "目录",
-        "foot": f'RieszManager 以 <a href="{REPO}/blob/main/LICENSE">Apache License 2.0</a> 开源。界面截图来自演示数据。',
+        "foot": f'Riesz Manager 以 <a href="{REPO}/blob/main/LICENSE">Apache License 2.0</a> 开源。界面截图来自演示数据。',
     },
     "en": {
-        "lang": "en", "site": "RieszManager Docs", "sub": "Docs", "other": "中文",
+        "lang": "en", "site": "Riesz Manager Docs", "sub": "Docs", "other": "中文",
         "names": {"index": "Introduction", "quickstart": "Quickstart", "guide": "User Guide", "deploy": "Deployment"},
         "docs": "Docs", "this_page": "On this page", "prev": "Previous", "next": "Next", "menu": "Menu",
-        "foot": f'RieszManager is open source under the <a href="{REPO}/blob/main/LICENSE">Apache License 2.0</a>. Screenshots show demo data.',
+        "foot": f'Riesz Manager is open source under the <a href="{REPO}/blob/main/LICENSE">Apache License 2.0</a>. Screenshots show demo data.',
     },
 }
 

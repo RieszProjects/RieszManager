@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>User Guide · RieszManager Docs</title>
-<meta name="description" content="RieszManager Docs">
+<title>User Guide · Riesz Manager Docs</title>
+<meta name="description" content="Riesz Manager Docs">
 <link rel="icon" href="../assets/logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@500;600&family=JetBrains+Mono:wght@400&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@500;600&family=JetBrains+Mono:wght@400&family=Long+Cang&family=Caveat:wght@600&display=swap">
 <link rel="stylesheet" href="../assets/style.css">
 <script src="../assets/menu.js" defer></script>
 </head>
@@ -33,12 +33,12 @@
   </aside>
   <article>
 <h1>User Guide</h1>
-<p class="lede">This page explains every screen and feature in RieszManager. It assumes you already have RieszManager deployed and can sign in; if not, start with the <a href="quickstart.html">Quickstart</a>. Each section stands on its own, so feel free to jump to the parts you need.</p>
+<p class="lede">This page explains every screen and feature in Riesz Manager. It assumes you already have Riesz Manager deployed and can sign in; if not, start with the <a href="quickstart.html">Quickstart</a>. Each section stands on its own, so feel free to jump to the parts you need.</p>
 <div class="note"><p>The interface is currently available in Chinese only. This guide gives each label in English with the original Chinese in parentheses, so you can find it on screen.</p></div>
 
 <h2 id="layout">Interface overview</h2>
 <p>When you open a session after signing in, the window is split into three columns—left, middle, and right—with the composer at the bottom of the middle column.</p>
-<figure><img class="shot" src="../assets/shots/layout-en.webp" alt="Main RieszManager interface with the sidebar, conversation area, composer, and project panel highlighted in orange" loading="lazy"><figcaption>The main interface. The table below explains each area.</figcaption></figure>
+<figure><img class="shot" src="../assets/shots/layout-en.webp" alt="Main Riesz Manager interface with the sidebar, conversation area, composer, and project panel highlighted in orange" loading="lazy"><figcaption>The main interface. The table below explains each area.</figcaption></figure>
 <div class="wrap"><table style="--first-col: 6em">
 <tr><th>Area</th><th>What it does</th></tr>
 <tr><td>Sidebar</td><td>At the top are the Riesz logo (click it to return to the home screen) and the “New session” (新会话) button; below are the “Search sessions or projects” (搜索会话或项目) search box and two tabs, “Projects” (项目) and “Recent” (最近). The bottom-left corner shows the connection status (“Connected” (已连接)) and the settings button (gear icon). Click the button next to the logo to collapse the sidebar into a narrow strip that keeps the home, expand, new session, and settings buttons.</td></tr>
@@ -128,7 +128,7 @@
 <p>Sessions running in the web app can message other Claude Code sessions, just like terminal sessions (Claude Code's cross-session messaging): while a session's process is running, other sessions can find it, message it and get replies. A session that is not running cannot receive messages; start it with “Pre-start process” (预先启动进程) or turn on “Keep running” (保持运行) to keep it reachable.</p>
 
 <h2 id="terminal">Terminal sessions</h2>
-<p>Sessions in RieszManager are the same Claude Code sessions stored in <code>~/.claude</code> on your machine. Any <code>claude</code> session you start directly in a terminal on the machine also shows up in the web list (with a green dot while running), and you can click in to watch the conversation live. Conversely, any session you continued in the web app can be picked back up in a terminal with <code>claude --resume &lt;session-id&gt;</code>.</p>
+<p>Sessions in Riesz Manager are the same Claude Code sessions stored in <code>~/.claude</code> on your machine. Any <code>claude</code> session you start directly in a terminal on the machine also shows up in the web list (with a green dot while running), and you can click in to watch the conversation live. Conversely, any session you continued in the web app can be picked back up in a terminal with <code>claude --resume &lt;session-id&gt;</code>.</p>
 <p>While viewing a terminal session in the web app, you can send it a message directly:</p>
 <ul>
   <li><b>If the terminal session is idle</b>: The composer notes “Sending will move this terminal session here to continue” (发送后，这个终端会话会转到这里继续). Once you send the message, the <code>claude</code> process in the terminal exits and the web app takes over the session. You can also hand it over without sending a message by clicking “Take over from terminal” (从终端转到这里) in the session menu.</li>
@@ -137,7 +137,7 @@
 <p>If you do not want to interrupt the terminal session, use “Fork as new session” (分叉为新会话) from the session menu to branch off a copy in the web app.</p>
 
 <h2 id="spawn">Starting sessions from other sessions</h2>
-<p>A session can open new sessions for RieszManager to host, for example to hand a separate task to another session. A session started this way is exactly like one you open with “New session” in the web app: Claude in Chrome is connected automatically, it can message other sessions, its approvals show up in the web app (and as push notifications if you enabled them), and it can be kept running. Running <code>claude</code> directly from a session's terminal only gives you a plain terminal session without any of this.</p>
+<p>A session can open new sessions for Riesz Manager to host, for example to hand a separate task to another session. A session started this way is exactly like one you open with “New session” in the web app: Claude in Chrome is connected automatically, it can message other sessions, its approvals show up in the web app (and as push notifications if you enabled them), and it can be kept running. Running <code>claude</code> directly from a session's terminal only gives you a plain terminal session without any of this.</p>
 <p>The tool is <code>rieszctl session</code>. A session just runs it from its Bash tool; no token is needed, and none is printed:</p>
 <pre><code># start a session in the current directory with a first message (-C picks another directory)
 /path/to/RieszManager/rieszctl session new "Fix the typos in docs/ and tell me which files you changed"
@@ -158,7 +158,7 @@ rieszctl session stop 1a2b3c4d   # stop its process when done</code></pre>
   <li><b>Code files</b>: Syntax highlighting and line numbers, with a “Word wrap” (自动换行) toggle.</li>
   <li><b>Markdown</b>: Rendered as a formatted document; click “View source” (查看源码) to see the raw text.</li>
   <li><b>Images and PDFs</b>: Previewed inline inside the modal.</li>
-  <li><b>HTML files</b>: Rendered as a live web page with scripts and external resources working, and relative links (CSS, images, other pages) resolving against files in the same project. You can click “View source” (查看源码) or “Open in new tab” (在新标签页打开). Previewed pages run inside an isolated sandbox and cannot access RieszManager's login state or data.</li>
+  <li><b>HTML files</b>: Rendered as a live web page with scripts and external resources working, and relative links (CSS, images, other pages) resolving against files in the same project. You can click “View source” (查看源码) or “Open in new tab” (在新标签页打开). Previewed pages run inside an isolated sandbox and cannot access Riesz Manager's login state or data.</li>
 </ul>
 <p>The top-right corner of the preview modal also has “Copy content” (复制内容) and “Download” (下载) buttons.</p>
 <figure><img class="shot" src="../assets/shots/viewer.webp" alt="File preview modal rendering a blog home page HTML, with the file name and buttons for View source, Open in new tab, Copy content, Download, and Close along the top" loading="lazy"><figcaption>HTML files render directly as a live preview, with buttons at the top to view the source or open the page in a new tab.</figcaption></figure>
@@ -194,7 +194,7 @@ rieszctl session stop 1a2b3c4d   # stop its process when done</code></pre>
 </ul>
 
 <h2 id="mobile">Using on mobile</h2>
-<p>RieszManager has a layout tailored for phone screens. On mobile, the home screen shows the 3 most recent sessions with an “All” (全部) button to open the full list; inside a session, the permission mode and model buttons move above the composer and the send button stays pinned on the far right.</p>
+<p>Riesz Manager has a layout tailored for phone screens. On mobile, the home screen shows the 3 most recent sessions with an “All” (全部) button to open the full list; inside a session, the permission mode and model buttons move above the composer and the send button stays pinned on the far right.</p>
 <figure><img class="shot" src="../assets/shots/mobile.webp" alt="Four mobile screenshots from left to right: home screen, session view, left session list drawer, and right project panel drawer" loading="lazy"><figcaption>Mobile interface. From left to right: home screen, session, session list opened by swiping right, and project panel opened by swiping left.</figcaption></figure>
 <ul>
   <li><b>Swipe gestures</b>: Swipe right anywhere on the screen to open the left session list, or swipe left to open the right project panel; when a drawer is open, swipe back the other way to close it. Swipes that start inside horizontally scrollable areas such as code blocks will not trigger a drawer.</li>
@@ -244,6 +244,6 @@ rieszctl session stop 1a2b3c4d   # stop its process when done</code></pre>
     <nav class="pager"><a class="prev" href="quickstart.html"><span class="dir">Previous</span><span class="name">Quickstart</span></a><a class="next" href="deploy.html"><span class="dir">Next</span><span class="name">Deployment</span></a></nav>
   </article>
 </main>
-<footer class="foot">RieszManager is open source under the <a href="https://github.com/RieszProjects/RieszManager/blob/main/LICENSE">Apache License 2.0</a>. Screenshots show demo data. <a href="https://github.com/RieszProjects/RieszManager">GitHub</a></footer>
+<footer class="foot">Riesz Manager is open source under the <a href="https://github.com/RieszProjects/RieszManager/blob/main/LICENSE">Apache License 2.0</a>. Screenshots show demo data. <a href="https://github.com/RieszProjects/RieszManager">GitHub</a></footer>
 </body>
 </html>

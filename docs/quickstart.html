@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>快速上手 · RieszManager 文档</title>
-<meta name="description" content="RieszManager 文档">
+<title>快速上手 · Riesz Manager 文档</title>
+<meta name="description" content="Riesz Manager 文档">
 <link rel="icon" href="assets/logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@500;600&family=JetBrains+Mono:wght@400&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@500;600&family=JetBrains+Mono:wght@400&family=Long+Cang&family=Caveat:wght@600&display=swap">
 <link rel="stylesheet" href="assets/style.css">
 <script src="assets/menu.js" defer></script>
 </head>
@@ -33,10 +33,10 @@
   </aside>
   <article>
 <h1>快速上手</h1>
-<p class="lede">这一篇带你在一台Linux机器上把RieszManager跑起来，先在本机（或通过SSH转发）打开网页试用，并完成第一次对话；想从手机或外网访问、配置HTTPS等，看<a href="deploy.html">部署教程</a>。</p>
+<p class="lede">这一篇带你在一台Linux机器上把Riesz Manager跑起来，先在本机（或通过SSH转发）打开网页试用，并完成第一次对话；想从手机或外网访问、配置HTTPS等，看<a href="deploy.html">部署教程</a>。</p>
 
 <h2 id="before">准备工作</h2>
-<p>开始之前，请确认你要安装RieszManager的机器满足以下条件：</p>
+<p>开始之前，请确认你要安装Riesz Manager的机器满足以下条件：</p>
 <ul>
   <li><b>操作系统</b>：Linux，带有systemd。</li>
   <li><b>Claude Code</b>：已经安装并完成登录，在当前用户下运行<code>claude</code>能正常对话。</li>
@@ -72,7 +72,7 @@ cd RieszManager</code></pre>
 <h2 id="configure">填写配置</h2>
 <p>用编辑器打开刚刚生成的<code>.env</code>文件，重点检查下面两项：</p>
 <ul>
-  <li><b><code>WORKSPACE_ROOT</code></b>：工作区根目录，必须填写绝对路径。它下面的每个一级文件夹在RieszManager里都会被识别为一个项目。例如把<code>WORKSPACE_ROOT</code>设为<code>/home/alice/work</code>，那么<code>~/work/blog</code>和<code>~/work/weather-cli</code>就分别是两个项目。</li>
+  <li><b><code>WORKSPACE_ROOT</code></b>：工作区根目录，必须填写绝对路径。它下面的每个一级文件夹在Riesz Manager里都会被识别为一个项目。例如把<code>WORKSPACE_ROOT</code>设为<code>/home/alice/work</code>，那么<code>~/work/blog</code>和<code>~/work/weather-cli</code>就分别是两个项目。</li>
   <li><b><code>RIESZ_PUBLIC_ORIGIN</code></b>：网关对外的访问地址。先在本机试用时，把它改成<code>http://127.0.0.1:18573</code>（默认值是一个示例域名，不改的话无法登录）；以后配置了域名和HTTPS，再改成<code>https://你的域名</code>（见<a href="deploy.html#https">配置HTTPS</a>）。</li>
 </ul>
 <div class="note warn"><p><code>RIESZ_PUBLIC_ORIGIN</code>的值必须和你实际在浏览器地址栏里输入的地址完全一致（包括协议、域名或IP、端口），否则登录会失败。</p></div>
@@ -99,10 +99,10 @@ cd RieszManager</code></pre>
 
 <h2 id="open">打开网页并登录</h2>
 <p>如果你正在这台Linux机器的桌面环境前操作，直接打开浏览器访问<code>http://127.0.0.1:18573</code>。</p>
-<p>如果RieszManager装在远处的机器（例如云服务器）上，先在你自己的电脑终端里执行下面的命令建立SSH本地端口转发，并保持这个连接不断开：</p>
+<p>如果Riesz Manager装在远处的机器（例如云服务器）上，先在你自己的电脑终端里执行下面的命令建立SSH本地端口转发，并保持这个连接不断开：</p>
 <pre><code>ssh -L 18573:127.0.0.1:18573 用户名@服务器地址</code></pre>
 <p>然后在你自己的电脑上打开浏览器，访问<code>http://127.0.0.1:18573</code>。</p>
-<figure><img class="shot medium" src="assets/shots/login.webp" alt="RieszManager的登录页面，包含用户名输入框、密码输入框、「在此设备上保持登录」复选框和登录按钮" loading="lazy"><figcaption>登录页面。输入用户名和初始化时生成的临时密码即可进入。</figcaption></figure>
+<figure><img class="shot medium" src="assets/shots/login.webp" alt="Riesz Manager的登录页面，包含用户名输入框、密码输入框、「在此设备上保持登录」复选框和登录按钮" loading="lazy"><figcaption>登录页面。输入用户名和初始化时生成的临时密码即可进入。</figcaption></figure>
 <p>在登录页填入「用户名」（默认是<code>admin</code>，或你在<code>.env</code>里改过的名字）和「密码」（<code>./rieszctl init</code>打印在终端上的临时密码）。你也可以勾选「在此设备上保持登录」。</p>
 
 <h2 id="first-session">第一个会话</h2>
@@ -113,21 +113,21 @@ cd RieszManager</code></pre>
   <li>消息发出后，Claude开始工作，底部状态行会显示当前的执行进度。当Claude需要运行终端命令或修改文件时，对话底部会出现确认卡片，点「允许」即可让它继续，详见<a href="guide.html#prompts">确认和提问</a>。</li>
   <li>点开右边项目面板的「文件」标签，可以看到项目目录下的文件列表，点文件名可以直接预览内容，详见<a href="guide.html#files">项目文件</a>。</li>
 </ol>
-<figure><img class="shot" src="assets/shots/chat.webp" alt="RieszManager的会话界面：左侧是项目与会话列表，中间是对话内容和工具卡片，右侧是项目文件列表" loading="lazy"><figcaption>一个会话：中间是对话，右侧的「文件」标签列出项目里的文件。</figcaption></figure>
-<p>在RieszManager里创建的会话，同样会保存在机器的<code>~/.claude</code>目录中。你随时可以回到终端，运行<code>claude --resume &lt;会话ID&gt;</code>接着同一个会话继续工作。</p>
+<figure><img class="shot" src="assets/shots/chat.webp" alt="Riesz Manager的会话界面：左侧是项目与会话列表，中间是对话内容和工具卡片，右侧是项目文件列表" loading="lazy"><figcaption>一个会话：中间是对话，右侧的「文件」标签列出项目里的文件。</figcaption></figure>
+<p>在Riesz Manager里创建的会话，同样会保存在机器的<code>~/.claude</code>目录中。你随时可以回到终端，运行<code>claude --resume &lt;会话ID&gt;</code>接着同一个会话继续工作。</p>
 
 <h2 id="next">接下来做什么</h2>
 <p>确认基本功能正常后，你可以根据自己的使用场景继续配置：</p>
 <ul>
   <li><b>换掉临时密码</b>：在终端运行<code>./rieszctl hash-password</code>生成<code>RIESZ_PASSWORD_HASH</code>，把它写进<code>.env</code>并删掉明文的<code>RIESZ_PASSWORD</code>，然后运行<code>./rieszctl restart</code>生效。也可以在网页里开启两步验证，详见<a href="deploy.html#account">账号与两步验证</a>。</li>
   <li><b>配置HTTPS后从手机或外网访问</b>：网关默认只监听本机回环地址。想在出门时用手机访问，请配置反向代理与HTTPS证书，详见<a href="deploy.html#https">配置HTTPS</a>。</li>
-  <li><b>把网页安装到手机主屏幕</b>：配置好HTTPS后，可以把RieszManager添加到手机桌面，像原生应用一样全屏使用，见<a href="guide.html#mobile">在手机上用</a>。</li>
+  <li><b>把网页安装到手机主屏幕</b>：配置好HTTPS后，可以把Riesz Manager添加到手机桌面，像原生应用一样全屏使用，见<a href="guide.html#mobile">在手机上用</a>。</li>
   <li><b>开启推送通知</b>：让Claude在完成任务或停下来等你确认时往手机发通知，见<a href="guide.html#push">推送通知</a>。</li>
   <li><b>了解全部功能</b>：阅读完整的<a href="guide.html">使用指南</a>，了解权限模式、终端里的会话、文件预览、推送通知、莉思玩偶等全部功能。</li>
 </ul>
     <nav class="pager"><a class="prev" href="index.html"><span class="dir">上一篇</span><span class="name">前言</span></a><a class="next" href="guide.html"><span class="dir">下一篇</span><span class="name">使用指南</span></a></nav>
   </article>
 </main>
-<footer class="foot">RieszManager 以 <a href="https://github.com/RieszProjects/RieszManager/blob/main/LICENSE">Apache License 2.0</a> 开源。界面截图来自演示数据。 <a href="https://github.com/RieszProjects/RieszManager">GitHub</a></footer>
+<footer class="foot">Riesz Manager 以 <a href="https://github.com/RieszProjects/RieszManager/blob/main/LICENSE">Apache License 2.0</a> 开源。界面截图来自演示数据。 <a href="https://github.com/RieszProjects/RieszManager">GitHub</a></footer>
 </body>
 </html>

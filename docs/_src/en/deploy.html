@@ -2,7 +2,7 @@
 <p class="lede">This page is the full deployment reference: architecture, configuration, HTTPS, account security, push notifications, upgrades, backups, and troubleshooting. If you just want to get it running first, see <a href="quickstart.html">Quickstart</a>; for day-to-day usage once deployed, see the <a href="guide.html">User Guide</a>.</p>
 
 <h2 id="overview">Components and requirements</h2>
-<p>RieszManager consists of a runner on the host and three Docker containers:</p>
+<p>Riesz Manager consists of a runner on the host and three Docker containers:</p>
 <div class="wrap"><table style="--first-col: 6em">
 <tr><th>Component</th><th>Where it runs</th><th>Description</th></tr>
 <tr><td><code>runner</code></td><td>Host (systemd user service)</td><td>Reads <code>~/.claude</code>, browses the workspace, and spawns and drives <code>claude</code> processes</td></tr>
@@ -129,7 +129,7 @@ cd RieszManager
 <p>The sign-in endpoint rate-limits failed attempts: a single client IP is temporarily locked out after <code>RIESZ_LOGIN_MAX_FAILURES</code> consecutive failures within <code>RIESZ_LOGIN_LOCKOUT_MINUTES</code> minutes; if total failures across all IPs reach <code>RIESZ_LOGIN_MAX_FAILURES_GLOBAL</code>, sign-in is throttled site-wide.</p>
 
 <h2 id="push">Push notifications</h2>
-<p>RieszManager uses standard browser Web Push: when you enable notifications in a browser, that browser vendor's push service (Google FCM for Chrome, Mozilla for Firefox, Apple for Safari/iPhone) assigns a push endpoint, and the backend container sends end-to-end encrypted payloads directly to that endpoint whenever a notification is needed. No third-party account or API key is required, nothing goes through any server run by the RieszManager authors, and each deployment uses its own generated keys.</p>
+<p>Riesz Manager uses standard browser Web Push: when you enable notifications in a browser, that browser vendor's push service (Google FCM for Chrome, Mozilla for Firefox, Apple for Safari/iPhone) assigns a push endpoint, and the backend container sends end-to-end encrypted payloads directly to that endpoint whenever a notification is needed. No third-party account or API key is required, nothing goes through any server run by the Riesz Manager authors, and each deployment uses its own generated keys.</p>
 <p>What the deployment needs:</p>
 <ul>
   <li><b>HTTPS</b>: browsers only expose Web Push on HTTPS origins (or <code>127.0.0.1</code>); <code>RIESZ_PUBLIC_ORIGIN</code> is used as the VAPID contact URI.</li>
@@ -146,7 +146,7 @@ cd RieszManager
 ./rieszctl up                 <span class="c"># Rebuild and start containers</span></code></pre>
 
 <h2 id="backup">Backup</h2>
-<p>Only two things belong to RieszManager itself and need backing up:</p>
+<p>Only two things belong to Riesz Manager itself and need backing up:</p>
 <ul>
   <li><code>.env</code>: all configuration and secrets;</li>
   <li><code>data/backend/</code>: the backend SQLite database (two-factor secrets, login sessions, and device push subscriptions) and the auto-generated <code>vapid_private.pem</code> push signing key. If that key is lost, push notifications will need to be re-enabled in Settings on each device.</li>
@@ -154,7 +154,7 @@ cd RieszManager
 <p>Conversation logs themselves are stored by Claude Code under <code>~/.claude/projects/</code>; attachments uploaded from the web UI are stored under <code>~/.local/state/riesz-manager/uploads/</code> (files older than 30 days are cleaned up automatically).</p>
 
 <h2 id="security">Security notes</h2>
-<div class="note warn"><p>Anyone who can sign in to RieszManager can ask Claude to run commands and read or write any file accessible to the host user. Always use a strong password and enable two-factor authentication.</p></div>
+<div class="note warn"><p>Anyone who can sign in to Riesz Manager can ask Claude to run commands and read or write any file accessible to the host user. Always use a strong password and enable two-factor authentication.</p></div>
 <ul>
   <li><b>Bind the gateway to localhost</b>: the gateway listens only on <code>127.0.0.1</code> by default. Do not change <code>RIESZ_BIND</code> to <code>0.0.0.0</code> and expose it directly to the internet; always put a TLS terminator in front of it.</li>
   <li><b>When to trust the Cloudflare IP header</b>: only set <code>RIESZ_TRUST_CF_HEADER=true</code> when traffic genuinely arrives through Cloudflare and the gateway is bound to localhost; otherwise a client could spoof the <code>CF-Connecting-IP</code> header and bypass per-IP login rate limiting.</li>
@@ -184,7 +184,7 @@ cd RieszManager
   <li><code>data/</code> and <code>.env</code> in the repository directory (or remove the repository directory altogether);</li>
   <li><code>~/.local/state/riesz-manager</code> (stores uploaded attachments, input history, and other runner state).</li>
 </ul>
-<p>All conversation logs live under <code>~/.claude/projects/</code> and belong to Claude Code itself; uninstalling RieszManager does not touch them.</p>
+<p>All conversation logs live under <code>~/.claude/projects/</code> and belong to Claude Code itself; uninstalling Riesz Manager does not touch them.</p>
 
 <h2 id="env">Environment variable reference</h2>
 <p>Below is every variable from <code>.env.example</code>. All configuration lives in a single <code>.env</code> file; values containing <code>$</code> must be wrapped in single quotes.</p>
