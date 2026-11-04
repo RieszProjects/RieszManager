@@ -1,6 +1,6 @@
 # 部署指南
 
-本文说明如何把 RieszManager 部署到一台运行 Claude Code 的 Linux 主机上，并通过 HTTPS 对外提供服务。
+本文说明如何把 RieszManager 部署到一台运行 Claude Code 的 Linux 主机上，并通过 HTTPS 对外提供服务。部署完成后的日常使用见 [使用教程](usage.md)。
 
 ## 1. 组件与要求
 
