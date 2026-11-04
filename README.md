@@ -124,6 +124,6 @@ cd frontend && npm install && npm run dev
 
 ## 许可
 
-尚未确定许可协议。
+本项目以 [Apache License 2.0](LICENSE) 发布。
 
 莉思玩偶的捏捏音效剪自 [Freesound](https://freesound.org/) 上以 CC0（公有领域）发布的一段录音，来源见 [`frontend/public/doll/sounds/CREDITS.md`](frontend/public/doll/sounds/CREDITS.md)。

@@ -30,13 +30,13 @@ TEXT = {
         "lang": "zh-CN", "site": "RieszManager 文档", "sub": "文档", "other": "English",
         "names": {"index": "前言", "quickstart": "快速上手", "guide": "使用指南", "deploy": "部署教程"},
         "docs": "文档", "this_page": "本页", "prev": "上一篇", "next": "下一篇", "menu": "目录",
-        "foot": "RieszManager 是一个开源项目。界面截图来自演示数据。",
+        "foot": f'RieszManager 以 <a href="{REPO}/blob/main/LICENSE">Apache License 2.0</a> 开源。界面截图来自演示数据。',
     },
     "en": {
         "lang": "en", "site": "RieszManager Docs", "sub": "Docs", "other": "中文",
         "names": {"index": "Introduction", "quickstart": "Quickstart", "guide": "User Guide", "deploy": "Deployment"},
         "docs": "Docs", "this_page": "On this page", "prev": "Previous", "next": "Next", "menu": "Menu",
-        "foot": "RieszManager is an open-source project. Screenshots show demo data.",
+        "foot": f'RieszManager is open source under the <a href="{REPO}/blob/main/LICENSE">Apache License 2.0</a>. Screenshots show demo data.',
     },
 }
 
