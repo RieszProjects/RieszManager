@@ -2,6 +2,8 @@
 
 在浏览器里查看和操控一台机器上的所有 Claude Code 会话，界面风格类似 Claude 客户端，支持桌面和手机（可安装为 PWA）。
 
+文档：[中文](https://rieszprojects.github.io/RieszManager/) · [English](https://rieszprojects.github.io/RieszManager/en/)
+
 <p align="center"><img src="frontend/public/icons/icon-512.png" width="120" alt="Riesz"></p>
 
 ![主界面](docs/assets/shots/chat.webp)
@@ -12,8 +14,9 @@
 
 - **会话总览**：读取本机 `~/.claude` 中的全部会话，按项目（工作区下的一级文件夹）归类；实时显示哪些会话正在运行、在等待确认。
 - **会话管理**：支持重命名、归档（默认隐藏，可在设置里显示）、拖动排序（保存在服务器，各设备一致）、分叉为新会话、复制终端恢复命令。
-- **完整的对话视图**：支持 Markdown、代码高亮、数学公式、工具调用卡片（命令输出、文件 diff、待办清单、子代理、网页抓取、MCP 工具等）、思考块、上下文压缩记录、图片。
+- **完整的对话视图**：支持 Markdown、代码高亮、数学公式、工具调用卡片（命令输出、文件 diff、待办清单、子代理、网页抓取、MCP 工具等）、思考块、上下文压缩记录；图片点开全屏查看，可缩放、滑动切换。
 - **在网页里继续对话**：随时发送消息（运行中发送会排队，在合适时机送达）；`Esc` 中断当前任务并立即发送排队消息；`/` 打开斜杠命令列表；`@` 引用项目文件；`↑`/`↓` 调出历史输入；`Shift+Tab` 切换权限模式；切换模型和推理强度（默认沿用 Claude Code 自己的设置）；发送按钮旁的小圆圈显示上下文已用多少、离 Claude Code 自动压缩还有多远（悬停或点按查看数字）。
+- **会话之间协作**：网页里运行的会话能和其他 Claude Code 会话互发消息；「保持运行」让会话空闲时也不关闭、runner 重启后自动回来；会话还能在 Bash 里用 `rieszctl session new` 开一个由 RieszManager 托管的新会话（和在网页上开的一样），再用 `send`、`wait` 分派任务、取回结果。
 - **交互式确认**：工具权限请求、`AskUserQuestion` 提问、计划审批都在网页中直接处理。
 - **附件与语音**：粘贴或拖放图片和文件；语音输入（配置 OpenAI 兼容的转写接口，或使用浏览器自带的语音识别）。
 - **终端里的会话**：实时旁观，也可以直接发消息——会话空闲时会自动转到这里继续（终端里的那个 Claude 进程会退出）；正在工作时消息先排队，等它空闲后自动送达。也可以分叉一份副本继续。
@@ -66,7 +69,7 @@ Claude Code 必须运行在宿主机的真实环境中（你的工具链、凭�
 需要：Linux、已登录的 Claude Code（`claude` 可用）、Python ≥ 3.10、Docker 与 Docker Compose v2。
 
 ```bash
-git clone <repo-url> RieszManager && cd RieszManager
+git clone https://github.com/RieszProjects/RieszManager.git && cd RieszManager
 ./rieszctl init              # 生成 .env（随机密钥和临时密码）
 $EDITOR .env                 # 至少设置 WORKSPACE_ROOT 和 RIESZ_PUBLIC_ORIGIN
 ./rieszctl runner install    # 安装并启动宿主机 runner
@@ -84,6 +87,7 @@ $EDITOR .env                 # 至少设置 WORKSPACE_ROOT 和 RIESZ_PUBLIC_ORIG
 ./rieszctl revoke-sessions   # 让所有设备重新登录
 ./rieszctl runner logs       # 查看 runner 日志
 ./rieszctl logs backend      # 查看容器日志
+./rieszctl session --help    # 从其他会话开新的托管会话、发消息、等结果
 ```
 
 ## 安全

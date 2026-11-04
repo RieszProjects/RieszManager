@@ -46,6 +46,7 @@
 <tr><td>Composer</td><td>Where you send messages, run slash commands, mention files, and switch permission modes and models. See <a href="#composer">Composer</a>.</td></tr>
 <tr><td>Project panel</td><td>Has two tabs: “Files” (文件) and “Sessions” (会话). “Files” (文件) is a read-only file tree of the current project with git status badges (see <a href="#files">Project files</a>); “Sessions” (会话) lists every session in this project. On narrower screens the right panel collapses automatically; click the button on the right side of the header to open it.</td></tr>
 </table></div>
+<p>On the home page (click the Riesz logo at the top left to get back to it), Lisi greets you for the time of day and says what is going on: how many sessions are running, or that a session is waiting for your approval. When one is waiting, a “Go see …” (去看看「…」) button follows, which takes you straight to it.</p>
 <p>The two tabs in the sidebar let you browse sessions in different ways. A green dot next to a session means it is currently running:</p>
 <ul>
   <li><b>“Projects” (项目)</b>: Each top-level folder inside your workspace (the directory configured at deployment, such as <code>~/workspace</code>) is a project. Click a project to expand its sessions; click the project name to open the project page, or click a session to open that session.</li>
@@ -56,6 +57,7 @@
 <h2 id="conversation">Conversation</h2>
 <p>The conversation area renders the full Claude Code transcript, including Markdown, syntax-highlighted code, math formulas, collapsible thinking blocks, context compaction notices, and images. Scrolling up automatically loads older messages; when you scroll away from the bottom, a button appears in the bottom-right corner to jump back down.</p>
 <p>Claude's tool calls are shown as cards: commands and their output, file diffs, newly written files, to-do lists, subagents, web fetches, MCP tools, and more. Click a card's header to expand or collapse its details.</p>
+<p>Click an image in the conversation (an attachment you sent, a screenshot Claude read, and so on) to open it full screen. On a computer, zoom with the mouse wheel, drag to pan, double-click to switch between zoomed in and actual size, and use the arrow keys or the side buttons to go through the images of the same message. On a phone, pinch to zoom, double-tap to zoom in, swipe sideways for the other images, and swipe down or go back to close. The button at the top right downloads the original.</p>
 <p>While Claude is working, a status line with the little mascot appears at the bottom of the conversation (such as “Pondering” (斟酌中) or “Thinking” (思索中)) along with elapsed time. When Claude is waiting on a command or subtask, it shows messages like “Waiting for command to finish” (等待命令执行完成) or “Waiting for subagent to finish” (等待子代理完成); background tasks appear here too. If a session's last run did not finish cleanly, the bottom shows “Terminated · Last run did not complete” (已终止 · 上次运行没有完成).</p>
 
 <h2 id="composer">Composer</h2>
@@ -232,7 +234,7 @@ rieszctl session stop 1a2b3c4d   # stop its process when done</code></pre>
 <p>When you send a message to an idle terminal session from the web app, the session automatically moves over to the web app to continue and the terminal process exits. To go back to working in the terminal, click “Copy terminal resume command” (复制终端恢复命令) in the session menu to get the <code>claude --resume</code> command.</p>
 
 <h3 id="faq-idle-process">Why did the background process for my web session disappear after sitting idle?</h3>
-<p>After a web-hosted session has been idle for a while, its background <code>claude</code> process stops automatically to save server resources. It resumes on its own the next time you send a message from the composer, with your conversation history and context intact.</p>
+<p>After a web-hosted session has been idle for a while, its background <code>claude</code> process stops automatically to save server resources (how long is set by the deployer's <code>RUNNER_IDLE_TIMEOUT</code>). A session that still has commands running in the background does not count as idle and is not stopped. It resumes on its own the next time you send a message from the composer, with your conversation history and context intact. To keep a session online all the time, for example so other sessions can always message it, turn on “Keep running” (保持运行) in its session menu.</p>
 
 <h3 id="faq-voice">Why is the voice input button disabled?</h3>
 <p>Browsers only expose the microphone API on HTTPS pages (see <a href="deploy.html#https">Configuring HTTPS</a>). In addition, if the administrator has not configured a server-side transcription endpoint, voice input falls back to the browser's built-in speech recognition, which some browsers do not support.</p>
