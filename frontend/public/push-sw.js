@@ -22,7 +22,7 @@ self.addEventListener("push", (event) => {
       );
       if (watching && data.kind !== "test") return;
       const urgent = data.kind === "permission" || data.kind === "question";
-      await self.registration.showNotification(data.title || "Riesz", {
+      await self.registration.showNotification(data.title || "Riesz Manager", {
         body: data.body || "",
         tag: data.tag || undefined,
         renotify: Boolean(data.tag),

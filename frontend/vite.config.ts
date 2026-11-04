@@ -16,8 +16,8 @@ export default defineConfig({
       includeAssets: ["favicon.png", "icons/apple-touch-icon.png"],
       manifest: {
         id: "/",
-        name: "Riesz",
-        short_name: "Riesz",
+        name: "Riesz Manager",
+        short_name: "Riesz Manager",
         description: "Claude Code 会话管理",
         lang: "zh-CN",
         start_url: "/",

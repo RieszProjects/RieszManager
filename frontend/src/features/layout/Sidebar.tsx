@@ -89,7 +89,7 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
       <div className="rz-brand">
         <button type="button" className="rz-brand-main" onClick={() => navigate({ view: "home" })}>
           <Mascot pose="icon" size={45} />
-          <span className="rz-brand-name">Riesz</span>
+          <span className="rz-brand-name">Riesz Manager</span>
         </button>
         {onCollapse && (
           <Tooltip title="收起侧栏">

@@ -36,7 +36,7 @@
 .rz-shell.mobile .rz-sidebar { border-right: none; }
 .rz-brand { display: flex; align-items: center; gap: 6px; padding: 10px 10px 8px 10px; }
 .rz-brand-main { display: flex; align-items: center; gap: 11px; flex: 1; min-width: 0; background: none; border: none; padding: 0; cursor: pointer; color: inherit; }
-.rz-brand-name { font-family: var(--font-display); font-size: 30px; font-weight: 600; font-style: italic; letter-spacing: 0.6px; line-height: 1; color: var(--text); }
+.rz-brand-name { font-family: var(--font-display); font-size: 26px; font-weight: 600; font-style: italic; letter-spacing: 0.4px; line-height: 1.1; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .rz-new {
   margin: 6px 12px 10px; height: 38px; display: flex; align-items: center; justify-content: center; gap: 8px;
   border-radius: 10px; border: 1px solid rgba(147, 168, 140, 0.35); background: rgba(147, 168, 140, 0.1);
@@ -510,11 +510,11 @@
   box-shadow: inset 0 0 0 4px rgba(18, 21, 19, 0.6), inset 0 0 0 5px rgba(232, 226, 212, 0.05);
 }
 .rz-login-mascot { height: min(88vh, 860px); max-width: 92%; object-fit: contain; object-position: bottom; filter: drop-shadow(0 24px 50px rgba(0, 0, 0, 0.5)); }
-.rz-login-art-caption { position: absolute; top: 40px; left: 48px; font-size: 54px; font-style: italic; color: rgba(232, 226, 212, 0.13); letter-spacing: 2px; }
+.rz-login-art-caption { position: absolute; top: 40px; left: 48px; right: 24px; font-size: 54px; font-style: italic; color: rgba(232, 226, 212, 0.13); letter-spacing: 2px; white-space: nowrap; overflow: hidden; }
 .rz-login-panel { display: flex; align-items: center; justify-content: center; padding: 40px 24px; }
 .rz-login-card { width: 100%; max-width: 360px; display: flex; flex-direction: column; align-items: center; }
 .rz-login-icon { margin-bottom: 10px; display: none; }
-.rz-login-title { font-family: var(--font-display); font-size: 36px; font-weight: 600; margin: 0; color: var(--text); }
+.rz-login-title { font-family: var(--font-display); font-size: 36px; font-weight: 600; margin: 0; color: var(--text); white-space: nowrap; }
 .rz-login-sub { margin: 4px 0 28px; color: var(--text3); font-size: 14px; }
 .rz-login-form { width: 100%; display: flex; flex-direction: column; gap: 14px; }
 .rz-login-form .MuiButton-root { height: 44px; font-size: 15px; }

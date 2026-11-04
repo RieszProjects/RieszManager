@@ -60,7 +60,7 @@ async def test(request: HttpRequest) -> JsonResponse:
     body = await sync_to_async(json_body)(request)
     endpoint = _endpoint(body.get("endpoint"))
     sent = await notifier.send(
-        {"title": "Riesz", "body": "推送通知已开启。Claude 等你确认、提问或完成长任务时会在这里提醒你。",
+        {"title": "Riesz Manager", "body": "推送通知已开启。Claude 等你确认、提问或完成长任务时会在这里提醒你。",
          "url": "/", "tag": "riesz-test", "kind": "test"},
         urgent=True, ttl=600, endpoint=endpoint,
     )
