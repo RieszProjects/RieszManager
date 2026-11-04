@@ -12,6 +12,9 @@ import { useIsMobile } from "@/lib/useIsMobile";
 import { PREVIEW_SANDBOX, viewUrl } from "@/lib/viewLink";
 import { toast, useUi } from "@/store/ui";
 
+/** Audio formats browsers play (same list as the runner's files.AUDIO_TYPES). */
+const AUDIO_NAME = /\.(mp3|wav|ogg|oga|opus|m4a|aac|flac|weba)$/i;
+
 export function FileViewer() {
   const target = useUi((s) => s.file);
   const openFile = useUi((s) => s.openFile);
@@ -41,6 +44,8 @@ export function FileViewer() {
   const close = () => openFile(null);
   const isMarkdown = info?.language === "markdown";
   const isHtml = info?.kind === "text" && Boolean(pageUrl);
+  // By name as well: a runner older than the "audio" kind reports these files as binary.
+  const isAudio = info?.kind === "audio" || (info?.kind === "binary" && AUDIO_NAME.test(info.name));
   const previewable = isMarkdown || isHtml;
 
   return (
@@ -92,12 +97,12 @@ export function FileViewer() {
               <div className="rz-fileviewer-image"><img src={fileRawUrl(target.project, target.path)} alt={info.name} /></div>
             )}
             {info?.kind === "pdf" && <iframe className="rz-fileviewer-pdf" src={fileRawUrl(target.project, target.path)} title={info.name} />}
-            {info?.kind === "audio" && (
+            {isAudio && (
               <div className="rz-fileviewer-audio">
                 <audio key={target.path} controls preload="metadata" src={fileRawUrl(target.project, target.path)} />
               </div>
             )}
-            {info?.kind === "binary" && (
+            {info?.kind === "binary" && !isAudio && (
               <div className="rz-center dim">二进制文件，无法预览。<a href={fileRawUrl(target.project, target.path, true)}>下载</a></div>
             )}
           </div>
