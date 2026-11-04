@@ -29,7 +29,7 @@
     <div class="toc-title">文档</div>
     <ul class="toc-site"><li><a href="index.html">前言</a></li><li><a href="quickstart.html">快速上手</a></li><li><a href="guide.html" class="current">使用指南</a></li><li><a href="deploy.html">部署教程</a></li></ul>
     <div class="toc-title">本页</div>
-    <ul class="toc-page"><li class="l2"><a href="#layout">界面总览</a></li><li class="l2"><a href="#conversation">对话</a></li><li class="l2"><a href="#composer">输入框</a></li><li class="l2"><a href="#modes">权限模式和模型</a></li><li class="l2"><a href="#prompts">确认和提问</a></li><li class="l2"><a href="#context">上下文用量</a></li><li class="l2"><a href="#sessions">会话管理</a></li><li class="l2"><a href="#terminal">终端里的会话</a></li><li class="l2"><a href="#files">项目文件</a></li><li class="l2"><a href="#push">推送通知</a></li><li class="l2"><a href="#doll">莉思玩偶</a></li><li class="l2"><a href="#mobile">在手机上用</a></li><li class="l2"><a href="#settings">设置页</a></li><li class="l2"><a href="#shortcuts">快捷键</a></li><li class="l2"><a href="#faq">常见问题</a></li></ul>
+    <ul class="toc-page"><li class="l2"><a href="#layout">界面总览</a></li><li class="l2"><a href="#conversation">对话</a></li><li class="l2"><a href="#composer">输入框</a></li><li class="l2"><a href="#modes">权限模式和模型</a></li><li class="l2"><a href="#prompts">确认和提问</a></li><li class="l2"><a href="#context">上下文用量</a></li><li class="l2"><a href="#sessions">会话管理</a></li><li class="l2"><a href="#terminal">终端里的会话</a></li><li class="l2"><a href="#spawn">让会话开新会话</a></li><li class="l2"><a href="#files">项目文件</a></li><li class="l2"><a href="#push">推送通知</a></li><li class="l2"><a href="#doll">莉思玩偶</a></li><li class="l2"><a href="#mobile">在手机上用</a></li><li class="l2"><a href="#settings">设置页</a></li><li class="l2"><a href="#shortcuts">快捷键</a></li><li class="l2"><a href="#faq">常见问题</a></li></ul>
   </aside>
   <article>
 <h1>使用指南</h1>
@@ -132,6 +132,22 @@
   <li><b>如果终端会话正在工作</b>：输入框会提示「终端里的会话正在工作，消息会在它空闲后送达」。发出的消息会先排队，等终端里的任务跑完空闲下来，再自动送达并转到网页。</li>
 </ul>
 <p>如果你不想打断终端里的会话，可以用会话菜单里的「分叉为新会话」复制一份，在网页里另起一支。</p>
+
+<h2 id="spawn">让会话开新会话</h2>
+<p>一个会话可以自己开新会话，交给RieszManager托管，比如把一项独立的任务交给另一个会话去做。这样开出的会话和你在网页上点「新会话」开的完全一样：会自动连接Claude in Chrome，能和其他会话互发消息，需要确认时会在网页上提示你（开了推送的话也会通知你），也能「保持运行」。如果会话直接在终端里运行<code>claude</code>，开出来的就只是一个普通的终端会话，没有这些功能。</p>
+<p>工具是<code>rieszctl session</code>。会话在Bash里运行它就行，不需要令牌，也不会打印出来：</p>
+<pre><code># 在当前目录开一个会话，并发第一条消息（-C 可以指定别的目录）
+/path/to/RieszManager/rieszctl session new "整理一下 docs/ 里的错别字，改完告诉我改了哪些文件"
+
+# 等它做完这一轮，打印它最后的回复（也可以在 new 后面加 --wait 一步完成）
+rieszctl session wait 1a2b3c4d
+
+# 继续给它发消息；它空闲太久被关掉了，也会自动重新开起来
+rieszctl session send 1a2b3c4d "再检查一下 README" --wait
+
+rieszctl session list --mine     # 当前会话开过的会话
+rieszctl session stop 1a2b3c4d   # 用完关掉它的进程</code></pre>
+<p>会话 ID 写前几位就可以。<code>new</code>还可以用<code>-m</code>指定模型，用<code>--mode</code>指定权限模式，用<code>--effort</code>指定思考强度，用<code>--keep</code>让它一直保持运行；消息很长时可以写成<code>-</code>，从标准输入读入。新会话在<code>wait</code>期间需要你确认时，命令会打印一行提示，等你在网页上处理。开新会话的会话会记在新会话的信息里（<code>rieszctl session show</code>里的 started by）。完整用法见<code>rieszctl session --help</code>。</p>
 
 <h2 id="files">项目文件</h2>
 <p>右边面板的「文件」标签展示当前项目的文件树（只读），修改、新增等文件带有git状态标记。点任意文件可以打开预览窗口：</p>

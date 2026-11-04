@@ -275,13 +275,16 @@ class Hub:
         self.prefs.set_keep_alive(session_id, on)
         self._revive_state.pop(session_id, None)
         note = None
-        if on and session_id not in self.live:
-            try:
-                await self.ensure_process(session_id)
-            except ControlError as exc:
-                note = str(exc)
-        elif on:
-            note = "the session is running in a terminal; it will be kept running here once that process ends"
+        hosted = self.hosted.get(session_id)
+        if on and not (hosted is not None and hosted.alive):
+            # self.live lists every running claude, hosted ones included; only others are "in a terminal".
+            if session_id in self.live:
+                note = "the session is running in a terminal; it will be kept running here once that process ends"
+            else:
+                try:
+                    await self.ensure_process(session_id)
+                except ControlError as exc:
+                    note = str(exc)
         await self.broadcast_global({"ev": "sessions", "sessions": [self.session_summary(session_id)], "removed": []})
         await self.broadcast_session(session_id, {"ev": "state", "state": self.session_state(session_id)})
         return note
@@ -303,6 +306,7 @@ class Hub:
         data["project"] = self.projects.project_id_for(data.get("cwd"))
         data["live"] = self._live_info(session_id)
         data["keepAlive"] = self.prefs.keep_alive(session_id)
+        data["startedBy"] = (self.prefs.get(session_id) or {}).get("startedBy")
         return data
 
     def _live_info(self, session_id: str) -> dict[str, Any] | None:

@@ -29,7 +29,7 @@
     <div class="toc-title">Docs</div>
     <ul class="toc-site"><li><a href="index.html">Introduction</a></li><li><a href="quickstart.html">Quickstart</a></li><li><a href="guide.html" class="current">User Guide</a></li><li><a href="deploy.html">Deployment</a></li></ul>
     <div class="toc-title">On this page</div>
-    <ul class="toc-page"><li class="l2"><a href="#layout">Interface overview</a></li><li class="l2"><a href="#conversation">Conversation</a></li><li class="l2"><a href="#composer">Composer</a></li><li class="l2"><a href="#modes">Permission modes and models</a></li><li class="l2"><a href="#prompts">Approvals and questions</a></li><li class="l2"><a href="#context">Context usage</a></li><li class="l2"><a href="#sessions">Managing sessions</a></li><li class="l2"><a href="#terminal">Terminal sessions</a></li><li class="l2"><a href="#files">Project files</a></li><li class="l2"><a href="#push">Push notifications</a></li><li class="l2"><a href="#doll">Lisi doll</a></li><li class="l2"><a href="#mobile">Using on mobile</a></li><li class="l2"><a href="#settings">Settings</a></li><li class="l2"><a href="#shortcuts">Keyboard shortcuts</a></li><li class="l2"><a href="#faq">FAQ</a></li></ul>
+    <ul class="toc-page"><li class="l2"><a href="#layout">Interface overview</a></li><li class="l2"><a href="#conversation">Conversation</a></li><li class="l2"><a href="#composer">Composer</a></li><li class="l2"><a href="#modes">Permission modes and models</a></li><li class="l2"><a href="#prompts">Approvals and questions</a></li><li class="l2"><a href="#context">Context usage</a></li><li class="l2"><a href="#sessions">Managing sessions</a></li><li class="l2"><a href="#terminal">Terminal sessions</a></li><li class="l2"><a href="#spawn">Starting sessions from other sessions</a></li><li class="l2"><a href="#files">Project files</a></li><li class="l2"><a href="#push">Push notifications</a></li><li class="l2"><a href="#doll">Lisi doll</a></li><li class="l2"><a href="#mobile">Using on mobile</a></li><li class="l2"><a href="#settings">Settings</a></li><li class="l2"><a href="#shortcuts">Keyboard shortcuts</a></li><li class="l2"><a href="#faq">FAQ</a></li></ul>
   </aside>
   <article>
 <h1>User Guide</h1>
@@ -133,6 +133,22 @@
   <li><b>If the terminal session is busy</b>: The composer notes “The terminal session is busy; your message will be delivered once it's idle” (终端里的会话正在工作，消息会在它空闲后送达). Your message is queued until the task in the terminal finishes and becomes idle, then delivered automatically as the session moves to the web app.</li>
 </ul>
 <p>If you do not want to interrupt the terminal session, use “Fork as new session” (分叉为新会话) from the session menu to branch off a copy in the web app.</p>
+
+<h2 id="spawn">Starting sessions from other sessions</h2>
+<p>A session can open new sessions for RieszManager to host, for example to hand a separate task to another session. A session started this way is exactly like one you open with “New session” in the web app: Claude in Chrome is connected automatically, it can message other sessions, its approvals show up in the web app (and as push notifications if you enabled them), and it can be kept running. Running <code>claude</code> directly from a session's terminal only gives you a plain terminal session without any of this.</p>
+<p>The tool is <code>rieszctl session</code>. A session just runs it from its Bash tool; no token is needed, and none is printed:</p>
+<pre><code># start a session in the current directory with a first message (-C picks another directory)
+/path/to/RieszManager/rieszctl session new "Fix the typos in docs/ and tell me which files you changed"
+
+# wait until it has finished this turn and print its last reply (or add --wait to new)
+rieszctl session wait 1a2b3c4d
+
+# send it another message; a session stopped for being idle is started again
+rieszctl session send 1a2b3c4d "Check the README too" --wait
+
+rieszctl session list --mine     # sessions this session started
+rieszctl session stop 1a2b3c4d   # stop its process when done</code></pre>
+<p>A unique prefix of the session ID is enough. <code>new</code> also takes <code>-m</code> for the model, <code>--mode</code> for the permission mode, <code>--effort</code> for the effort level and <code>--keep</code> to keep the session running; pass <code>-</code> as the message to read a long one from standard input. If the new session needs your approval while <code>wait</code> is running, the command prints a note and keeps waiting until you answer in the web app. The session that started it is recorded (“started by” in <code>rieszctl session show</code>). Run <code>rieszctl session --help</code> for the full usage.</p>
 
 <h2 id="files">Project files</h2>
 <p>The “Files” (文件) tab in the right panel shows a read-only file tree of the current project, with git status badges on modified and untracked files. Click any file to open the preview modal:</p>

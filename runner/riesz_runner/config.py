@@ -104,6 +104,17 @@ class Config:
         return self.state_dir / "history.jsonl"
 
 
+def _state_dir(env: dict[str, str]) -> Path:
+    return Path(os.path.expanduser(env.get("RUNNER_STATE_DIR") or "~/.local/state/riesz-manager"))
+
+
+def runner_socket(env: dict[str, str]) -> Path:
+    """Path of the runner's Unix socket for these settings."""
+    socket_dir = env.get("RUNNER_SOCKET_DIR")
+    default = Path(os.path.expanduser(socket_dir)) / "runner.sock" if socket_dir else _state_dir(env) / "run" / "runner.sock"
+    return Path(os.path.expanduser(env.get("RUNNER_SOCKET") or str(default)))
+
+
 def load_config(env_file: str | None = None) -> Config:
     env: dict[str, str] = {}
     if env_file:
@@ -111,10 +122,8 @@ def load_config(env_file: str | None = None) -> Config:
     env.update({k: v for k, v in os.environ.items() if k.startswith(("RIESZ_", "RUNNER_", "WORKSPACE_"))})
 
     home = Path.home()
-    state_dir = Path(os.path.expanduser(env.get("RUNNER_STATE_DIR") or "~/.local/state/riesz-manager"))
-    socket_dir = env.get("RUNNER_SOCKET_DIR")
-    default_socket = Path(os.path.expanduser(socket_dir)) / "runner.sock" if socket_dir else state_dir / "run" / "runner.sock"
-    socket_path = Path(os.path.expanduser(env.get("RUNNER_SOCKET") or str(default_socket)))
+    state_dir = _state_dir(env)
+    socket_path = runner_socket(env)
     token = env.get("RUNNER_TOKEN", "")
     if len(token) < 24:
         raise SystemExit("RUNNER_TOKEN must be set to a random string of at least 24 characters")

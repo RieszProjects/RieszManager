@@ -6,6 +6,7 @@ import asyncio
 import hmac
 import json
 import logging
+import os
 import re
 import time
 import uuid as uuidlib
@@ -311,17 +312,31 @@ async def _deliver_new(request: web.Request, proc: Any, body: dict[str, Any]) ->
 async def create_session(request: web.Request) -> web.Response:
     hub = request.app[HUB]
     body = await _body(request)
-    project = body.get("project")
-    path = hub.projects.path_for(project) if project else None
+    # Either a project id (the web) or a working directory (`rieszctl session new` from another session).
+    cwd = body.get("cwd")
+    if cwd:
+        if not isinstance(cwd, str) or not os.path.isabs(cwd):
+            return _err(400, "cwd must be an absolute path")
+        path = Path(os.path.realpath(cwd))
+    else:
+        project = body.get("project")
+        path = hub.projects.path_for(project) if project else None
     if path is None:
         return _err(400, "unknown project")
+    started_by = body.get("startedBy")
+    if started_by is not None and not (isinstance(started_by, str) and _UUID_RE.match(started_by)):
+        return _err(400, "invalid startedBy")
     mode = _validate_mode(hub.cfg, body.get("permissionMode"))
     proc = await hub.create_session(str(path), model=body.get("model") or None, permission_mode=mode,
                                     effort=_validate_effort(body.get("effort")))
     request.app[PROBE].remember(proc.cwd, _probe_info(proc))
+    if started_by:
+        hub.prefs.remember(proc.session_id, startedBy=started_by)
     message_uuid = None
     if body.get("text") or body.get("attachments"):
         message_uuid = await _deliver_new(request, proc, body)
+    if body.get("keepAlive"):
+        await hub.set_keep_alive(proc.session_id, True)
     return _json({"sessionId": proc.session_id, "uuid": message_uuid, "state": proc.snapshot()})
 
 

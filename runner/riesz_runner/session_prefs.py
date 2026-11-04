@@ -5,7 +5,8 @@
   default), and in stream-json mode it does not record permission-mode changes
   in the transcript either;
 - keepAlive: the user asked for the session's claude process to stay running
-  (not stopped when idle, started again after a runner restart).
+  (not stopped when idle, started again after a runner restart);
+- startedBy: the session that asked for this one with `rieszctl session new`.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ class SessionPrefs:
         return self._data.get(session_id)
 
     def remember(self, session_id: str, **fields: str | None) -> None:
-        """Store non-empty fields (effort, permissionMode); writes only when something changed."""
+        """Store non-empty fields (effort, permissionMode, startedBy); writes only when something changed."""
         current = self._data.get(session_id, {})
         updates = {k: v for k, v in fields.items() if v}
         if all(current.get(k) == v for k, v in updates.items()):

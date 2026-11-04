@@ -158,6 +158,9 @@ Usage: ./rieszctl <command>
   restart              restart the containers
   logs [service]       follow container logs
   status               check runner, containers and gateway
+  session <command>    start and drive hosted sessions, e.g. from another Claude Code session:
+                       new [-C DIR] MESSAGE | send ID MESSAGE | wait ID | reply ID | show ID
+                       | list [--mine|--all] | keep ID on|off | stop ID   (session --help for more)
   hash-password        generate RIESZ_PASSWORD_HASH for .env
   reset-totp           disable two-factor authentication (lost authenticator)
   revoke-sessions      log out every device
@@ -174,6 +177,7 @@ main() {
     restart) compose restart ;;
     logs) compose logs -f --tail=200 "$@" ;;
     status) cmd_status ;;
+    session) PYTHONPATH="$ROOT/runner" exec python3 -m riesz_runner.client --env-file "$ENV_FILE" "$@" ;;
     hash-password) compose run --rm -it backend python manage.py hash_password ;;
     reset-totp) compose exec backend python manage.py reset_totp ;;
     revoke-sessions) compose exec backend python manage.py revoke_sessions ;;
