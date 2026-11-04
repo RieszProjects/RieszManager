@@ -265,7 +265,7 @@ export interface FileInfo {
   size: number;
   mtime: number;
   mime: string | null;
-  kind: "text" | "image" | "pdf" | "binary";
+  kind: "text" | "image" | "pdf" | "audio" | "binary";
   content?: string;
   truncated?: boolean;
   language?: string;

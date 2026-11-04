@@ -1,4 +1,4 @@
-/** Read-only file viewer (code, markdown, rendered HTML, images, PDFs) shown as a dialog. */
+/** Read-only file viewer (code, markdown, rendered HTML, images, PDFs, audio) shown as a dialog. */
 import { Dialog, IconButton, Tooltip } from "@mui/material";
 import { Code2, Copy, Download, ExternalLink, Eye, LoaderCircle, WrapText, X } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -92,6 +92,11 @@ export function FileViewer() {
               <div className="rz-fileviewer-image"><img src={fileRawUrl(target.project, target.path)} alt={info.name} /></div>
             )}
             {info?.kind === "pdf" && <iframe className="rz-fileviewer-pdf" src={fileRawUrl(target.project, target.path)} title={info.name} />}
+            {info?.kind === "audio" && (
+              <div className="rz-fileviewer-audio">
+                <audio key={target.path} controls preload="metadata" src={fileRawUrl(target.project, target.path)} />
+              </div>
+            )}
             {info?.kind === "binary" && (
               <div className="rz-center dim">二进制文件，无法预览。<a href={fileRawUrl(target.project, target.path, true)}>下载</a></div>
             )}

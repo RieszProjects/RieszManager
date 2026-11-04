@@ -585,7 +585,12 @@ async def files_search(request: web.Request) -> web.Response:
 async def files_raw(request: web.Request) -> web.StreamResponse:
     root = _project_root(request)
     path = files_mod.raw_path(root, request.query.get("path", ""))
-    return web.FileResponse(path, headers={"Cache-Control": "private, no-cache"})
+    headers = {"Cache-Control": "private, no-cache"}
+    audio = files_mod.audio_type(path)
+    if audio:
+        headers["Content-Type"] = audio
+    # FileResponse answers Range requests (206), which audio seeking and Safari's player rely on.
+    return web.FileResponse(path, headers=headers)
 
 
 async def upload(request: web.Request) -> web.Response:

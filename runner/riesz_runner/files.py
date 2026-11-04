@@ -66,6 +66,17 @@ def list_dir(root: Path, rel: str) -> list[dict[str, Any]]:
     return entries
 
 
+# Audio formats browsers can play, with the Content-Type to serve them with.
+AUDIO_TYPES = {
+    ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg", ".oga": "audio/ogg", ".opus": "audio/ogg",
+    ".m4a": "audio/mp4", ".aac": "audio/aac", ".flac": "audio/flac", ".weba": "audio/webm",
+}
+
+
+def audio_type(path: Path) -> str | None:
+    return AUDIO_TYPES.get(path.suffix.lower())
+
+
 def describe_file(root: Path, rel: str, max_bytes: int) -> dict[str, Any]:
     path = safe_join(root, rel)
     if not path.is_file():
@@ -73,6 +84,9 @@ def describe_file(root: Path, rel: str, max_bytes: int) -> dict[str, Any]:
     st = path.stat()
     mime, _ = mimetypes.guess_type(path.name)
     info: dict[str, Any] = {"path": rel, "name": path.name, "size": st.st_size, "mtime": st.st_mtime, "mime": mime}
+    if audio_type(path):
+        info.update(kind="audio", mime=audio_type(path))
+        return info
     if mime and (mime.startswith("image/") or mime in ("application/pdf",)) and not path.suffix == ".svg":
         info["kind"] = "image" if mime.startswith("image/") else "pdf"
         return info

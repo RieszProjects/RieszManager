@@ -34,9 +34,9 @@ def session() -> aiohttp.ClientSession:
 
 
 async def request(method: str, path: str, *, params: Any = None, json: Any = None, data: Any = None,
-                  timeout: float = 120) -> aiohttp.ClientResponse:
+                  headers: dict[str, str] | None = None, timeout: float = 120) -> aiohttp.ClientResponse:
     try:
-        return await session().request(method, BASE + path, params=params, json=json, data=data,
+        return await session().request(method, BASE + path, params=params, json=json, data=data, headers=headers,
                                        timeout=aiohttp.ClientTimeout(total=timeout))
     except (aiohttp.ClientConnectionError, FileNotFoundError, ConnectionRefusedError) as exc:
         raise RunnerUnavailable(str(exc)) from exc

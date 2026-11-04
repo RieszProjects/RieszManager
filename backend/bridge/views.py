@@ -96,11 +96,19 @@ async def stream(request: HttpRequest, path: str) -> HttpResponse:
             break
     else:
         return error_response(404, "not found")
+    # Pass byte ranges through: audio seeking needs them, and Safari will not play media without them.
+    forward = {h: request.headers[h] for h in ("Range", "If-Range") if h in request.headers}
     try:
-        resp = await runner.request("GET", target, params=list(request.GET.items()), timeout=600)
+        resp = await runner.request("GET", target, params=list(request.GET.items()), headers=forward or None, timeout=600)
     except runner.RunnerUnavailable:
         return _unavailable()
-    if resp.status != 200:
+    if resp.status == 416:
+        async with resp:
+            out = HttpResponse(b"", status=416)
+            if resp.headers.get("Content-Range"):
+                out["Content-Range"] = resp.headers["Content-Range"]
+            return out
+    if resp.status not in (200, 206):
         async with resp:
             return HttpResponse(await resp.read(), status=resp.status, content_type="application/json")
 
@@ -111,9 +119,11 @@ async def stream(request: HttpRequest, path: str) -> HttpResponse:
         finally:
             resp.release()
 
-    out = StreamingHttpResponse(body(), content_type=resp.headers.get("Content-Type", "application/octet-stream"))
-    if resp.headers.get("Content-Length"):
-        out["Content-Length"] = resp.headers["Content-Length"]
+    out = StreamingHttpResponse(body(), status=resp.status,
+                                content_type=resp.headers.get("Content-Type", "application/octet-stream"))
+    for name in ("Content-Length", "Content-Range", "Accept-Ranges", "Last-Modified", "ETag"):
+        if resp.headers.get(name):
+            out[name] = resp.headers[name]
     out["Cache-Control"] = resp.headers.get("Cache-Control", "private, no-cache")
     out["X-Content-Type-Options"] = "nosniff"
     if request.GET.get("download"):
