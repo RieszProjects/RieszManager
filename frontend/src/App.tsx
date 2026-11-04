@@ -9,6 +9,7 @@ import { LoginPage } from "@/features/auth/LoginPage";
 import { ChatView } from "@/features/chat/ChatView";
 import { DollSlot } from "@/features/doll/DollSlot";
 import { FileViewer } from "@/features/files/FileViewer";
+import { ImageViewer } from "@/components/ImageViewer";
 import { HomeView, ProjectView } from "@/features/home/HomeView";
 import { AppShell } from "@/features/layout/AppShell";
 import { NewSessionDialog } from "@/features/sessions/NewSessionDialog";
@@ -96,6 +97,7 @@ export function App() {
         <Router />
       </AppShell>
       <FileViewer />
+      <ImageViewer />
       <SettingsDialog />
       <NewSessionDialog />
       <RenameDialog />

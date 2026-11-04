@@ -27,6 +27,12 @@ export interface Toast {
   severity: "info" | "success" | "error" | "warning";
 }
 
+/** Images shown in the full-screen viewer: all images of one message, starting at `index`. */
+export interface ImageGallery {
+  urls: string[];
+  index: number;
+}
+
 export interface FileTarget {
   project: string;
   path: string;
@@ -43,6 +49,7 @@ interface UiStore {
   rightTab: "sessions" | "files";
   sidebarTab: "recent" | "projects";
   file: FileTarget | null;
+  gallery: ImageGallery | null;
   settingsOpen: boolean;
   newSessionOpen: boolean;
   renameTarget: { sessionId: string; title: string } | null;
@@ -59,6 +66,7 @@ interface UiStore {
   setRightTab: (tab: UiStore["rightTab"]) => void;
   setSidebarTab: (tab: UiStore["sidebarTab"]) => void;
   openFile: (target: FileTarget | null) => void;
+  openGallery: (gallery: ImageGallery | null) => void;
   setSettingsOpen: (open: boolean) => void;
   setNewSessionOpen: (open: boolean) => void;
   setRenameTarget: (target: UiStore["renameTarget"]) => void;
@@ -78,6 +86,7 @@ export const useUi = create<UiStore>((set) => ({
   rightTab: "files",
   sidebarTab: storage.get("sidebarTab.v2", "projects"),
   file: null,
+  gallery: null,
   settingsOpen: false,
   newSessionOpen: false,
   renameTarget: null,
@@ -108,6 +117,7 @@ export const useUi = create<UiStore>((set) => ({
     set({ sidebarTab });
   },
   openFile: (file) => set({ file }),
+  openGallery: (gallery) => set({ gallery }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setNewSessionOpen: (newSessionOpen) => set({ newSessionOpen }),
   setRenameTarget: (renameTarget) => set({ renameTarget }),

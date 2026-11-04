@@ -6,6 +6,7 @@ import { CodeBlock } from "@/components/CodeBlock";
 import { DiffView, diffStats, type Hunk } from "@/components/DiffView";
 import { Markdown } from "@/components/Markdown";
 import { languageFor } from "@/lib/language";
+import { useUi } from "@/store/ui";
 import { useSessionContext } from "../SessionContext";
 import { mcpParts, toolMeta } from "./toolMeta";
 
@@ -14,13 +15,20 @@ const str = (v: unknown): string => (typeof v === "string" ? v : v === undefined
 
 function ResultImages({ result }: { result: ToolResult }) {
   const { sessionId } = useSessionContext();
+  const openGallery = useUi((s) => s.openGallery);
   if (!result.images?.length) return null;
   return (
     <div className="rz-tool-images">
-      {result.images.map((img) => (
-        <a key={img.ref} href={imageUrl(sessionId, img.ref)} target="_blank" rel="noreferrer">
+      {result.images.map((img, i) => (
+        <button
+          key={img.ref}
+          type="button"
+          className="rz-image-thumb"
+          aria-label="查看大图"
+          onClick={() => openGallery({ urls: result.images.map((m) => imageUrl(sessionId, m.ref)), index: i })}
+        >
           <img src={imageUrl(sessionId, img.ref)} alt="" loading="lazy" />
-        </a>
+        </button>
       ))}
     </div>
   );

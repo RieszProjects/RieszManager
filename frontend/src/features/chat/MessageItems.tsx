@@ -7,7 +7,7 @@ import { Collapsible } from "@/components/Collapsible";
 import { Markdown } from "@/components/Markdown";
 import { copyText } from "@/lib/clipboard";
 import { clockTime, duration, modelLabel } from "@/lib/format";
-import { toast } from "@/store/ui";
+import { toast, useUi } from "@/store/ui";
 import { useSessionContext } from "./SessionContext";
 import { ToolBlock } from "./tools/ToolBlock";
 
@@ -33,6 +33,7 @@ function UserText({ text }: { text: string }) {
 const UserBubble = memo(function UserBubble({ item }: { item: UserItem }) {
   const { sessionId } = useSessionContext();
   const [expanded, setExpanded] = useState(false);
+  const openGallery = useUi((s) => s.openGallery);
   const long = item.text.length > 1600;
   const text = long && !expanded ? `${item.text.slice(0, 1600)}…` : item.text;
   if (item.origin === "peer") {
@@ -48,10 +49,16 @@ const UserBubble = memo(function UserBubble({ item }: { item: UserItem }) {
       <div className="rz-user-bubble">
         {item.images.length > 0 && (
           <div className="rz-user-images">
-            {item.images.map((img) => (
-              <a key={img.ref} href={imageUrl(sessionId, img.ref)} target="_blank" rel="noreferrer">
+            {item.images.map((img, i) => (
+              <button
+                key={img.ref}
+                type="button"
+                className="rz-image-thumb"
+                aria-label="查看大图"
+                onClick={() => openGallery({ urls: item.images.map((m) => imageUrl(sessionId, m.ref)), index: i })}
+              >
                 <img src={imageUrl(sessionId, img.ref)} alt="" loading="lazy" />
-              </a>
+              </button>
             ))}
           </div>
         )}

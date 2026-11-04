@@ -742,3 +742,18 @@ body.rz-dragging, body.rz-dragging * { cursor: grabbing !important; user-select:
 .rz-tag.keep { display: inline-flex; align-items: center; gap: 3px; color: var(--amber-strong); border-color: rgba(198, 150, 107, 0.45); }
 .rz-menu-grow { flex: 1; }
 .rz-menu-check { margin-left: 14px; color: var(--sage-strong); }
+
+/* Full-screen image viewer. */
+.rz-image-thumb { padding: 0; border: 0; background: none; cursor: zoom-in; display: block; }
+.rz-imgview { background-image: none !important; overflow: hidden; }
+.rz-imgview-stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; touch-action: none; user-select: none; -webkit-user-select: none; overflow: hidden; }
+.rz-imgview-stage img { max-width: 100%; max-height: 100%; object-fit: contain; transform-origin: center; will-change: transform; -webkit-user-drag: none; }
+.rz-imgview-stage img.animate { transition: transform 0.22s cubic-bezier(0.3, 0.8, 0.3, 1); }
+.rz-imgview-bar { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 4px; padding: calc(10px + var(--safe-top)) 12px 10px; background: linear-gradient(rgba(8, 10, 9, 0.7), transparent); pointer-events: none; }
+.rz-imgview-bar > * { pointer-events: auto; }
+.rz-imgview-bar .MuiIconButton-root { color: var(--text); }
+.rz-imgview-count { color: var(--text2); font-size: 14px; padding-left: 4px; font-variant-numeric: tabular-nums; }
+.rz-imgview-nav { position: absolute !important; top: 50%; translate: 0 -50%; color: var(--text) !important; background: rgba(30, 35, 31, 0.6) !important; }
+.rz-imgview-nav:hover { background: rgba(47, 54, 48, 0.85) !important; }
+.rz-imgview-nav.prev { left: 16px; }
+.rz-imgview-nav.next { right: 16px; }
