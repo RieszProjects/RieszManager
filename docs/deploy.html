@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>部署教程 · RieszManager 文档</title>
+<meta name="description" content="RieszManager 文档">
+<link rel="icon" href="assets/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@500;600&family=JetBrains+Mono:wght@400&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/menu.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <a class="brand" href="index.html"><img src="assets/logo.png" alt=""><span class="word">Riesz</span><span class="sub">文档</span></a>
+    <button class="menu-toggle" aria-expanded="false">目录</button>
+    <nav>
+      <a href="index.html">前言</a><a href="quickstart.html">快速上手</a><a href="guide.html">使用指南</a><a href="deploy.html" class="active">部署教程</a>
+      <a class="lang" href="en/deploy.html">English</a>
+      <a class="gh" href="https://github.com/RieszProjects/RieszManager"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.19 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+    </nav>
+  </div>
+</header>
+<main class="page">
+  <aside class="toc">
+    <div class="toc-title">文档</div>
+    <ul class="toc-site"><li><a href="index.html">前言</a></li><li><a href="quickstart.html">快速上手</a></li><li><a href="guide.html">使用指南</a></li><li><a href="deploy.html" class="current">部署教程</a></li></ul>
+    <div class="toc-title">本页</div>
+    <ul class="toc-page"><li class="l2"><a href="#overview">组件与要求</a></li><li class="l2"><a href="#get-code">获取代码</a></li><li class="l2"><a href="#configure">填写配置</a></li><li class="l2"><a href="#runner">安装runner</a></li><li class="l2"><a href="#containers">启动容器</a></li><li class="l2"><a href="#https">配置HTTPS</a></li><li class="l3"><a href="#https-cloudflare">Cloudflare Tunnel（推荐）</a></li><li class="l3"><a href="#https-caddy">Caddy</a></li><li class="l3"><a href="#https-nginx">已有的nginx</a></li><li class="l2"><a href="#account">账号与两步验证</a></li><li class="l2"><a href="#push">推送通知</a></li><li class="l2"><a href="#upgrade">升级</a></li><li class="l2"><a href="#backup">备份</a></li><li class="l2"><a href="#security">安全说明</a></li><li class="l2"><a href="#troubleshoot">排错</a></li><li class="l2"><a href="#uninstall">卸载</a></li><li class="l2"><a href="#env">环境变量参考</a></li><li class="l3"><a href="#env-account">账号</a></li><li class="l3"><a href="#env-secrets">密钥</a></li><li class="l3"><a href="#env-network">网络</a></li><li class="l3"><a href="#env-throttle">登录限流</a></li><li class="l3"><a href="#env-runner">宿主机用户与runner</a></li><li class="l3"><a href="#env-voice">语音输入（可选）</a></li><li class="l3"><a href="#env-misc">其他</a></li><li class="l3"><a href="#env-push">推送通知（可选）</a></li></ul>
+  </aside>
+  <article>
+<h1>部署教程</h1>
+<p class="lede">这一篇是完整的部署说明，包括组件、配置、HTTPS、账号安全、推送通知、升级、备份和排错；只想先跑起来试试的话看<a href="quickstart.html">快速上手</a>；部署好以后的日常使用见<a href="guide.html">使用指南</a>。</p>
+
+<h2 id="overview">组件与要求</h2>
+<p>RieszManager由宿主机上的runner和三个Docker容器组成：</p>
+<div class="wrap"><table style="--first-col: 6em">
+<tr><th>组件</th><th>运行位置</th><th>说明</th></tr>
+<tr><td><code>runner</code></td><td>宿主机（systemd用户服务）</td><td>读取<code>~/.claude</code>、浏览工作区、启动和驱动<code>claude</code>进程</td></tr>
+<tr><td><code>backend</code></td><td>Docker</td><td>Django（ASGI/uvicorn），负责登录、两步验证、API与WebSocket代理、推送通知</td></tr>
+<tr><td><code>frontend</code></td><td>Docker</td><td>构建好的静态前端（nginx）</td></tr>
+<tr><td><code>gateway</code></td><td>Docker</td><td>nginx网关，监听<code>RIESZ_BIND:RIESZ_PORT</code>（默认<code>127.0.0.1:18573</code>）</td></tr>
+</table></div>
+<p>runner和backend容器必须以同一个用户（同一uid/gid）运行：容器通过挂载目录访问runner的Unix socket，socket只对该用户可读写。</p>
+<p>部署主机需要满足以下条件：</p>
+<ul>
+  <li><b>Linux与systemd</b>：systemd用于管理runner的用户服务。</li>
+  <li><b>Claude Code已安装并登录</b>：在要使用的用户下执行<code>claude</code>能正常对话。</li>
+  <li><b>Python ≥ 3.10</b>：供runner使用。</li>
+  <li><b>Docker Engine与Docker Compose v2</b>：运行<code>rieszctl</code>的用户需要能执行<code>docker</code>（加入<code>docker</code>组后重新登录）。</li>
+  <li><b>一个TLS终端</b>：Cloudflare Tunnel、Caddy、带证书的nginx等。不要把网关端口直接暴露到公网。</li>
+</ul>
+
+<h2 id="get-code">获取代码</h2>
+<p>克隆仓库并执行<code>init</code>生成初始配置文件：</p>
+<pre><code>git clone https://github.com/RieszProjects/RieszManager.git RieszManager
+cd RieszManager
+./rieszctl init</code></pre>
+<p><code>./rieszctl init</code>会从<code>.env.example</code>生成<code>.env</code>（文件权限600），并自动填入：</p>
+<ul>
+  <li><code>RIESZ_SECRET_KEY</code>、<code>RUNNER_TOKEN</code>：随机生成的密钥；</li>
+  <li><code>RIESZ_PASSWORD</code>：随机临时密码，会打印在终端上；</li>
+  <li><code>RIESZ_UID</code> / <code>RIESZ_GID</code>：当前用户的uid和gid；</li>
+  <li><code>RUNNER_SOCKET_DIR</code>：<code>~/.local/state/riesz-manager/run</code>；</li>
+  <li><code>WORKSPACE_ROOT</code>：默认是当前用户的家目录，也可以在初始化时用<code>WORKSPACE_ROOT=/path ./rieszctl init</code>指定。</li>
+</ul>
+
+<h2 id="configure">填写配置</h2>
+<p><code>.env</code>同时被Docker Compose、backend容器和宿主机runner读取。打开<code>.env</code>，至少确认下面几项：</p>
+<div class="wrap"><table style="--first-col: 14em">
+<tr><th>变量</th><th>说明</th></tr>
+<tr><td><code>WORKSPACE_ROOT</code></td><td>工作区根目录，其下每个一级文件夹是一个项目</td></tr>
+<tr><td><code>RIESZ_PUBLIC_ORIGIN</code></td><td>对外访问地址，如<code>https://claude.example.com</code>（用于CSRF、WebSocket来源校验、安全Cookie）</td></tr>
+<tr><td><code>RIESZ_USERNAME</code> / <code>RIESZ_PASSWORD</code></td><td>登录账号；建议改用<code>RIESZ_PASSWORD_HASH</code>，见<a href="#account">账号与两步验证</a></td></tr>
+<tr><td><code>RIESZ_PORT</code> / <code>RIESZ_BIND</code></td><td>网关监听地址，默认只监听本机<code>127.0.0.1:18573</code></td></tr>
+<tr><td><code>RIESZ_TRUST_CF_HEADER</code></td><td>使用Cloudflare Tunnel时设为<code>true</code>，以便按真实客户端IP限流</td></tr>
+<tr><td><code>RUNNER_DEFAULT_PERMISSION_MODE</code></td><td>新会话的权限模式，见<a href="guide.html#modes">权限模式和模型</a></td></tr>
+<tr><td><code>RUNNER_ALLOW_BYPASS</code></td><td>是否允许在网页中切换到「跳过权限」模式</td></tr>
+<tr><td><code>RUNNER_CHROME</code></td><td>网页端会话是否连接Claude in Chrome：<code>auto</code>（跟随你在终端里<code>/chrome</code>的默认设置）、<code>on</code>、<code>off</code></td></tr>
+<tr><td><code>OPENAI_API_KEY</code></td><td>可选，启用服务端语音转写</td></tr>
+<tr><td><code>RIESZ_VAPID_PRIVATE_KEY</code></td><td>可选，推送通知的签名密钥；留空时首次使用会自动生成，保存在<code>data/backend/vapid_private.pem</code></td></tr>
+</table></div>
+<p>全部变量的详细列表见文末的<a href="#env">环境变量参考</a>。</p>
+<div class="note"><p><code>.env</code>中含有<code>$</code>的值（例如密码哈希<code>pbkdf2_sha256$...</code>）必须用单引号包起来，否则会被当成变量展开。</p></div>
+
+<h2 id="runner">安装runner</h2>
+<p>在要运行Claude Code的宿主机用户下执行：</p>
+<pre><code>./rieszctl runner install</code></pre>
+<p>这条命令会做三件事：</p>
+<ol class="steps">
+  <li>在<code>runner/.venv</code>创建Python虚拟环境并安装依赖；</li>
+  <li>写入<code>~/.config/systemd/user/riesz-runner.service</code>并启动服务；</li>
+  <li>尝试执行<code>loginctl enable-linger $USER</code>，让用户服务在你注销SSH或主机重启后继续运行（若没有权限，会提示你手动用<code>sudo</code>执行）。</li>
+</ol>
+<p>runner默认通过登录shell（<code>$SHELL -lc</code>）启动<code>claude</code>，因此会话里的Bash命令看到的环境变量与你在终端里的一致；若不需要，可以在<code>.env</code>里设置<code>RUNNER_LOGIN_SHELL=false</code>。</p>
+<p>常用的runner管理命令：</p>
+<pre><code>./rieszctl runner status
+./rieszctl runner logs
+./rieszctl runner reload      <span class="c"># 应用新代码或修改后的 .env：等所有托管会话空闲后再重载</span>
+./rieszctl runner restart     <span class="c"># 立即重启：会中断正在工作的会话</span></code></pre>
+<p><code>reload</code>会等到runner托管的所有Claude会话都空闲（没有进行中的回合、待确认的权限或排队消息）时，才结束这些空闲进程并重新加载自己；会话记录都在磁盘上，下次发消息时会自动恢复。<code>restart</code>则立即生效，正在工作的会话会被打断，一般只在runner卡住时使用。完整子命令还包括<code>start</code>、<code>stop</code>、<code>uninstall</code>和<code>run</code>（在前台直接运行）。</p>
+
+<h2 id="containers">启动容器</h2>
+<p>构建并启动三个容器，然后检查整体状态：</p>
+<pre><code>./rieszctl up
+./rieszctl status</code></pre>
+<p><code>./rieszctl status</code>会依次检查runner的socket、容器运行状态，以及网关的健康检查接口<code>http://127.0.0.1:$RIESZ_PORT/api/healthz</code>。后端的SQLite数据库保存在仓库下的<code>data/backend/</code>目录中，用来存放登录记录、两步验证密钥、归档与排序、快捷短语和推送订阅等数据。</p>
+<p>日常管理容器的命令：</p>
+<pre><code>./rieszctl restart            <span class="c"># 只改了容器相关的 .env 配置时重启容器</span>
+./rieszctl up                 <span class="c"># 更新代码后重新构建并启动</span>
+./rieszctl down               <span class="c"># 停止容器</span>
+./rieszctl logs               <span class="c"># 查看所有容器日志，也可指定服务名如 ./rieszctl logs backend</span></code></pre>
+
+<h2 id="https">配置HTTPS</h2>
+<p>gateway容器只提供HTTP，并且默认只监听本机<code>127.0.0.1:18573</code>。对外提供服务时，需要在它前面放一个TLS终端。下面是三种常见做法。</p>
+
+<h3 id="https-cloudflare">Cloudflare Tunnel（推荐）</h3>
+<ol class="steps">
+  <li>在Cloudflare Zero Trust后台进入Networks → Tunnels，创建（或选择已有的）隧道，按页面提示在宿主机上安装<code>cloudflared</code>连接器。</li>
+  <li>在该隧道的Public Hostname中添加一条规则：Subdomain / Domain填你的域名；Service选<code>HTTP</code>，URL填<code>localhost:18573</code>（与<code>RIESZ_PORT</code>一致）。</li>
+  <li>在<code>.env</code>中设置<code>RIESZ_PUBLIC_ORIGIN=https://你的域名</code>和<code>RIESZ_TRUST_CF_HEADER=true</code>，然后执行<code>./rieszctl restart</code>。</li>
+</ol>
+<p>WebSocket会自动透传，无需额外配置。如果你希望进入登录页之前再加一层验证，可以在Cloudflare Access中为这个域名配置策略。</p>
+
+<h3 id="https-caddy">Caddy</h3>
+<p>在<code>Caddyfile</code>中加入：</p>
+<pre><code>claude.example.com {
+    reverse_proxy 127.0.0.1:18573
+}</code></pre>
+<p>Caddy会自动申请证书并设置<code>X-Forwarded-Proto</code>头。记得把<code>.env</code>里的<code>RIESZ_PUBLIC_ORIGIN</code>设为<code>https://claude.example.com</code>并重启容器。</p>
+
+<h3 id="https-nginx">已有的nginx</h3>
+<p>如果主机上已经有nginx并配好了证书，添加如下站点配置（注意转发WebSocket所需的<code>Upgrade</code>与<code>Connection</code>头，以及长连接超时）：</p>
+<pre><code>server {
+    listen 443 ssl http2;
+    server_name claude.example.com;
+    ssl_certificate     /path/fullchain.pem;
+    ssl_certificate_key /path/privkey.pem;
+    client_max_body_size 210m;
+    location / {
+        proxy_pass http://127.0.0.1:18573;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 1d;
+    }
+}</code></pre>
+
+<h2 id="account">账号与两步验证</h2>
+<ul>
+  <li><b>修改密码</b>：在宿主机执行<code>./rieszctl hash-password</code>，按提示输入新密码，把输出的<code>RIESZ_PASSWORD_HASH='...'</code>写入<code>.env</code>，删除或清空<code>RIESZ_PASSWORD</code>，然后执行<code>./rieszctl restart</code>。当<code>RIESZ_PASSWORD_HASH</code>存在时，它优先于明文<code>RIESZ_PASSWORD</code>生效。</li>
+  <li><b>启用两步验证</b>：登录网页后打开「设置」→「安全」→「开始设置」，用手机上的验证器应用扫码并输入6位验证码，最后妥善保存页面显示的8个一次性恢复码。详见<a href="guide.html#settings">设置页</a>。</li>
+  <li><b>强制两步验证</b>：在<code>.env</code>中设置<code>RIESZ_REQUIRE_TOTP=true</code>。开启后，在完成验证器绑定之前，登录后只能访问设置页，无法使用其他功能。</li>
+  <li><b>丢失验证器</b>：登录时改用之前保存的恢复码；如果恢复码也找不到了，在宿主机上执行<code>./rieszctl reset-totp</code>直接关闭两步验证。</li>
+  <li><b>登出所有设备</b>：在「设置」→「设备」里操作，或在宿主机上执行<code>./rieszctl revoke-sessions</code>。</li>
+</ul>
+<p>登录接口带有失败限流：同一客户端IP在<code>RIESZ_LOGIN_LOCKOUT_MINUTES</code>分钟内连续失败达到<code>RIESZ_LOGIN_MAX_FAILURES</code>次后会被暂时锁定；如果所有IP的累计失败次数达到<code>RIESZ_LOGIN_MAX_FAILURES_GLOBAL</code>，整个站点的登录都会暂缓。</p>
+
+<h2 id="push">推送通知</h2>
+<p>RieszManager使用浏览器标准的Web Push推送消息：当你在某个浏览器里开启推送时，由该浏览器厂商的推送服务（Chrome为Google FCM、Firefox为Mozilla、Safari/iPhone为Apple）分配一个推送地址，backend容器在需要通知时把端到端加密后的消息直接发往这个地址。整个过程不需要注册任何第三方账号或API key，也不经过RieszManager作者的任何服务器，每个部署都使用自己生成的密钥。</p>
+<p>部署侧需要满足的条件：</p>
+<ul>
+  <li><b>HTTPS</b>：浏览器只在HTTPS站点（或本机<code>127.0.0.1</code>）下开放Web Push；<code>RIESZ_PUBLIC_ORIGIN</code>会被用作VAPID推送的联系地址。</li>
+  <li><b>外网访问</b>：backend容器随服务启动一个常驻任务监听runner事件，需要能访问外网HTTPS以连接各浏览器厂商的推送服务。</li>
+  <li><b>签名密钥（VAPID）</b>：<code>.env</code>中的<code>RIESZ_VAPID_PRIVATE_KEY</code>可以留空。留空时，第一次用到推送功能会自动生成密钥并保存在<code>data/backend/vapid_private.pem</code>（仅所有者可读）。如果日后更换或丢失了这把密钥，之前订阅过的所有设备都会失效，需要在「设置」里重新打开一次推送。</li>
+  <li><b>客户端环境</b>：Android手机需要能连接Google服务；iPhone需要iOS 16.4以上，并且必须先把网页「添加到主屏幕」、从主屏幕图标打开后才能订阅。</li>
+</ul>
+<p>各设备上的开启方法与触发时机见<a href="guide.html#push">使用指南：推送通知</a>。</p>
+
+<h2 id="upgrade">升级</h2>
+<p>拉取新代码后，依次更新runner和容器：</p>
+<pre><code>git pull
+./rieszctl runner install     <span class="c"># 更新 runner 依赖；服务已在运行时会平滑重载（不打断工作中的会话）</span>
+./rieszctl up                 <span class="c"># 重新构建并启动容器</span></code></pre>
+
+<h2 id="backup">备份</h2>
+<p>属于RieszManager自身、需要备份的只有两处：</p>
+<ul>
+  <li><code>.env</code>：全部配置与密钥；</li>
+  <li><code>data/backend/</code>：后端SQLite数据库（含两步验证密钥、登录会话与设备推送订阅）以及自动生成的<code>vapid_private.pem</code>推送签名密钥。如果这把密钥丢失，各设备需要在设置里重新开启推送。</li>
+</ul>
+<p>对话记录本身由Claude Code保存在<code>~/.claude/projects/</code>下；网页端上传的附件保存在<code>~/.local/state/riesz-manager/uploads/</code>（超过30天会自动清理）。</p>
+
+<h2 id="security">安全说明</h2>
+<div class="note warn"><p>任何能登录RieszManager的人，都能以宿主机用户的身份让Claude执行命令、读写该用户有权访问的文件。请务必使用强密码并启用两步验证。</p></div>
+<ul>
+  <li><b>网关绑定本机</b>：gateway默认只监听<code>127.0.0.1</code>；不要把<code>RIESZ_BIND</code>改成<code>0.0.0.0</code>后直接暴露到公网，务必在前面放置TLS终端。</li>
+  <li><b>Cloudflare IP头信任条件</b>：<code>RIESZ_TRUST_CF_HEADER=true</code>只应在流量确实经由Cloudflare转发、且网关只监听本机时开启；否则客户端可以伪造<code>CF-Connecting-IP</code>请求头，绕过按IP的登录限流。</li>
+  <li><b>runner通信隔离</b>：runner只监听Unix socket（目录权限<code>0750</code>，socket文件权限<code>0660</code>），并且每次请求都会校验<code>RUNNER_TOKEN</code>。</li>
+  <li><b>项目文件只读与路径限制</b>：网页中的项目文件浏览器以只读方式提供文件，路径会解析符号链接并严格限制在当前项目目录内；下载或查看原始文件时响应带有<code>Content-Security-Policy: sandbox</code>，不会在本站源下执行脚本。</li>
+  <li><b>HTML渲染预览隔离</b>：预览HTML文件时通过<code>/api/view/&lt;令牌&gt;/&lt;路径&gt;</code>加载。令牌是带签名的只读凭证，只对单个项目有效、一小时后过期；响应头带<code>Content-Security-Policy: sandbox</code>（不含<code>allow-same-origin</code>），因此页面内的脚本运行在匿名来源中，拿不到本站的Cookie、本地存储或API权限。不过被预览的页面仍可以加载外部网络资源，因此它最多能读到并外发的是该项目目录内的其他文件。</li>
+  <li><b>推送内容加密</b>：Web Push负载使用浏览器端生成的密钥做端到端加密，途经的浏览器厂商推送服务看不到通知正文。</li>
+  <li><b>套餐用量查询</b>：莉思玩偶显示的套餐用量来自runner定期在本地执行的<code>claude -p /usage</code>，这是Claude Code的内置命令，不调用模型、不消耗额度，也不会留下会话记录。</li>
+</ul>
+
+<h2 id="troubleshoot">排错</h2>
+<div class="wrap"><table style="--first-col: 14em">
+<tr><th>现象</th><th>处理</th></tr>
+<tr><td>页面提示「宿主机运行器未连接」</td><td>执行<code>./rieszctl runner status</code>查看服务是否运行；确认<code>.env</code>里的<code>RUNNER_SOCKET_DIR</code>是绝对路径且与runner一致；确认<code>RIESZ_UID</code>/<code>RIESZ_GID</code>与运行runner的宿主机用户相同。</td></tr>
+<tr><td>登录后立即掉线 / 报CSRF失败</td><td><code>RIESZ_PUBLIC_ORIGIN</code>必须与浏览器地址栏里的访问地址完全一致（协议+域名+端口，末尾不要带斜杠）。修改后执行<code>./rieszctl restart</code>。</td></tr>
+<tr><td>WebSocket连不上</td><td>检查前面的反向代理是否转发了<code>Upgrade</code>和<code>Connection</code>请求头，参考<a href="#https-nginx">已有的nginx</a>配置。</td></tr>
+<tr><td>新会话启动失败</td><td>执行<code>./rieszctl runner logs</code>查看报错；在同一宿主机用户的终端里运行<code>claude -p "hi"</code>，确认Claude Code本身已登录且能正常回复。</td></tr>
+<tr><td>语音按钮不可用</td><td>浏览器只在HTTPS（或<code>localhost</code>）下允许网页使用麦克风；另外如果未配置<code>OPENAI_API_KEY</code>，则依赖浏览器自带的语音识别能力。</td></tr>
+</table></div>
+
+<h2 id="uninstall">卸载</h2>
+<p>停止容器并移除宿主机上的runner用户服务：</p>
+<pre><code>./rieszctl down
+./rieszctl runner uninstall</code></pre>
+<p>如果你不再需要保留配置和运行数据，可以接着删除：</p>
+<ul>
+  <li>仓库目录里的<code>data/</code>和<code>.env</code>（或直接删除整个仓库目录）；</li>
+  <li><code>~/.local/state/riesz-manager</code>（存放上传的附件、输入历史等runner状态）。</li>
+</ul>
+<p>所有会话记录都保存在<code>~/.claude/projects/</code>下，属于Claude Code本身的数据，卸载RieszManager不会删除它们。</p>
+
+<h2 id="env">环境变量参考</h2>
+<p>下面是<code>.env.example</code>中全部变量的说明。所有配置都写在同一份<code>.env</code>里，含有<code>$</code>的值必须用单引号包起来。</p>
+
+<h3 id="env-account">账号</h3>
+<div class="wrap"><table style="--first-col: 16em">
+<tr><th>变量</th><th>默认值</th><th>说明</th></tr>
+<tr><td><code>RIESZ_USERNAME</code></td><td><code>admin</code></td><td>登录用户名</td></tr>
+<tr><td><code>RIESZ_PASSWORD</code></td><td><code>change-me-please</code></td><td>明文登录密码（<code>./rieszctl init</code>会生成随机临时密码）</td></tr>
+<tr><td><code>RIESZ_PASSWORD_HASH</code></td><td>（注释，未启用）</td><td>推荐使用的密码哈希，由<code>./rieszctl hash-password</code>生成；设置后优先于<code>RIESZ_PASSWORD</code></td></tr>
+<tr><td><code>RIESZ_REQUIRE_TOTP</code></td><td><code>false</code></td><td>设为<code>true</code>时，在设置好TOTP两步验证之前拒绝使用应用（只能进设置页）</td></tr>
+<tr><td><code>RIESZ_TOTP_ISSUER</code></td><td><code>RieszManager</code></td><td>验证器应用中显示的发行方名称</td></tr>
+<tr><td><code>RIESZ_SESSION_DAYS</code></td><td><code>30</code></td><td>登录时勾选保持登录后，会话维持的天数</td></tr>
+</table></div>
+
+<h3 id="env-secrets">密钥</h3>
+<div class="wrap"><table style="--first-col: 16em">
+<tr><th>变量</th><th>默认值</th><th>说明</th></tr>
+<tr><td><code>RIESZ_SECRET_KEY</code></td><td>空（<code>init</code>自动生成）</td><td>Django后端密钥</td></tr>
+<tr><td><code>RUNNER_TOKEN</code></td><td>空（<code>init</code>自动生成）</td><td>backend与runner之间通信的共享密钥</td></tr>
+</table></div>
+
+<h3 id="env-network">网络</h3>
+<div class="wrap"><table style="--first-col: 16em">
+<tr><th>变量</th><th>默认值</th><th>说明</th></tr>
+<tr><td><code>RIESZ_PUBLIC_ORIGIN</code></td><td><code>https://riesz.example.com</code></td><td>应用对外提供服务的完整URL（协议+主机，末尾不带斜杠）。用于CSRF与WebSocket来源校验，以及HTTPS下启用安全Cookie</td></tr>
+<tr><td><code>RIESZ_ALLOWED_HOSTS</code></td><td><code>localhost,127.0.0.1</code></td><td>允许访问backend的额外主机名，逗号分隔</td></tr>
+<tr><td><code>RIESZ_EXTRA_ORIGINS</code></td><td>空</td><td>额外信任的来源（逗号分隔），例如本机调试时可填<code>http://localhost:18573</code></td></tr>
+<tr><td><code>RIESZ_BIND</code></td><td><code>127.0.0.1</code></td><td>gateway在宿主机上监听的网卡地址。放在隧道或反向代理后面时应保持为<code>127.0.0.1</code></td></tr>
+<tr><td><code>RIESZ_PORT</code></td><td><code>18573</code></td><td>gateway在宿主机上监听的端口</td></tr>
+<tr><td><code>RIESZ_TRUST_CF_HEADER</code></td><td><code>false</code></td><td>是否信任<code>CF-Connecting-IP</code>请求头作为客户端真实IP（仅在位于Cloudflare后面且绑定本机时开启）</td></tr>
+</table></div>
+
+<h3 id="env-throttle">登录限流</h3>
+<div class="wrap"><table style="--first-col: 16em">
+<tr><th>变量</th><th>默认值</th><th>说明</th></tr>
+<tr><td><code>RIESZ_LOGIN_MAX_FAILURES</code></td><td><code>5</code></td><td>单个IP在锁定窗口内允许的最大登录失败次数</td></tr>
+<tr><td><code>RIESZ_LOGIN_MAX_FAILURES_GLOBAL</code></td><td><code>30</code></td><td>全局在锁定窗口内允许的最大登录失败次数</td></tr>
+<tr><td><code>RIESZ_LOGIN_LOCKOUT_MINUTES</code></td><td><code>15</code></td><td>登录失败计数与锁定的时间窗口（分钟）</td></tr>
+</table></div>
+
+<h3 id="env-runner">宿主机用户与runner</h3>
+<div class="wrap"><table style="--first-col: 18em">
+<tr><th>变量</th><th>默认值</th><th>说明</th></tr>
+<tr><td><code>RIESZ_UID</code></td><td><code>1000</code></td><td>运行Claude Code与runner的宿主机用户uid（<code>id -u</code>，<code>init</code>会自动填入）</td></tr>
+<tr><td><code>RIESZ_GID</code></td><td><code>1000</code></td><td>运行Claude Code与runner的宿主机用户gid（<code>id -g</code>，<code>init</code>会自动填入）</td></tr>
+<tr><td><code>WORKSPACE_ROOT</code></td><td><code>/home/you/work</code></td><td>工作区根目录（绝对路径），其下的每个子文件夹对应一个项目</td></tr>
+<tr><td><code>RUNNER_SOCKET_DIR</code></td><td><code>/home/you/.local/state/riesz-manager/run</code></td><td>存放runner Unix socket的目录绝对路径（会挂载进backend容器）</td></tr>
+<tr><td><code>RUNNER_STATE_DIR</code></td><td><code>~/.local/state/riesz-manager</code></td><td>runner状态目录（存放上传文件、输入历史等）</td></tr>
+<tr><td><code>RUNNER_CLAUDE_BIN</code></td><td>空（自动检测）</td><td><code>claude</code>可执行文件的路径</td></tr>
+<tr><td><code>RUNNER_DEFAULT_PERMISSION_MODE</code></td><td><code>default</code></td><td>新会话的默认权限模式：<code>default</code>、<code>acceptEdits</code>、<code>plan</code>、<code>auto</code>或<code>bypassPermissions</code></td></tr>
+<tr><td><code>RUNNER_ALLOW_BYPASS</code></td><td><code>false</code></td><td>是否允许在网页界面中将会话切换到<code>bypassPermissions</code>模式</td></tr>
+<tr><td><code>RUNNER_IDLE_TIMEOUT</code></td><td><code>1800</code></td><td><code>claude</code>进程空闲多少秒后自动停止（下次发消息时会自动恢复）</td></tr>
+<tr><td><code>RUNNER_LOGIN_SHELL</code></td><td><code>true</code></td><td>是否通过登录shell启动<code>claude</code>，使它看到与你终端相同的环境</td></tr>
+<tr><td><code>RUNNER_CHROME</code></td><td><code>auto</code></td><td>从网页端运行的会话是否连接Claude in Chrome：<code>auto</code>（跟随<code>~/.claude.json</code>里的<code>/chrome</code>默认设置）、<code>on</code>或<code>off</code>。非交互式<code>claude</code>只有带<code>--chrome</code>参数时才会连接</td></tr>
+<tr><td><code>RUNNER_ALLOW_EXTERNAL_FILES</code></td><td><code>false</code></td><td>是否允许浏览目录位于<code>WORKSPACE_ROOT</code>之外的会话的文件</td></tr>
+<tr><td><code>RUNNER_MAX_FILE_BYTES</code></td><td><code>2097152</code></td><td>文件查看器中允许显示的最大文件大小（字节）</td></tr>
+</table></div>
+
+<h3 id="env-voice">语音输入（可选）</h3>
+<div class="wrap"><table style="--first-col: 16em">
+<tr><th>变量</th><th>默认值</th><th>说明</th></tr>
+<tr><td><code>OPENAI_API_KEY</code></td><td>空</td><td>配置OpenAI兼容的API key后，录音会在服务端转写；留空则在支持的浏览器上使用浏览器内置的语音识别</td></tr>
+<tr><td><code>OPENAI_BASE_URL</code></td><td><code>https://api.openai.com/v1</code></td><td>OpenAI兼容接口的基础URL</td></tr>
+<tr><td><code>RIESZ_TRANSCRIBE_MODEL</code></td><td><code>gpt-4o-transcribe</code></td><td>服务端语音转写使用的模型</td></tr>
+<tr><td><code>RIESZ_TRANSCRIBE_LANGUAGE</code></td><td>空（注释示例为<code>zh</code>）</td><td>语音转写的语言代码</td></tr>
+</table></div>
+
+<h3 id="env-misc">其他</h3>
+<div class="wrap"><table style="--first-col: 16em">
+<tr><th>变量</th><th>默认值</th><th>说明</th></tr>
+<tr><td><code>RIESZ_MAX_UPLOAD_MB</code></td><td><code>100</code></td><td>上传附件的最大大小（MB）</td></tr>
+<tr><td><code>RIESZ_DEBUG</code></td><td><code>false</code></td><td>是否开启调试模式</td></tr>
+</table></div>
+
+<h3 id="env-push">推送通知（可选）</h3>
+<div class="wrap"><table style="--first-col: 16em">
+<tr><th>变量</th><th>默认值</th><th>说明</th></tr>
+<tr><td><code>RIESZ_VAPID_PRIVATE_KEY</code></td><td>空</td><td>用于签名Web Push消息的私钥（PEM格式，或base64url编码的原始私钥）。留空时会在首次使用时自动生成并保存在<code>data/backend/vapid_private.pem</code>。更换此密钥会使所有设备已有的推送订阅失效，需要重新在设置中开启</td></tr>
+</table></div>
+    <nav class="pager"><a class="prev" href="guide.html"><span class="dir">上一篇</span><span class="name">使用指南</span></a></nav>
+  </article>
+</main>
+<footer class="foot">RieszManager 是一个开源项目。界面截图来自演示数据。 <a href="https://github.com/RieszProjects/RieszManager">GitHub</a></footer>
+</body>
+</html>

@@ -1,0 +1,189 @@
+<h1>User Guide</h1>
+<p class="lede">This page explains every screen and feature in RieszManager. It assumes you already have RieszManager deployed and can sign in; if not, start with the <a href="quickstart.html">Quickstart</a>. Each section stands on its own, so feel free to jump to the parts you need.</p>
+<div class="note"><p>The interface is currently available in Chinese only. This guide gives each label in English with the original Chinese in parentheses, so you can find it on screen.</p></div>
+
+<h2 id="layout">Interface overview</h2>
+<p>When you open a session after signing in, the window is split into three columns—left, middle, and right—with the composer at the bottom of the middle column.</p>
+<figure><img class="shot" src="assets/shots/layout-en.webp" alt="Main RieszManager interface with the sidebar, conversation area, composer, and project panel highlighted in orange" loading="lazy"><figcaption>The main interface. The table below explains each area.</figcaption></figure>
+<div class="wrap"><table style="--first-col: 6em">
+<tr><th>Area</th><th>What it does</th></tr>
+<tr><td>Sidebar</td><td>At the top are the Riesz logo (click it to return to the home screen) and the “New session” (新会话) button; below are the “Search sessions or projects” (搜索会话或项目) search box and two tabs, “Projects” (项目) and “Recent” (最近). The bottom-left corner shows the connection status (“Connected” (已连接)) and the settings button (gear icon). Click the button next to the logo to collapse the sidebar into a narrow strip that keeps the home, expand, new session, and settings buttons.</td></tr>
+<tr><td>Conversation</td><td>The header shows the session title, project, and git branch; “⋯” on the top right opens the session menu (see <a href="#sessions">Managing sessions</a>). The conversation itself is in the middle.</td></tr>
+<tr><td>Composer</td><td>Where you send messages, run slash commands, mention files, and switch permission modes and models. See <a href="#composer">Composer</a>.</td></tr>
+<tr><td>Project panel</td><td>Has two tabs: “Files” (文件) and “Sessions” (会话). “Files” (文件) is a read-only file tree of the current project with git status badges (see <a href="#files">Project files</a>); “Sessions” (会话) lists every session in this project. On narrower screens the right panel collapses automatically; click the button on the right side of the header to open it.</td></tr>
+</table></div>
+<p>The two tabs in the sidebar let you browse sessions in different ways. A green dot next to a session means it is currently running:</p>
+<ul>
+  <li><b>“Projects” (项目)</b>: Each top-level folder inside your workspace (the directory configured at deployment, such as <code>~/workspace</code>) is a project. Click a project to expand its sessions; click the project name to open the project page, or click a session to open that session.</li>
+  <li><b>“Recent” (最近)</b>: All sessions ordered by time (Today, Yesterday, Earlier, and so on). Currently running sessions are grouped at the very top under “Running” (运行中), separated by a divider.</li>
+</ul>
+<p>There are two ways to start a new session: click “New session” (新会话) in the sidebar, pick a project under “Select a project” (选择项目), and send your first message on the project page; or click a project name in the sidebar to open its project page and send a message from the composer below. The session is only created when you send the first message. New sessions inherit the default model and reasoning effort you configured in Claude Code.</p>
+
+<h2 id="conversation">Conversation</h2>
+<p>The conversation area renders the full Claude Code transcript, including Markdown, syntax-highlighted code, math formulas, collapsible thinking blocks, context compaction notices, and images. Scrolling up automatically loads older messages; when you scroll away from the bottom, a button appears in the bottom-right corner to jump back down.</p>
+<p>Claude's tool calls are shown as cards: commands and their output, file diffs, newly written files, to-do lists, subagents, web fetches, MCP tools, and more. Click a card's header to expand or collapse its details.</p>
+<p>While Claude is working, a status line with the little mascot appears at the bottom of the conversation (such as “Pondering” (斟酌中) or “Thinking” (思索中)) along with elapsed time. When Claude is waiting on a command or subtask, it shows messages like “Waiting for command to finish” (等待命令执行完成) or “Waiting for subagent to finish” (等待子代理完成); background tasks appear here too. If a session's last run did not finish cleanly, the bottom shows “Terminated · Last run did not complete” (已终止 · 上次运行没有完成).</p>
+
+<h2 id="composer">Composer</h2>
+<p>From the composer you can send text, run commands, mention project files, attach files, and dictate with voice input. Drafts are saved locally on your device, so switching sessions or refreshing the page will not lose what you typed.</p>
+<div class="wrap"><table style="--first-col: 8em">
+<tr><th>Action</th><th>How to do it</th></tr>
+<tr><td>Send and new line</td><td>On desktop, press <kbd>Enter</kbd> to send and <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line. On mobile, the return key inserts a new line; tap the send button on the right to send.</td></tr>
+<tr><td>Queue messages</td><td>You can send messages at any time. Messages sent while Claude is busy are queued and delivered as soon as a turn opens up; click “Recall” (撤回) on a queued message to pull it back.</td></tr>
+<tr><td>Interrupt a task</td><td>Press <kbd>Esc</kbd> or click the stop button to interrupt the current task. If you have queued messages, interrupting sends them right away (“Interrupt current task and send immediately” (中断当前任务并立即发送)). This only works for sessions running in the web app; sessions running in a terminal must be interrupted from that terminal.</td></tr>
+<tr><td>Slash commands</td><td>Type <code>/</code> to open Claude Code's slash command list (including <code>/compact</code>, <code>/context</code>, <code>/usage</code>, <code>/clear</code>, and any skills or plugin commands you have installed). Use the arrow keys to select, <kbd>Tab</kbd> to complete, <kbd>Enter</kbd> to confirm, and <kbd>Esc</kbd> to close.</td></tr>
+<tr><td>Mention files</td><td>Type <code>@</code> to bring up the project file list. Selecting a file inserts its path into the composer so Claude will read it.</td></tr>
+<tr><td>Input history</td><td>Press <kbd>↑</kbd> when the cursor is at the very start of the composer to recall earlier messages you sent, and press <kbd>↓</kbd> at the very end to move forward again.</td></tr>
+<tr><td>Attachments</td><td>Click the paperclip button to pick files, or paste or drag images and files directly into the composer (dragging shows “Drop to add attachment” (松开以添加附件)).</td></tr>
+<tr><td>Voice input</td><td>Click the microphone button to start recording and click again to stop; the transcribed text is inserted into the composer. If the administrator configured an OpenAI-compatible transcription endpoint, transcription runs on the server; otherwise the browser's built-in speech recognition is used. Microphone access requires HTTPS.</td></tr>
+</table></div>
+<figure><img class="shot" src="assets/shots/slash.webp" alt="Command menu popped up after typing a slash in the composer" loading="lazy"><figcaption>Type <code>/</code> to open the slash command list, including built-in commands and installed skills and plugin commands.</figcaption></figure>
+<figure><img class="shot" src="assets/shots/mention.webp" alt="Project file search menu popped up after typing @ in the composer" loading="lazy"><figcaption>Type <code>@</code> to search and mention files in the project.</figcaption></figure>
+
+<h2 id="modes">Permission modes and models</h2>
+<p>Two buttons sit below the composer (or above it on mobile) for switching the permission mode and the model. These settings are saved per session: when a session ends and is later resumed, it keeps the model, reasoning effort, and permission mode it used last time.</p>
+<p>Click the left button or press <kbd>Shift</kbd>+<kbd>Tab</kbd> to cycle through permission modes:</p>
+<div class="wrap"><table style="--first-col: 7em">
+<tr><th>Mode</th><th>Effect</th></tr>
+<tr><td>“Ask every time” (逐项确认)</td><td>Asks for permission before every file edit and command execution.</td></tr>
+<tr><td>“Auto-accept edits” (自动接受编辑)</td><td>Approves file edits automatically, but still asks before running commands.</td></tr>
+<tr><td>“Plan mode” (计划模式)</td><td>Does read-only research first and proposes a plan for your approval.</td></tr>
+<tr><td>“Auto mode” (自动模式)</td><td>Uses a classifier to judge risk and runs safe actions automatically.</td></tr>
+<tr><td>“Bypass permissions” (跳过权限)</td><td>Skips all permission prompts. Dangerous; only appears if enabled by the administrator.</td></tr>
+</table></div>
+<figure><img class="shot medium" src="assets/shots/mode.webp" alt="Permission mode menu listing Ask every time, Auto-accept edits, Plan mode, and other options" loading="lazy"><figcaption>Switch permission modes from the menu or with <kbd>Shift</kbd>+<kbd>Tab</kbd>.</figcaption></figure>
+<p>Click the model button on the right to choose any model supported by Claude Code, and pick the reasoning effort on the row below (<code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, <code>max</code>; available levels depend on the model).</p>
+<figure><img class="shot medium" src="assets/shots/model.webp" alt="Model and reasoning effort menu with the model list on top and effort levels at the bottom" loading="lazy"><figcaption>Choose the model and reasoning effort.</figcaption></figure>
+
+<h2 id="prompts">Approvals and questions</h2>
+<p>When Claude wants to perform an action that needs permission, a confirmation card appears at the bottom of the conversation (for example, “Allow command?” (允许 命令?)) with three buttons:</p>
+<ul>
+  <li><b>“Allow” (允许)</b>: Approve this action once.</li>
+  <li><b>“Allow, and don't ask again for …” (允许，且不再询问 …)</b>: Approve the action and save the rule to local settings so matching actions are not prompted again.</li>
+  <li><b>“Deny” (拒绝)</b>: Reject the action, optionally adding a note to tell Claude why.</li>
+</ul>
+<p>In “Plan mode” (计划模式), once Claude finishes drafting a plan, it also asks you to approve the plan here.</p>
+<figure><img class="shot" src="assets/shots/permission.webp" alt="Command confirmation card at the bottom of the conversation showing the command to run and Allow, Don't ask again, and Deny buttons" loading="lazy"><figcaption>Confirmation card when Claude asks to run a command.</figcaption></figure>
+<p>When Claude uses the question tool to ask you something, an option card appears at the bottom. You can click an option directly (or several for multi-select questions), or type your own answer in “Other (type your own)” (其他（自行输入）) and click “Submit answer” (提交回答); click “Skip” (跳过) if you prefer not to answer.</p>
+<figure><img class="shot" src="assets/shots/question.webp" alt="Question card from Claude with preset choices and a free-text input box" loading="lazy"><figcaption>Option card when Claude asks you a question.</figcaption></figure>
+
+<h2 id="context">Context usage</h2>
+<p>The small ring next to the send button shows how much of the context window the current session has used. The ring fills proportionally, turning orange past 70% and red past 90%.</p>
+<p>Hover over the ring (or tap it on mobile) to see exact numbers, such as “Context used 3%” (上下文已用 3%), “24k / 967k tokens” (24k / 967k tokens), and “943k until auto-compact” (距离自动压缩还有 943k). The percentage is measured against Claude Code's auto-compaction threshold—that is, the context window size minus the buffer reserved for auto-compaction. Right after a compaction, it shows “Context just compacted” (刚压缩过上下文).</p>
+<figure><img class="shot narrow" src="assets/shots/context.webp" alt="Tooltip shown when hovering over the context ring, displaying the percentage used and token counts" loading="lazy"><figcaption>Inspect context usage details for the current session.</figcaption></figure>
+
+<h2 id="sessions">Managing sessions</h2>
+<p>Click “⋯” on the right side of the conversation header to open the session menu:</p>
+<figure><img class="shot narrow" src="assets/shots/session-menu.webp" alt="Session menu in the top-right corner with options to rename, archive, fork as a new session, and more" loading="lazy"><figcaption>The session menu.</figcaption></figure>
+<div class="wrap"><table style="--first-col: 8em">
+<tr><th>Menu item</th><th>What it does</th></tr>
+<tr><td>“Rename” (重命名)</td><td>Change the session title. You can also click the title directly in the header to rename it.</td></tr>
+<tr><td>“Archive” (归档)</td><td>Tuck the session away. Archiving is just a flag; archived sessions are hidden by default.</td></tr>
+<tr><td>“Fork as new session” (分叉为新会话)</td><td>Duplicate the current session and continue from this point without affecting the original session.</td></tr>
+<tr><td>“Copy session ID” (复制会话 ID)</td><td>Copy the ID of this session.</td></tr>
+<tr><td>“Copy terminal resume command” (复制终端恢复命令)</td><td>Copy the <code>claude --resume &lt;ID&gt;</code> command so you can pick the session back up in a terminal.</td></tr>
+<tr><td>“Stop background process” (结束后台进程)</td><td>Shown only when the session is hosted by the web app. Stops the background <code>claude</code> process; it resumes automatically next time you send a message.</td></tr>
+<tr><td>“Pre-start process” (预先启动进程)</td><td>Shown only when the session is not currently running. Spins up the background process ahead of time.</td></tr>
+<tr><td>“Take over from terminal” (从终端转到这里)</td><td>Shown only when viewing a session running in a terminal. See <a href="#terminal">Terminal sessions</a>.</td></tr>
+</table></div>
+<p>In both session lists on the left and right, the “⋯” button next to each session also offers “Rename” (重命名), “Archive” (归档), and “Copy session ID” (复制会话 ID); the “⋯” button next to a project archives the whole project. To view or restore archived items, turn on “Settings → General → Show archived sessions and projects” (设置 → 通用 → 显示已归档的会话和项目); archived items then appear in the list with an “Archived” (已归档) badge, and you can open their menu to choose “Unarchive” (取消归档). Workspace folders that have been deleted on disk are no longer shown.</p>
+<p>You can drag projects in the sidebar to reorder them, and drag sessions in the right panel's “Sessions” (会话) tab as well. The order is saved on the server and synced across all your devices.</p>
+
+<h2 id="terminal">Terminal sessions</h2>
+<p>Sessions in RieszManager are the same Claude Code sessions stored in <code>~/.claude</code> on your machine. Any <code>claude</code> session you start directly in a terminal on the machine also shows up in the web list (with a green dot while running), and you can click in to watch the conversation live. Conversely, any session you continued in the web app can be picked back up in a terminal with <code>claude --resume &lt;session-id&gt;</code>.</p>
+<p>While viewing a terminal session in the web app, you can send it a message directly:</p>
+<ul>
+  <li><b>If the terminal session is idle</b>: The composer notes “Sending will move this terminal session here to continue” (发送后，这个终端会话会转到这里继续). Once you send the message, the <code>claude</code> process in the terminal exits and the web app takes over the session. You can also hand it over without sending a message by clicking “Take over from terminal” (从终端转到这里) in the session menu.</li>
+  <li><b>If the terminal session is busy</b>: The composer notes “The terminal session is busy; your message will be delivered once it's idle” (终端里的会话正在工作，消息会在它空闲后送达). Your message is queued until the task in the terminal finishes and becomes idle, then delivered automatically as the session moves to the web app.</li>
+</ul>
+<p>If you do not want to interrupt the terminal session, use “Fork as new session” (分叉为新会话) from the session menu to branch off a copy in the web app.</p>
+
+<h2 id="files">Project files</h2>
+<p>The “Files” (文件) tab in the right panel shows a read-only file tree of the current project, with git status badges on modified and untracked files. Click any file to open the preview modal:</p>
+<ul>
+  <li><b>Code files</b>: Syntax highlighting and line numbers, with a “Word wrap” (自动换行) toggle.</li>
+  <li><b>Markdown</b>: Rendered as a formatted document; click “View source” (查看源码) to see the raw text.</li>
+  <li><b>Images and PDFs</b>: Previewed inline inside the modal.</li>
+  <li><b>HTML files</b>: Rendered as a live web page with scripts and external resources working, and relative links (CSS, images, other pages) resolving against files in the same project. You can click “View source” (查看源码) or “Open in new tab” (在新标签页打开). Previewed pages run inside an isolated sandbox and cannot access RieszManager's login state or data.</li>
+</ul>
+<p>The top-right corner of the preview modal also has “Copy content” (复制内容) and “Download” (下载) buttons.</p>
+<figure><img class="shot" src="assets/shots/viewer.webp" alt="File preview modal rendering a blog home page HTML, with the file name and buttons for View source, Open in new tab, Copy content, Download, and Close along the top" loading="lazy"><figcaption>HTML files render directly as a live preview, with buttons at the top to view the source or open the page in a new tab.</figcaption></figure>
+
+<h2 id="push">Push notifications</h2>
+<p>Turn on “Settings → General → Push notifications” (设置 → 通用 → 推送通知) and your browser will ask for notification permission; once enabled, click “Send test notification” (发送测试通知) to verify it works. Push settings are per device, so enable them on each device where you want alerts. Push requires the site to be served over HTTPS; see <a href="deploy.html#push">Deployment Guide: Push notifications</a> for server setup details.</p>
+<figure><img class="shot" src="assets/shots/settings.webp" alt="General tab of the settings dialog showing the push notification toggle, test notification button, and Lisi doll settings" loading="lazy"><figcaption>Enable push notifications in “Settings → General” (设置 → 通用).</figcaption></figure>
+<p>Once enabled, four kinds of events trigger a notification, and tapping the notification opens the corresponding session directly:</p>
+<div class="wrap"><table style="--first-col: 8em">
+<tr><th>Event</th><th>Notification</th></tr>
+<tr><td>Claude is waiting for your approval</td><td>Titled “Waiting for approval · Session name” (等你确认 · 会话名), with body text such as “Run command: npm test” (运行命令：npm test). Multiple approvals in a row in the same session only notify once.</td></tr>
+<tr><td>Claude has a question for you</td><td>Titled “Claude has a question · Session name” (Claude 有问题问你 · 会话名), with the question itself as the body.</td></tr>
+<tr><td>A long task finishes</td><td>When a task that ran for more than 1 minute finishes, sends “Task complete · Session name” (任务完成 · 会话名) with the elapsed time and the start of the final reply. Works for terminal sessions too.</td></tr>
+<tr><td>Process exits unexpectedly</td><td>Sends “Session interrupted · Session name” (会话中断 · 会话名).</td></tr>
+</table></div>
+<p>A session you are actively viewing on any device will not send notifications. Payloads are end-to-end encrypted and delivered through your browser vendor's push service, so they arrive even when the browser or app is completely closed:</p>
+<ul>
+  <li><b>Chrome on Android</b>: Uses Google's push service, so the phone must be able to reach Google services. On some Android ROMs you also need to allow Chrome to run in the background and post notifications in the system settings.</li>
+  <li><b>iPhone</b>: Requires iOS 16.4 or later, and you must first add the web page to your Home Screen and open it from the Home Screen before enabling push.</li>
+</ul>
+<p>If the settings page says “Notification permission was denied” (通知权限被拒绝了), re-allow notifications in your browser's site settings.</p>
+
+<h2 id="doll">Lisi doll</h2>
+<p>Lisi (莉思) is the project's mascot. You can enable the desktop doll under “Settings → General → Lisi doll” (设置 → 通用 → 莉思玩偶) (off by default, and stored per device), toggle “Play sound when squished” (捏的时候发出声音), and choose the doll size (small, medium, or large).</p>
+<figure><img class="shot narrow" src="assets/shots/doll.webp" alt="Lisi doll in the corner of the screen with her plan usage and quick phrases bubble open" loading="lazy"><figcaption>The Lisi doll with her usage and quick phrases bubble.</figcaption></figure>
+<p>On desktop, Lisi peeks out from the bottom-right corner of the screen, and you can drag her to the bottom-left corner; if the composer reaches into her corner, she steps up above it automatically. On mobile, she normally peeks out just half her head from the edge of the screen and pops out fully with her bubble when tapped; you can drag her up and down along the edge, or drag past the screen's centerline to move her to the other side, and she tucks herself away while you type.</p>
+<p>Lisi is more than decoration—she also shows your plan usage and inserts phrases you use often:</p>
+<ul>
+  <li><b>Check plan usage</b>: Tap Lisi to open a bubble showing the percentage used and reset time for each quota window of your Claude subscription (such as “This week” (本周)). The numbers come from Claude Code's own <code>/usage</code> command and checking them does not consume any quota.</li>
+  <li><b>Quick phrases</b>: The bubble includes a “Quick phrases” (快捷短语) list; tap any phrase to insert it into the composer (at the cursor, or on a new line after existing text). Click “Edit” (编辑) under “Settings → General → Lisi doll → Quick phrases” (设置 → 通用 → 莉思玩偶 → 快捷短语) to write multi-line phrases and reorder them. Phrases are saved on the server and shared across all your devices.</li>
+  <li><b>Moods and alerts</b>: Her expression changes with what's going on—resting her chin in thought while a session is running, dozing off with floating z's when everything has been idle for a while, and looking worried when your quota is nearly full. When a session is waiting for your approval, an exclamation mark pops up over her head with a reminder, and clicking the session name jumps straight there; she also alerts you the first time your plan usage crosses 80% and 95%.</li>
+  <li><b>Squishing and context menu</b>: Press and hold her to squish her (she flattens and bounces back with a squeak; on desktop she switches to a squished expression, and on mobile she picks a random expression each time you tap her out). Right-click her (or long-press on mobile) to quickly toggle sound, change her size, open “Quick phrases” (快捷短语), “Refresh usage” (刷新用量), or “Hide Lisi” (收起莉思).</li>
+</ul>
+
+<h2 id="mobile">Using on mobile</h2>
+<p>RieszManager has a layout tailored for phone screens. On mobile, the home screen shows the 3 most recent sessions with an “All” (全部) button to open the full list; inside a session, the permission mode and model buttons move above the composer and the send button stays pinned on the far right.</p>
+<figure><img class="shot" src="assets/shots/mobile.webp" alt="Four mobile screenshots from left to right: home screen, session view, left session list drawer, and right project panel drawer" loading="lazy"><figcaption>Mobile interface. From left to right: home screen, session, session list opened by swiping right, and project panel opened by swiping left.</figcaption></figure>
+<ul>
+  <li><b>Swipe gestures</b>: Swipe right anywhere on the screen to open the left session list, or swipe left to open the right project panel; when a drawer is open, swipe back the other way to close it. Swipes that start inside horizontally scrollable areas such as code blocks will not trigger a drawer.</li>
+  <li><b>Back gesture</b>: Pressing the system back button or performing the back gesture closes the topmost overlay first (settings, file preview, menu, drawer, and so on) before navigating back to the previous page.</li>
+  <li><b>Install as an app (PWA)</b>: On Android, open “Settings → General” (设置 → 通用) and tap “Install” (安装) (or use “Add to Home screen / Install app” in the browser menu); on iPhone, open Safari's Share menu and choose “Add to Home Screen”.</li>
+  <li><b>Automatic updates</b>: After a new version is deployed on the server, the app refreshes to the new version automatically the next time you bring it back from the background; if you are in the middle of typing, it shows a “New version available” (有新版本) notice first and updates the next time you background the app.</li>
+</ul>
+
+<h2 id="settings">Settings</h2>
+<p>Click the gear button in the bottom-left corner of the sidebar to open Settings, which has three tabs:</p>
+<ul>
+  <li><b>“General” (通用)</b>: Manage “Push notifications” (推送通知), “Show archived sessions and projects” (显示已归档的会话和项目), “Lisi doll” (莉思玩偶), and (when supported by the browser) “Install app” (安装应用). The bottom shows the current workspace path, the signed-in account, and a “Sign out” (退出登录) button.</li>
+  <li><b>“Security” (安全)</b>: Manage two-factor authentication. Click “Set up” (开始设置), scan the QR code or enter the secret key manually in an authenticator app (Google Authenticator, 1Password, Aegis, and so on), then enter a 6-digit code and click “Enable” (启用); you will then be shown 8 recovery codes—keep them somewhere safe. Once 2FA is enabled, you can “Regenerate recovery codes” (重新生成恢复码) or “Disable two-factor authentication” (关闭两步验证) here (requires a current code or a recovery code; cannot be disabled if the administrator requires 2FA in the server configuration).</li>
+  <li><b>“Devices” (设备)</b>: “Signed-in devices” (已登录的设备) lists all active login sessions (with browser, OS, IP address, and last active time) so you can sign out an individual device or click “Sign out all other devices” (退出其他所有设备); “Recent sign-in attempts” (最近的登录尝试) is shown below.</li>
+</ul>
+<div class="note"><p>If you lose your authenticator device, click “Use a recovery code” (使用恢复码) on the sign-in screen and enter one of your recovery codes (each code works only once). If you have lost both your authenticator and your recovery codes, the administrator can run <code>./rieszctl reset-totp</code> on the server to turn off 2FA, or <code>./rieszctl revoke-sessions</code> to sign out every device. See <a href="deploy.html#account">Accounts and 2FA</a> for details.</p></div>
+
+<h2 id="shortcuts">Keyboard shortcuts</h2>
+<div class="wrap"><table style="--first-col: 10em">
+<tr><th>Key</th><th>Action</th></tr>
+<tr><td><kbd>Enter</kbd></td><td>Send message (on desktop); confirm selection in the command or file menu</td></tr>
+<tr><td><kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>Insert a new line in the composer</td></tr>
+<tr><td><kbd>Esc</kbd></td><td>Interrupt the current task and send queued messages (web-hosted sessions only); close the command or file menu</td></tr>
+<tr><td><kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>Cycle through permission modes</td></tr>
+<tr><td><code>/</code></td><td>Open the slash command menu</td></tr>
+<tr><td><code>@</code></td><td>Open the file mention menu</td></tr>
+<tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Recall input history when the cursor is at the very start (<kbd>↑</kbd>) or very end (<kbd>↓</kbd>) of the composer; move up and down in the command or file menu (<kbd>Ctrl</kbd>+<kbd>P</kbd> / <kbd>Ctrl</kbd>+<kbd>N</kbd> also work)</td></tr>
+<tr><td><kbd>Tab</kbd></td><td>Complete the highlighted item in the command or file menu</td></tr>
+</table></div>
+
+<h2 id="faq">FAQ</h2>
+
+<h3 id="faq-runner">What should I do if the page says “Host runner not connected” (宿主机运行器未连接)?</h3>
+<p>This means the runner service on the server is not running. Ask the administrator to run <code>./rieszctl runner status</code> on the server to check its status; see <a href="deploy.html#troubleshoot">Troubleshooting</a>.</p>
+
+<h3 id="faq-terminal-exit">Why did my terminal session suddenly exit?</h3>
+<p>When you send a message to an idle terminal session from the web app, the session automatically moves over to the web app to continue and the terminal process exits. To go back to working in the terminal, click “Copy terminal resume command” (复制终端恢复命令) in the session menu to get the <code>claude --resume</code> command.</p>
+
+<h3 id="faq-idle-process">Why did the background process for my web session disappear after sitting idle?</h3>
+<p>After a web-hosted session has been idle for a while, its background <code>claude</code> process stops automatically to save server resources. It resumes on its own the next time you send a message from the composer, with your conversation history and context intact.</p>
+
+<h3 id="faq-voice">Why is the voice input button disabled?</h3>
+<p>Browsers only expose the microphone API on HTTPS pages (see <a href="deploy.html#https">Configuring HTTPS</a>). In addition, if the administrator has not configured a server-side transcription endpoint, voice input falls back to the browser's built-in speech recognition, which some browsers do not support.</p>
+
+<h3 id="faq-push">Why am I not receiving push notifications?</h3>
+<p>First check that the push toggle under “Settings → General” (设置 → 通用) is turned on and that clicking “Send test notification” (发送测试通知) delivers a test alert. On Android, Chrome needs connectivity to Google services and permission in the phone's system settings to run in the background and show notifications; on iPhone, you must add the site to the Home Screen from Safari and open it from the Home Screen before enabling push.</p>

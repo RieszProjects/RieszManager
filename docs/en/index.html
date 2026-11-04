@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RieszManager Docs</title>
+<meta name="description" content="RieszManager Docs">
+<link rel="icon" href="../assets/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@500;600&family=JetBrains+Mono:wght@400&display=swap">
+<link rel="stylesheet" href="../assets/style.css">
+<script src="../assets/menu.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <a class="brand" href="index.html"><img src="../assets/logo.png" alt=""><span class="word">Riesz</span><span class="sub">Docs</span></a>
+    <button class="menu-toggle" aria-expanded="false">Menu</button>
+    <nav>
+      <a href="index.html" class="active">Introduction</a><a href="quickstart.html">Quickstart</a><a href="guide.html">User Guide</a><a href="deploy.html">Deployment</a>
+      <a class="lang" href="../index.html">中文</a>
+      <a class="gh" href="https://github.com/RieszProjects/RieszManager"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.19 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+    </nav>
+  </div>
+</header>
+<main class="page single">
+<section class="hero">
+  <div>
+    <div class="hero-title">
+      <img class="hero-logo" src="../assets/head.webp" alt="">
+      <div class="hero-words"><h1>RieszManager</h1><div class="tagline">Manage Claude Code sessions from your browser</div></div>
+    </div>
+    <p class="hero-text">RieszManager (shown as “Riesz” in the UI) is a self-hosted web application for viewing and controlling all Claude Code sessions on a machine from your browser. Whether you are at your desk or away with just your phone, you can open the page at any time to check progress, approve prompts, or start new tasks.</p>
+    <div class="buttons">
+      <a class="btn" href="quickstart.html">Quickstart</a>
+      <a class="btn ghost" href="guide.html">User Guide</a>
+      <a class="btn ghost" href="deploy.html">Deployment</a>
+      <a class="btn ghost" href="https://github.com/RieszProjects/RieszManager"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.19 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+    </div>
+  </div>
+  <div class="hero-art"><div class="shine"></div><img src="../assets/hero.webp" alt="Full-body illustration of the mascot Lisi: a sleepy-looking girl with gray-green hair and cat ears"></div>
+</section>
+
+<section class="home-sheet">
+  <h2 id="what">What is RieszManager</h2>
+  <p>RieszManager is a self-hosted web app that lets you view and control all Claude Code sessions on a single machine from one place in your browser. It works on both desktop and mobile, and on mobile you can install it to your home screen as a standalone app (PWA).</p>
+  <p>Messages you see and send in the browser map directly to the session logs in <code>~/.claude</code> on your machine—they are not separate copies. You can pick up a conversation started in the terminal right in the browser; conversely, after continuing a session in the browser, you can head back to the terminal and resume it seamlessly with <code>claude --resume &lt;session-id&gt;</code>.</p>
+  <p>Because Claude Code needs to run in the host's real environment (with access to your toolchain, credentials, and file permissions), RieszManager splits its work between the host and containers. A small daemon called the runner (a systemd user service) runs on the host to read <code>~/.claude</code>, browse workspace files, and drive <code>claude</code> processes over the <code>stream-json</code> protocol, listening only on a Unix socket accessible to the current user. Meanwhile, the Django backend, frontend web app (PWA), and gateway run inside Docker containers, handling authentication, TOTP two-factor verification, API and real-time connection proxying, and push notifications.</p>
+  <p>If you often run Claude Code across several projects at once, or want to check on a task from your phone and tap through permission prompts while away from your desk, RieszManager is built for you.</p>
+  <div class="gallery">
+    <figure><img class="shot" src="../assets/shots/chat.webp" alt="RieszManager in a desktop browser: sessions grouped by project on the left, conversation with syntax highlighting and tool cards in the center, and the project file panel on the right" loading="lazy"><figcaption>Desktop interface: all sessions grouped by project on the left, full conversation and tool call cards in the middle, and project files on the right.</figcaption></figure>
+    <figure><img class="shot" src="../assets/shots/mobile.webp" alt="Four mobile screenshots: home view, session view, left session list, and right project panel" loading="lazy"><figcaption>Mobile interface: swipe horizontally to open the session list and project panel, or install it to the home screen.</figcaption></figure>
+  </div>
+  <h2 id="features">Features</h2>
+  <ul>
+    <li><b>Session overview and live status</b>: Lists all sessions on the machine grouped by project, showing in real time which ones are running and which are waiting for your confirmation.</li>
+    <li><b>Full conversation rendering</b>: Cleanly displays Markdown text, code blocks, tool call cards, and file diffs; a small ring next to the send button shows context usage.</li>
+    <li><b>Rich input and controls</b>: Queue messages while Claude is running, press <kbd>Esc</kbd> to interrupt a run, use slash commands, reference project files with <code>@</code>, upload attachments, and use voice input.</li>
+    <li><b>Permission prompts and questions</b>: When Claude asks for permission to run a command or edit a file, or asks you a question, approve, deny, or answer right in the browser.</li>
+    <li><b>Take over terminal sessions</b>: Hand off a Claude Code session currently running in a terminal to the web UI at any time and keep working from there.</li>
+    <li><b>Project file tree and preview</b>: Browse the workspace directory tree and inspect file contents in the browser, with live webpage previews for HTML files.</li>
+    <li><b>Push notifications</b>: Supports browser and mobile Web Push notifications, so you get alerted when a task finishes or needs approval even if the tab or PWA is closed.</li>
+    <li><b>Mobile-friendly and secure</b>: Designed with touch gestures and PWA support for phones; protects sign-in with TOTP two-factor authentication for safe access over HTTPS from outside your network.</li>
+  </ul>
+  <h2 id="before">Before You Begin</h2>
+  <ul class="req">
+    <li><b>A Linux machine</b><span>Must run systemd and have Claude Code already installed and signed in under your current user account.</span></li>
+    <li><b>Python and Docker</b><span>The host needs Python 3.10+ (for the runner) along with Docker and Docker Compose v2 (for the backend, frontend, and gateway).</span></li>
+    <li><b>A workspace directory</b><span>Prepare a single parent directory for your code; each top-level subfolder inside it is recognized as a project.</span></li>
+    <li><b>Domain and TLS termination (for external access)</b><span>The gateway listens only on localhost by default. You do not need a domain to try it locally, but to access it from a phone or over the internet you will need a domain and a TLS terminator (such as Cloudflare Tunnel, Caddy, or nginx).</span></li>
+  </ul>
+  <p>Once your environment is ready, pick a section below to get started:</p>
+  <div class="cards">
+    <a class="card" href="quickstart.html"><div class="n">I</div><div class="t">Quickstart</div><p>Install RieszManager on a Linux machine, open it locally in your browser, and send your first message.</p></a>
+    <a class="card" href="guide.html"><div class="n">II</div><div class="t">User Guide</div><p>A complete tour of session takeover, file preview, push notifications, mobile gestures, the Lisi mascot doll, and more.</p></a>
+    <a class="card" href="deploy.html"><div class="n">III</div><div class="t">Deployment</div><p>Install the runner and Docker containers from scratch, and set up HTTPS for external access.</p></a>
+  </div>
+  <h2 id="lisi">About Lisi</h2>
+  <p>Lisi (莉思) is the mascot of RieszManager—the sleepy-looking girl with gray-green hair and cat ears on the app icon and sign-in page. You can enable her in Settings as a desktop doll in the corner of the screen: poke her, check your plan usage at a glance, or tap her to insert quick phrases. See <a href="guide.html#doll">Lisi doll</a> for details.</p>
+</section>
+</main>
+<footer class="foot">RieszManager is an open-source project. Screenshots show demo data. <a href="https://github.com/RieszProjects/RieszManager">GitHub</a></footer>
+</body>
+</html>

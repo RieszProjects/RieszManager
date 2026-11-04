@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RieszManager 文档</title>
+<meta name="description" content="RieszManager 文档">
+<link rel="icon" href="assets/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@500;600&family=JetBrains+Mono:wght@400&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/menu.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <a class="brand" href="index.html"><img src="assets/logo.png" alt=""><span class="word">Riesz</span><span class="sub">文档</span></a>
+    <button class="menu-toggle" aria-expanded="false">目录</button>
+    <nav>
+      <a href="index.html" class="active">前言</a><a href="quickstart.html">快速上手</a><a href="guide.html">使用指南</a><a href="deploy.html">部署教程</a>
+      <a class="lang" href="en/index.html">English</a>
+      <a class="gh" href="https://github.com/RieszProjects/RieszManager"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.19 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+    </nav>
+  </div>
+</header>
+<main class="page single">
+<section class="hero">
+  <div>
+    <div class="hero-title">
+      <img class="hero-logo" src="assets/head.webp" alt="">
+      <div class="hero-words"><h1>RieszManager</h1><div class="tagline">在浏览器里管理Claude Code会话</div></div>
+    </div>
+    <p class="hero-text">RieszManager（界面上显示为「Riesz」）是一个自部署的网页应用，用来在浏览器里查看和操控一台机器上的全部Claude Code会话。无论是坐在电脑前还是只带着手机，你都可以随时打开网页查看进度、回复确认、发起新任务。</p>
+    <div class="buttons">
+      <a class="btn" href="quickstart.html">快速上手</a>
+      <a class="btn ghost" href="guide.html">使用指南</a>
+      <a class="btn ghost" href="deploy.html">部署教程</a>
+      <a class="btn ghost" href="https://github.com/RieszProjects/RieszManager"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.19 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+    </div>
+  </div>
+  <div class="hero-art"><div class="shine"></div><img src="assets/hero.webp" alt="看板娘莉思的全身立绘：灰绿色头发、长着猫耳、一副没睡醒样子的少女"></div>
+</section>
+
+<section class="home-sheet">
+  <h2 id="what">RieszManager是什么</h2>
+  <p>RieszManager是一个自部署的网页应用，用来在浏览器里集中查看和操控一台机器上的全部Claude Code会话。电脑和手机都能用，手机上还可以安装到主屏幕当成独立应用（PWA）使用。</p>
+  <p>网页里看到的、发出的消息，都直接对应机器上<code>~/.claude</code>里的会话记录，并不是另起炉灶的副本。在终端里聊了一半的会话可以直接在网页上接着聊；反过来，在网页上继续过的会话，回到终端用<code>claude --resume &lt;会话ID&gt;</code>也能无缝接上。</p>
+  <p>因为Claude Code必须运行在宿主机的真实环境里（需要用到你的工具链、凭据和文件权限），RieszManager分成宿主机和容器两部分协同工作：宿主机上运行一个叫runner的小守护进程（systemd用户服务），负责读取<code>~/.claude</code>、浏览工作区文件，并以<code>stream-json</code>协议驱动<code>claude</code>进程，它只监听仅当前用户可访问的Unix socket；Django后端、前端网页（PWA）和网关则在Docker容器里运行，负责登录鉴权、TOTP两步验证、接口与实时连接的转发以及推送通知。</p>
+  <p>如果你经常同时在几个项目里跑Claude Code，或者希望离开电脑时用手机看一眼任务跑完没有、顺手点个权限确认，RieszManager就是为这种场景准备的。</p>
+  <div class="gallery">
+    <figure><img class="shot" src="assets/shots/chat.webp" alt="桌面浏览器里的RieszManager界面：左侧按项目列出会话，中间是带代码高亮和工具卡片的对话，右侧是项目的文件面板" loading="lazy"><figcaption>电脑上的界面：左侧按项目归类全部会话，中间完整渲染对话和工具调用卡片，右侧是项目文件。</figcaption></figure>
+    <figure><img class="shot" src="assets/shots/mobile.webp" alt="四张手机截图：首页、会话、左侧会话列表、右侧项目面板" loading="lazy"><figcaption>手机上的界面：横滑打开会话列表和项目面板，可以安装到主屏幕。</figcaption></figure>
+  </div>
+  <h2 id="features">能做什么</h2>
+  <ul>
+    <li><b>会话总览与状态跟踪</b>：按项目归类列出机器上的全部会话，实时标出哪些正在运行、哪些停下来等待你的确认。</li>
+    <li><b>完整渲染对话细节</b>：清晰展示Markdown文本、代码块、工具调用卡片和文件修改diff；发送按钮旁的小圆圈显示上下文用量。</li>
+    <li><b>丰富的输入与控制</b>：支持在Claude运行时随时发送排队消息、按<kbd>Esc</kbd>中断运行、使用斜杠命令、用<code>@</code>引用项目文件，还可以上传附件和语音输入。</li>
+    <li><b>处理权限确认与提问</b>：当Claude请求执行命令、修改文件的权限或向你提问时，直接在网页里点击批准、拒绝或作答。</li>
+    <li><b>接管终端会话</b>：正在终端里运行的Claude Code会话，可以随时从网页端接管过来继续操作。</li>
+    <li><b>项目文件树与预览</b>：直接在网页里浏览工作区的文件目录树并查看文件内容，HTML文件还能直接渲染成网页预览。</li>
+    <li><b>推送通知</b>：支持浏览器与手机Web Push通知，就算把网页或PWA关掉，任务完成或需要确认时也能收到提醒。</li>
+    <li><b>手机适配与安全防护</b>：针对手机屏幕设计了顺手的触摸手势与PWA支持；登录支持TOTP两步验证，配合HTTPS从外网访问也有保障。</li>
+  </ul>
+  <h2 id="before">在开始之前</h2>
+  <ul class="req">
+    <li><b>一台Linux机器</b><span>需要带有systemd，并且已经在当前用户下安装、登录好Claude Code。</span></li>
+    <li><b>Python与Docker环境</b><span>宿主机需安装Python 3.10+（运行runner），以及Docker与Docker Compose v2（运行后端、前端和网关）。</span></li>
+    <li><b>工作区文件夹</b><span>准备一个统一的目录存放代码，它下面的每一个一级子文件夹会被识别为一个项目。</span></li>
+    <li><b>域名与TLS终端（外网访问时）</b><span>网关默认只监听本机。如果只在本机浏览器试用，不需要域名；如果想从手机或外网访问，需要准备一个域名并配置TLS终端（如Cloudflare Tunnel、Caddy或nginx）。</span></li>
+  </ul>
+  <p>准备好上面的环境后，可以根据你的需要选择下面的章节开始阅读：</p>
+  <div class="cards">
+    <a class="card" href="quickstart.html"><div class="n">I</div><div class="t">快速上手</div><p>在一台Linux机器上装好RieszManager，在本机打开网页，完成第一次对话。</p></a>
+    <a class="card" href="guide.html"><div class="n">II</div><div class="t">使用指南</div><p>详细介绍会话接管、文件预览、推送通知、手机手势与莉思玩偶等全部功能。</p></a>
+    <a class="card" href="deploy.html"><div class="n">III</div><div class="t">部署教程</div><p>从零安装runner与Docker容器，配置HTTPS与外网访问。</p></a>
+  </div>
+  <h2 id="lisi">关于莉思</h2>
+  <p>莉思是RieszManager的看板娘——就是应用图标和登录页上那位灰绿色头发、长着猫耳、总是一副没睡醒样子的少女。你可以在设置里把她请到屏幕角落当桌面玩偶，平时戳一戳她、看一眼套餐用量，或者点她快速填入常用短语，详见<a href="guide.html#doll">莉思玩偶</a>。</p>
+</section>
+</main>
+<footer class="foot">RieszManager 是一个开源项目。界面截图来自演示数据。 <a href="https://github.com/RieszProjects/RieszManager">GitHub</a></footer>
+</body>
+</html>

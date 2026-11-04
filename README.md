@@ -4,9 +4,9 @@
 
 <p align="center"><img src="frontend/public/icons/icon-512.png" width="120" alt="Riesz"></p>
 
-![主界面](docs/images/chat.webp)
+![主界面](docs/assets/shots/chat.webp)
 
-![手机界面](docs/images/mobile.webp)
+![手机界面](docs/assets/shots/mobile.webp)
 
 ## 功能
 
@@ -24,8 +24,13 @@
 
 ## 文档
 
-- [使用教程](docs/usage.md)：介绍各项界面功能与日常操作方式。
-- [部署指南](docs/deployment.md)：包含完整的安装步骤、HTTPS 方案、升级与排错说明。
+完整的文档是一个网页站点（中文和英文），源文件在 [`docs/`](docs/) 目录，发布在 GitHub Pages：**[https://rieszprojects.github.io/RieszManager/](https://rieszprojects.github.io/RieszManager/)**。
+
+- [快速上手](https://rieszprojects.github.io/RieszManager/quickstart.html)：在一台 Linux 机器上装好并在本机打开，完成第一次对话。
+- [使用指南](https://rieszprojects.github.io/RieszManager/guide.html)：每个界面和功能的用法，包括推送通知、手机使用和莉思玩偶。
+- [部署教程](https://rieszprojects.github.io/RieszManager/deploy.html)：组件、配置、HTTPS、账号安全、升级、备份、排错和全部环境变量。
+
+English documentation: [https://rieszprojects.github.io/RieszManager/en/](https://rieszprojects.github.io/RieszManager/en/)
 
 ## 架构
 
@@ -69,7 +74,7 @@ $EDITOR .env                 # 至少设置 WORKSPACE_ROOT 和 RIESZ_PUBLIC_ORIG
 ./rieszctl status            # 检查各组件
 ```
 
-然后在 TLS 反向代理（推荐 Cloudflare Tunnel）里把你的域名指向 `http://127.0.0.1:18573`。完整步骤、HTTPS 方案、升级与排错见 [docs/deployment.md](docs/deployment.md)。
+然后在 TLS 反向代理（推荐 Cloudflare Tunnel）里把你的域名指向 `http://127.0.0.1:18573`。完整步骤、HTTPS 方案、升级与排错见[部署教程](https://rieszprojects.github.io/RieszManager/deploy.html)。
 
 ## 常用命令
 
@@ -89,9 +94,11 @@ $EDITOR .env                 # 至少设置 WORKSPACE_ROOT 和 RIESZ_PUBLIC_ORIG
 - **文件与预览安全**：项目文件以只读方式提供；HTML 文件在隔离的沙箱里渲染预览。
 - **权限提醒**：任何能登录的人都能以宿主机用户身份让 Claude 执行命令，因此请务必使用强密码并开启两步验证。
 
-更多安全细节请参见 [部署指南 - 安全说明](docs/deployment.md#9-安全说明)。
+更多安全细节请参见[部署教程：安全说明](https://rieszprojects.github.io/RieszManager/deploy.html#security)。
 
 ## 开发
+
+文档站的页面正文在 `docs/_src/zh/` 和 `docs/_src/en/`，修改后执行 `python3 docs/_src/build.py` 重新生成 `docs/` 下的页面。
 
 三个部分各开一个终端，在仓库根目录下执行：
 
