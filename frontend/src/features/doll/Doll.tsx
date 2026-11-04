@@ -158,10 +158,10 @@ export default function Doll() {
   const isMobile = useIsMobile();
   const pose = isMobile ? "side" : "corner";
   const art = ART[pose];
-  const { sound, voice, size, side, y, update } = useDollPrefs();
+  const { sound, size, side, y, update } = useDollPrefs();
   useEffect(() => {
-    if (sound) squeak.preload(voice);
-  }, [sound, voice]);
+    if (sound) squeak.preload();
+  }, [sound]);
   const live = useApp((s) => s.live);
   const sessions = useApp((s) => s.sessions);
   const route = useUi((s) => s.route);
@@ -328,7 +328,7 @@ export default function Doll() {
     setBoing(false);
     setPressed(true);
     setLastActive(Date.now());
-    if (sound) squeak.press(voice);
+    if (sound) squeak.press();
     if (touch) {
       longPress.current = window.setTimeout(() => {
         const p = press.current;
@@ -380,7 +380,7 @@ export default function Doll() {
     }
     setPressed(false);
     setBoing(true);
-    if (sound) squeak.release(voice);
+    if (sound) squeak.release();
     if (isMobile) setFlash(randomReaction());
     if (isMobile && !out) {
       setOut(true);

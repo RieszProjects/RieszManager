@@ -1,24 +1,13 @@
 /**
- * Squeaky-toy sounds for the doll.
- *
- * The sampled voices are short recordings of real squeaky toys (CC0, see
- * public/doll/sounds/CREDITS.md), each cut into the squeak of pressing and the
- * squeak of letting go. They are decoded once and played through the Web Audio
+ * The doll's squeak: a short recording of a real squeaky toy (CC0, see
+ * public/doll/sounds/CREDITS.md), cut into the squeak of pressing and the
+ * squeak of letting go. Both are decoded once and played through the Web Audio
  * API with a slightly random pitch, so repeated squeezes do not sound identical.
  *
- * The "synth" voice needs no files: a short tone whose pitch glides (up when
- * pressed, down when released), wobbled by a fast vibrato and shaped by a
- * band-pass filter, with a little filtered noise for the puff of air.
+ * A quick tap lifts the finger long before the first squeak has finished; the
+ * second one is then scheduled to follow the first instead of being laid over it,
+ * with about the same gap as in the original recording.
  */
-export const VOICES = {
-  classic: "经典吱吱",
-  short: "短促一声",
-  puppy: "小狗玩具",
-  soft: "软胶玩具",
-  synth: "电子音",
-} as const;
-export type Voice = keyof typeof VOICES;
-
 let ctx: AudioContext | null = null;
 
 function audio(): AudioContext | null {
@@ -31,126 +20,58 @@ function audio(): AudioContext | null {
   }
 }
 
-interface Squeak {
-  from: number;
-  to: number;
-  duration: number;
-  volume: number;
-  wobble: number;
-}
-
-const PRESS: Squeak = { from: 620, to: 1180, duration: 0.15, volume: 0.22, wobble: 34 };
-const RELEASE: Squeak = { from: 1050, to: 560, duration: 0.2, volume: 0.17, wobble: 26 };
-
-function play(s: Squeak): void {
-  const c = audio();
-  if (!c) return;
-  const t = c.currentTime + 0.005;
-  const end = t + s.duration;
-  // Small random detune so repeated squeezes do not sound identical.
-  const detune = 1 + (Math.random() - 0.5) * 0.12;
-
-  const osc = c.createOscillator();
-  osc.type = "triangle";
-  osc.frequency.setValueAtTime(s.from * detune, t);
-  osc.frequency.exponentialRampToValueAtTime(s.to * detune, t + s.duration * 0.75);
-
-  const vibrato = c.createOscillator();
-  vibrato.frequency.value = s.wobble;
-  const vibratoDepth = c.createGain();
-  vibratoDepth.gain.value = s.from * 0.06;
-  vibrato.connect(vibratoDepth).connect(osc.frequency);
-
-  const band = c.createBiquadFilter();
-  band.type = "bandpass";
-  band.frequency.value = 1500;
-  band.Q.value = 0.9;
-
-  const env = c.createGain();
-  env.gain.setValueAtTime(0.0001, t);
-  env.gain.exponentialRampToValueAtTime(s.volume, t + 0.012);
-  env.gain.exponentialRampToValueAtTime(s.volume * 0.6, t + s.duration * 0.6);
-  env.gain.exponentialRampToValueAtTime(0.0001, end);
-  osc.connect(band).connect(env).connect(c.destination);
-
-  // Puff of air.
-  const frames = Math.floor(c.sampleRate * s.duration);
-  const buffer = c.createBuffer(1, frames, c.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < frames; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / frames);
-  const noise = c.createBufferSource();
-  noise.buffer = buffer;
-  const hiss = c.createBiquadFilter();
-  hiss.type = "highpass";
-  hiss.frequency.value = 2400;
-  const hissGain = c.createGain();
-  hissGain.gain.value = s.volume * 0.12;
-  noise.connect(hiss).connect(hissGain).connect(c.destination);
-
-  osc.start(t);
-  vibrato.start(t);
-  noise.start(t);
-  osc.stop(end + 0.02);
-  vibrato.stop(end + 0.02);
-  noise.stop(end);
-}
-
-// ---- sampled voices ---------------------------------------------------------------
+type Part = "press" | "release";
 
 const VOLUME = 0.7;
-const buffers = new Map<string, Promise<AudioBuffer | null>>();
+/** The release squeak may start this long before the press squeak has finished playing. */
+const RELEASE_LEAD = 0.02;
+const buffers = new Map<Part, Promise<AudioBuffer | null>>();
+/** When the current press squeak ends, on the audio clock. */
+let pressEndsAt = 0;
 
-function sample(voice: Voice, part: "press" | "release"): Promise<AudioBuffer | null> {
-  const key = `${voice}-${part}`;
-  let pending = buffers.get(key);
+function sample(part: Part): Promise<AudioBuffer | null> {
+  let pending = buffers.get(part);
   if (!pending) {
     pending = (async () => {
       const c = audio();
       if (!c) return null;
       try {
-        const res = await fetch(`/doll/sounds/${key}.wav`);
+        const res = await fetch(`/doll/sounds/${part}.wav`);
         if (!res.ok) return null;
         return await c.decodeAudioData(await res.arrayBuffer());
       } catch {
         return null;
       }
     })();
-    buffers.set(key, pending);
+    pending.then((buffer) => buffer || buffers.delete(part)); // retry later after a failed fetch
+    buffers.set(part, pending);
   }
   return pending;
 }
 
-async function playSample(voice: Voice, part: "press" | "release"): Promise<void> {
+async function play(part: Part): Promise<void> {
   const c = audio();
-  const buffer = await sample(voice, part);
+  const buffer = await sample(part);
   if (!c || !buffer) return;
   const src = c.createBufferSource();
   src.buffer = buffer;
-  src.playbackRate.value = 0.94 + Math.random() * 0.12;
+  const rate = 0.94 + Math.random() * 0.12;
+  src.playbackRate.value = rate;
   const gain = c.createGain();
   gain.gain.value = VOLUME;
   src.connect(gain).connect(c.destination);
-  src.start();
+  const now = c.currentTime;
+  const when = part === "release" ? Math.max(now, pressEndsAt - RELEASE_LEAD) : now;
+  if (part === "press") pressEndsAt = now + buffer.duration / rate;
+  src.start(when);
 }
 
 export const squeak = {
-  /** Fetch and decode a voice ahead of time, so the first squeeze sounds at once. */
-  preload(voice: Voice): void {
-    if (voice === "synth") return;
-    void sample(voice, "press");
-    void sample(voice, "release");
+  /** Fetch and decode ahead of time, so the first squeeze sounds at once. */
+  preload(): void {
+    void sample("press");
+    void sample("release");
   },
-  press(voice: Voice = "classic"): void {
-    if (voice === "synth") play(PRESS);
-    else void playSample(voice, "press");
-  },
-  release(voice: Voice = "classic"): void {
-    if (voice === "synth") play(RELEASE);
-    else void playSample(voice, "release");
-  },
-  /** Press, then let go: for trying a voice in the settings. */
-  demo(voice: Voice): void {
-    squeak.press(voice);
-    window.setTimeout(() => squeak.release(voice), 380);
-  },
+  press: () => void play("press"),
+  release: () => void play("release"),
 };

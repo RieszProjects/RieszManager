@@ -1,17 +1,16 @@
 /** Settings rows for the doll widget, shown in Settings → General. */
-import { Button, IconButton, MenuItem, Select, Switch, ToggleButton, ToggleButtonGroup, Tooltip } from "@mui/material";
-import { MessageSquareText, Play, Volume2 } from "lucide-react";
+import { Button, Switch, ToggleButton, ToggleButtonGroup } from "@mui/material";
+import { MessageSquareText, Volume2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Mascot } from "@/components/Mascot";
 import { usePhrases } from "./phrases";
 import { PhrasesDialog } from "./PhrasesDialog";
 import { useDollPrefs, type DollSize } from "./prefs";
-import { squeak, VOICES, type Voice } from "./sound";
 
 export const SIZE_LABELS: Record<DollSize, string> = { s: "小", m: "中", l: "大" };
 
 export function DollSettings() {
-  const { enabled, sound, voice, size, update } = useDollPrefs();
+  const { enabled, sound, size, update } = useDollPrefs();
   const phrases = usePhrases((s) => s.phrases);
   const loadPhrases = usePhrases((s) => s.load);
   const [editing, setEditing] = useState(false);
@@ -31,23 +30,7 @@ export function DollSettings() {
         <>
           <div className="rz-settings-row rz-settings-sub">
             <div className="rz-settings-title"><Volume2 size={16} /> 捏的时候发出声音</div>
-            <div className="rz-row-controls">
-              {sound && (
-                <>
-                  <Select size="small" value={voice} onChange={(e) => {
-                    const next = e.target.value as Voice;
-                    update({ voice: next });
-                    squeak.demo(next);
-                  }} sx={{ minWidth: 112, fontSize: 13.5 }}>
-                    {(Object.keys(VOICES) as Voice[]).map((v) => <MenuItem key={v} value={v}>{VOICES[v]}</MenuItem>)}
-                  </Select>
-                  <Tooltip title="试听">
-                    <IconButton size="small" onClick={() => squeak.demo(voice)} aria-label="试听"><Play size={15} /></IconButton>
-                  </Tooltip>
-                </>
-              )}
-              <Switch checked={sound} onChange={(e) => update({ sound: e.target.checked })} />
-            </div>
+            <Switch checked={sound} onChange={(e) => update({ sound: e.target.checked })} />
           </div>
           <div className="rz-settings-row rz-settings-sub">
             <div className="rz-settings-title">大小</div>

@@ -122,4 +122,4 @@ cd frontend && npm install && npm run dev
 
 尚未确定许可协议。
 
-莉思玩偶的捏捏音效剪自 [Freesound](https://freesound.org/) 上以 CC0（公有领域）发布的录音，来源见 [`frontend/public/doll/sounds/CREDITS.md`](frontend/public/doll/sounds/CREDITS.md)。
+莉思玩偶的捏捏音效剪自 [Freesound](https://freesound.org/) 上以 CC0（公有领域）发布的一段录音，来源见 [`frontend/public/doll/sounds/CREDITS.md`](frontend/public/doll/sounds/CREDITS.md)。
