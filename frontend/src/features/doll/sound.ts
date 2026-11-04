@@ -1,11 +1,24 @@
 /**
- * Squeaky-toy sounds, synthesised with the Web Audio API (no audio files).
+ * Squeaky-toy sounds for the doll.
  *
- * A squeak is a short tone whose pitch glides (up when pressed, down when
- * released), wobbled by a fast vibrato and shaped by a band-pass filter, which
- * gives the rubbery "squeeze" character. A little filtered noise adds the puff
- * of air.
+ * The sampled voices are short recordings of real squeaky toys (CC0, see
+ * public/doll/sounds/CREDITS.md), each cut into the squeak of pressing and the
+ * squeak of letting go. They are decoded once and played through the Web Audio
+ * API with a slightly random pitch, so repeated squeezes do not sound identical.
+ *
+ * The "synth" voice needs no files: a short tone whose pitch glides (up when
+ * pressed, down when released), wobbled by a fast vibrato and shaped by a
+ * band-pass filter, with a little filtered noise for the puff of air.
  */
+export const VOICES = {
+  classic: "经典吱吱",
+  short: "短促一声",
+  puppy: "小狗玩具",
+  soft: "软胶玩具",
+  synth: "电子音",
+} as const;
+export type Voice = keyof typeof VOICES;
+
 let ctx: AudioContext | null = null;
 
 function audio(): AudioContext | null {
@@ -82,7 +95,62 @@ function play(s: Squeak): void {
   noise.stop(end);
 }
 
+// ---- sampled voices ---------------------------------------------------------------
+
+const VOLUME = 0.7;
+const buffers = new Map<string, Promise<AudioBuffer | null>>();
+
+function sample(voice: Voice, part: "press" | "release"): Promise<AudioBuffer | null> {
+  const key = `${voice}-${part}`;
+  let pending = buffers.get(key);
+  if (!pending) {
+    pending = (async () => {
+      const c = audio();
+      if (!c) return null;
+      try {
+        const res = await fetch(`/doll/sounds/${key}.wav`);
+        if (!res.ok) return null;
+        return await c.decodeAudioData(await res.arrayBuffer());
+      } catch {
+        return null;
+      }
+    })();
+    buffers.set(key, pending);
+  }
+  return pending;
+}
+
+async function playSample(voice: Voice, part: "press" | "release"): Promise<void> {
+  const c = audio();
+  const buffer = await sample(voice, part);
+  if (!c || !buffer) return;
+  const src = c.createBufferSource();
+  src.buffer = buffer;
+  src.playbackRate.value = 0.94 + Math.random() * 0.12;
+  const gain = c.createGain();
+  gain.gain.value = VOLUME;
+  src.connect(gain).connect(c.destination);
+  src.start();
+}
+
 export const squeak = {
-  press: () => play(PRESS),
-  release: () => play(RELEASE),
+  /** Fetch and decode a voice ahead of time, so the first squeeze sounds at once. */
+  preload(voice: Voice): void {
+    if (voice === "synth") return;
+    void sample(voice, "press");
+    void sample(voice, "release");
+  },
+  press(voice: Voice = "classic"): void {
+    if (voice === "synth") play(PRESS);
+    else void playSample(voice, "press");
+  },
+  release(voice: Voice = "classic"): void {
+    if (voice === "synth") play(RELEASE);
+    else void playSample(voice, "release");
+  },
+  /** Press, then let go: for trying a voice in the settings. */
+  demo(voice: Voice): void {
+    squeak.press(voice);
+    window.setTimeout(() => squeak.release(voice), 380);
+  },
 };

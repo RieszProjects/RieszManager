@@ -742,3 +742,4 @@ body.rz-dragging, body.rz-dragging * { cursor: grabbing !important; user-select:
 .rz-tag.keep { display: inline-flex; align-items: center; gap: 3px; color: var(--amber-strong); border-color: rgba(198, 150, 107, 0.45); }
 .rz-menu-grow { flex: 1; }
 .rz-menu-check { margin-left: 14px; color: var(--sage-strong); }
+.rz-row-controls { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
