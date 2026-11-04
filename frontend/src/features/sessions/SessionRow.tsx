@@ -1,9 +1,10 @@
 import { ListItemIcon, Menu, MenuItem } from "@mui/material";
-import { Archive, ArchiveRestore, Copy, Ellipsis, Pencil } from "lucide-react";
+import { Archive, ArchiveRestore, Check, Copy, Ellipsis, Pencil, Pin } from "lucide-react";
 import { memo, useState } from "react";
 import type { SessionSummary } from "@/api/types";
 import { StatusDot } from "@/components/StatusDot";
 import { copyText } from "@/lib/clipboard";
+import { setKeepAlive } from "@/lib/keepAlive";
 import { relativeTime } from "@/lib/format";
 import { sessionTitle, useApp } from "@/store/app";
 import { useOrganize } from "@/store/organize";
@@ -43,6 +44,18 @@ function SessionActions({ session, archived }: { session: SessionSummary; archiv
           <ListItemIcon>{archived ? <ArchiveRestore size={15} /> : <Archive size={15} />}</ListItemIcon>
           {archived ? "取消归档" : "归档"}
         </MenuItem>
+        <MenuItem onClick={async () => {
+          close();
+          try {
+            await setKeepAlive(session.sessionId, !session.keepAlive);
+          } catch (err) {
+            toast((err as Error).message, "error");
+          }
+        }}>
+          <ListItemIcon><Pin size={15} /></ListItemIcon>
+          <span className="rz-menu-grow">保持运行</span>
+          {session.keepAlive && <Check size={14} className="rz-menu-check" />}
+        </MenuItem>
         <MenuItem onClick={async () => { close(); if (await copyText(session.sessionId)) toast("已复制会话 ID", "success"); }}>
           <ListItemIcon><Copy size={15} /></ListItemIcon>复制会话 ID
         </MenuItem>
@@ -61,6 +74,7 @@ function SessionRowImpl({ session, showProject, active }: Props) {
       <button type="button" className="rz-session-row-btn" onClick={() => navigate({ view: "session", sessionId: session.sessionId })}>
         <div className="rz-session-row-main">
           <span className="rz-session-title clamp-1">{sessionTitle(session)}</span>
+          {session.keepAlive && <Pin size={11} className="rz-keep-pin" aria-label="保持运行" />}
           <StatusDot live={live} size={7} />
         </div>
         <div className="rz-session-row-sub">

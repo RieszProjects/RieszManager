@@ -355,8 +355,24 @@ async def start_session(request: web.Request) -> web.Response:
 
 
 async def stop_session(request: web.Request) -> web.Response:
-    stopped = await request.app[HUB].stop_process(_session_id(request))
-    return _json({"stopped": stopped})
+    hub = request.app[HUB]
+    sid = _session_id(request)
+    # Stopping a session by hand also ends "keep running"; otherwise it would come straight back.
+    kept = hub.prefs.keep_alive(sid)
+    if kept:
+        await hub.set_keep_alive(sid, False)
+    stopped = await hub.stop_process(sid)
+    return _json({"stopped": stopped, "keepAliveCleared": kept})
+
+
+async def keep_alive(request: web.Request) -> web.Response:
+    """Keep a session's claude process running (on: true) or let it stop when idle again."""
+    hub = request.app[HUB]
+    sid = _session_id(request)
+    body = await _body(request)
+    on = bool(body.get("on"))
+    note = await hub.set_keep_alive(sid, on)
+    return _json({"keepAlive": on, "note": note, "state": hub.session_state(sid)})
 
 
 async def interrupt(request: web.Request) -> web.Response:
@@ -652,6 +668,7 @@ def build_app(cfg: Config) -> web.Application:
     r.add_post("/v1/sessions/{sid}/messages", send_message)
     r.add_post("/v1/sessions/{sid}/start", start_session)
     r.add_post("/v1/sessions/{sid}/stop", stop_session)
+    r.add_post("/v1/sessions/{sid}/keep-alive", keep_alive)
     r.add_post("/v1/sessions/{sid}/interrupt", interrupt)
     r.add_post("/v1/sessions/{sid}/cancel", cancel_message)
     r.add_post("/v1/sessions/{sid}/permissions/{rid}", answer_permission)

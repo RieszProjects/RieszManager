@@ -31,6 +31,9 @@ TAIL_INTERVAL = 0.35
 LIVE_INTERVAL = 1.5
 INDEX_INTERVAL = 3.0
 REAP_INTERVAL = 30.0
+KEEP_ALIVE_INTERVAL = 30.0
+# A kept-alive process that ends within this many seconds of being started counts as a crash.
+KEEP_ALIVE_CRASH_WINDOW = 600
 RESET_ITEMS = 160
 EFFORT_LEVELS = {"low", "medium", "high", "xhigh", "max"}
 
@@ -52,6 +55,8 @@ class Hub:
         self.usage = UsageMonitor(cfg)
         # Terminal sessions: when each one started working (to spot long turns finishing).
         self._external_busy_since: dict[str, float] = {}
+        # Sessions to keep running: (last start attempt, consecutive quick deaths).
+        self._revive_state: dict[str, tuple[float, int]] = {}
         self.reload_pending = False
         self.reload_ready = asyncio.Event()
 
@@ -64,6 +69,7 @@ class Hub:
             asyncio.create_task(self._live_loop()),
             asyncio.create_task(self._index_loop()),
             asyncio.create_task(self._reap_loop()),
+            asyncio.create_task(self._keep_alive_loop()),
         ]
 
     # ---- graceful reload ------------------------------------------------------
@@ -220,9 +226,65 @@ class Hub:
                 idle = now - proc.last_activity
                 # last_activity moves with every message from claude, including the
                 # task events, so the idle time counts from when the last task ended.
-                if proc.alive and not proc.working and idle > self.cfg.idle_timeout:
+                if proc.alive and not proc.working and idle > self.cfg.idle_timeout and not self.prefs.keep_alive(sid):
                     log.info("stopping idle claude process for %s", sid)
                     await proc.stop()
+
+    # ---- keep running ---------------------------------------------------------
+
+    async def _keep_alive_loop(self) -> None:
+        """Start the sessions marked "keep running" whenever their process is not running:
+        after a runner restart or reload, and after a crash (backing off if it keeps dying)."""
+        await asyncio.sleep(3.0)
+        while True:
+            ids = self.prefs.keep_alive_ids()
+            if ids:
+                self.store.refresh()
+            for sid in ids:
+                try:
+                    await self._revive(sid)
+                except Exception:  # noqa: BLE001
+                    log.exception("keep-alive: failed to start %s", sid)
+            await asyncio.sleep(KEEP_ALIVE_INTERVAL)
+
+    async def _revive(self, session_id: str) -> None:
+        if self.reload_pending or self.reload_ready.is_set():
+            return
+        proc = self.hosted.get(session_id)
+        if (proc is not None and proc.alive) or session_id in self.live or session_id not in self.store.entries:
+            return  # running here, running in a terminal, or gone
+        now = time.time()
+        last, deaths = self._revive_state.get(session_id, (0.0, 0))
+        if last and now - last < min(60 * 2 ** deaths, 1800):
+            return
+        deaths = deaths + 1 if last and now - last < KEEP_ALIVE_CRASH_WINDOW else 0
+        self._revive_state[session_id] = (now, deaths)
+        try:
+            await self.ensure_process(session_id)
+            log.info("keep-alive: started %s", session_id)
+        except ControlError as exc:
+            log.info("keep-alive: cannot start %s: %s", session_id, exc)
+
+    async def set_keep_alive(self, session_id: str, on: bool) -> str | None:
+        """Mark a session to keep running (starting it now) or not. Returns a note when it
+        could not be started right away."""
+        if session_id not in self.hosted and session_id not in self.store.entries:
+            self.store.refresh()
+            if session_id not in self.store.entries:
+                raise ControlError("unknown session")
+        self.prefs.set_keep_alive(session_id, on)
+        self._revive_state.pop(session_id, None)
+        note = None
+        if on and session_id not in self.live:
+            try:
+                await self.ensure_process(session_id)
+            except ControlError as exc:
+                note = str(exc)
+        elif on:
+            note = "the session is running in a terminal; it will be kept running here once that process ends"
+        await self.broadcast_global({"ev": "sessions", "sessions": [self.session_summary(session_id)], "removed": []})
+        await self.broadcast_session(session_id, {"ev": "state", "state": self.session_state(session_id)})
+        return note
 
     # ---- views --------------------------------------------------------------
 
@@ -240,6 +302,7 @@ class Hub:
         data = entry.summary() if entry else {"sessionId": session_id}
         data["project"] = self.projects.project_id_for(data.get("cwd"))
         data["live"] = self._live_info(session_id)
+        data["keepAlive"] = self.prefs.keep_alive(session_id)
         return data
 
     def _live_info(self, session_id: str) -> dict[str, Any] | None:
@@ -285,6 +348,7 @@ class Hub:
             for key, value in (("model", meta.model), ("effort", effort), ("permissionMode", mode)):
                 if not state.get(key):
                     state[key] = value
+        state["keepAlive"] = self.prefs.keep_alive(session_id)
         return state
 
     def session_state(self, session_id: str) -> dict[str, Any]:

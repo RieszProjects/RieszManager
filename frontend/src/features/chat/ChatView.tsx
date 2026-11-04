@@ -1,10 +1,11 @@
 /** A conversation: header, transcript, live activity, pending prompts and the composer. */
 import { IconButton, ListItemIcon, Menu, MenuItem } from "@mui/material";
 import {
-  Archive, ArchiveRestore, Copy, EllipsisVertical, GitFork, Hand, LoaderCircle, MonitorUp, Pencil, Power, SquareTerminal, TriangleAlert, X,
+  Archive, ArchiveRestore, Check, Copy, EllipsisVertical, GitFork, Hand, LoaderCircle, MonitorUp, Pencil, Pin, Power, SquareTerminal, TriangleAlert, X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { api } from "@/api/client";
+import { setKeepAlive } from "@/lib/keepAlive";
 import { socket } from "@/api/socket";
 import type { QueueEntry, SessionState } from "@/api/types";
 import { Mascot } from "@/components/Mascot";
@@ -49,7 +50,7 @@ function QueueBar({ sessionId, queue }: { sessionId: string; queue: QueueEntry[]
   );
 }
 
-function SessionMenu({ sessionId, state, cwd, title }: { sessionId: string; state: SessionState | null; cwd: string | null; title: string }) {
+function SessionMenu({ sessionId, state, cwd, title, keepAlive }: { sessionId: string; state: SessionState | null; cwd: string | null; title: string; keepAlive: boolean }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const navigate = useUi((s) => s.navigate);
   const setRenameTarget = useUi((s) => s.setRenameTarget);
@@ -82,10 +83,15 @@ function SessionMenu({ sessionId, state, cwd, title }: { sessionId: string; stat
         })}>
           <ListItemIcon><GitFork size={16} /></ListItemIcon>分叉为新会话
         </MenuItem>
+        <MenuItem onClick={() => run(() => setKeepAlive(sessionId, !keepAlive))}>
+          <ListItemIcon><Pin size={16} /></ListItemIcon>
+          <span className="rz-menu-grow">保持运行</span>
+          {keepAlive && <Check size={15} className="rz-menu-check" />}
+        </MenuItem>
         {state?.hosted && state.alive && (
           <MenuItem onClick={() => run(async () => {
-            await api(`sessions/${sessionId}/stop`, { body: {} });
-            toast("已结束后台进程，下次发送消息时会自动恢复", "success");
+            const res = await api<{ keepAliveCleared?: boolean }>(`sessions/${sessionId}/stop`, { body: {} });
+            toast(res.keepAliveCleared ? "已结束后台进程，并关闭了保持运行" : "已结束后台进程，下次发送消息时会自动恢复", "success");
           })}>
             <ListItemIcon><Power size={16} /></ListItemIcon>结束后台进程
           </MenuItem>
@@ -140,6 +146,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
   }, [projectId, setContextProject]);
 
   const state = data?.state ?? null;
+  const keepAlive = Boolean(state?.keepAlive ?? summary?.keepAlive);
   const items = data?.items ?? [];
   const project = projects.find((p) => p.id === projectId);
   const turn = useMemo(() => turnStatus(items, state), [items, state]);
@@ -219,9 +226,10 @@ export function ChatView({ sessionId }: { sessionId: string }) {
               <StatusDot live={live} size={7} />
               {project && <span className="clamp-1">{project.name}</span>}
               {summary?.gitBranch && <span className="dim mono clamp-1">⎇ {summary.gitBranch}</span>}
+              {keepAlive && <span className="rz-tag keep" title="保持运行：空闲时不会被关闭"><Pin size={10} />常驻</span>}
             </div>
           </div>
-          <SessionMenu sessionId={sessionId} state={state} cwd={summary?.cwd ?? null} title={sessionTitle(summary)} />
+          <SessionMenu sessionId={sessionId} state={state} cwd={summary?.cwd ?? null} title={sessionTitle(summary)} keepAlive={keepAlive} />
           {isMobile ? <MobileHeaderButtons side="right" /> : <RightPanelButton />}
         </header>
         <div className="rz-chat-row">

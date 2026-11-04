@@ -45,6 +45,8 @@ export interface SessionSummary {
   live: LiveInfo | null;
   mtime: number;
   size: number;
+  /** The user asked for this session's claude process to stay running. */
+  keepAlive?: boolean;
 }
 
 export interface LiveProcess {
@@ -210,6 +212,7 @@ export interface TaskInfo {
 }
 
 export interface SessionState {
+  keepAlive?: boolean;
   hosted: boolean;
   alive: boolean;
   ready?: boolean;

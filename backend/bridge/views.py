@@ -34,7 +34,7 @@ ROUTES: list[tuple[str, re.Pattern[str], str]] = [
         ("GET", rf"^sessions/(?P<sid>{UUID})/commands$", "/v1/sessions/{sid}/commands"),
         ("GET", rf"^sessions/(?P<sid>{UUID})/context$", "/v1/sessions/{sid}/context"),
         ("GET", rf"^sessions/(?P<sid>{UUID})/context-limits$", "/v1/sessions/{sid}/context-limits"),
-        ("POST", rf"^sessions/(?P<sid>{UUID})/(?P<action>messages|start|stop|interrupt|cancel|model|mode|effort|rename|fork|takeover)$",
+        ("POST", rf"^sessions/(?P<sid>{UUID})/(?P<action>messages|start|stop|interrupt|cancel|model|mode|effort|rename|fork|takeover|keep-alive)$",
          "/v1/sessions/{sid}/{action}"),
         ("POST", rf"^sessions/(?P<sid>{UUID})/permissions/(?P<rid>[\w-]{{1,80}})$",
          "/v1/sessions/{sid}/permissions/{rid}"),

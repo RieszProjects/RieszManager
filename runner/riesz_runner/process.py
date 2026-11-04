@@ -117,6 +117,9 @@ class ClaudeProcess:
             args += ["--model", self.requested_model]
         if self.effort:
             args += ["--effort", self.effort]
+        flags = self.flag_settings()
+        if flags:
+            args += ["--settings", json.dumps(flags)]
         args += self.cfg.extra_args
         if self.cfg.login_shell:
             shell = os.environ.get("SHELL") or "/bin/bash"
@@ -192,6 +195,15 @@ class ClaudeProcess:
     @property
     def busy(self) -> bool:
         return self.turn_active or bool(self.permissions)
+
+    def flag_settings(self) -> dict[str, Any]:
+        """Settings the runner imposes on hosted sessions (on top of the user's own)."""
+        flags: dict[str, Any] = {}
+        if self.cfg.cross_session_inbound:
+            # Headless sessions cannot ask anyone to approve a held cross-session message,
+            # so "hold" would drop messages between sessions in different permission modes.
+            flags["crossSessionInbound"] = self.cfg.cross_session_inbound
+        return flags
 
     @property
     def working(self) -> bool:
@@ -294,7 +306,9 @@ class ClaudeProcess:
         await self._emit_state()
 
     async def set_effort(self, level: str) -> None:
-        await self.control("apply_flag_settings", settings={"effortLevel": level})
+        # Sent with the runner's own flag settings so that they are kept whether claude
+        # merges this update into them or replaces them.
+        await self.control("apply_flag_settings", settings={**self.flag_settings(), "effortLevel": level})
         self.effort = level
         await self._emit_state()
 
@@ -542,6 +556,8 @@ class ClaudeProcess:
             await self._emit_state()
             return
         # Anything else (hooks, SDK MCP servers, elicitation) is not supported by this host.
+        log.info("unsupported control request from claude (%s): %s %s", self.session_id[:8], subtype,
+                 json.dumps(request, ensure_ascii=False)[:300])
         await self._write({
             "type": "control_response",
             "response": {"subtype": "error", "request_id": request_id,

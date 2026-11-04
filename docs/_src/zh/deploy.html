@@ -237,9 +237,10 @@ cd RieszManager
 <tr><td><code>RUNNER_CLAUDE_BIN</code></td><td>空（自动检测）</td><td><code>claude</code>可执行文件的路径</td></tr>
 <tr><td><code>RUNNER_DEFAULT_PERMISSION_MODE</code></td><td><code>default</code></td><td>新会话的默认权限模式：<code>default</code>、<code>acceptEdits</code>、<code>plan</code>、<code>auto</code>或<code>bypassPermissions</code></td></tr>
 <tr><td><code>RUNNER_ALLOW_BYPASS</code></td><td><code>false</code></td><td>是否允许在网页界面中将会话切换到<code>bypassPermissions</code>模式</td></tr>
-<tr><td><code>RUNNER_IDLE_TIMEOUT</code></td><td><code>1800</code></td><td><code>claude</code>进程空闲多少秒后自动停止（下次发消息时会自动恢复）。还有后台命令、子代理或监视任务在运行的进程不算空闲</td></tr>
+<tr><td><code>RUNNER_IDLE_TIMEOUT</code></td><td><code>1800</code></td><td><code>claude</code>进程空闲多少秒后自动停止（下次发消息时会自动恢复）。还有后台命令、子代理或监视任务在运行的进程不算空闲；设置了「保持运行」的会话不受此限制</td></tr>
 <tr><td><code>RUNNER_LOGIN_SHELL</code></td><td><code>true</code></td><td>是否通过登录shell启动<code>claude</code>，使它看到与你终端相同的环境</td></tr>
 <tr><td><code>RUNNER_CHROME</code></td><td><code>auto</code></td><td>从网页端运行的会话是否连接Claude in Chrome：<code>auto</code>（跟随<code>~/.claude.json</code>里的<code>/chrome</code>默认设置）、<code>on</code>或<code>off</code>。非交互式<code>claude</code>只有带<code>--chrome</code>参数时才会连接</td></tr>
+<tr><td><code>RUNNER_CROSS_SESSION_INBOUND</code></td><td><code>accept</code></td><td>网页端会话如何处理来自其他会话的消息（Claude Code的<code>crossSessionInbound</code>设置）。权限模式不同的会话之间，消息默认会扣住等用户批准，但无头运行的会话没有人能批准，消息会过期作废；设为<code>accept</code>直接接收。也可以设为<code>hold</code>、<code>refuse</code>；留空则沿用你自己的Claude Code设置</td></tr>
 <tr><td><code>RUNNER_ALLOW_EXTERNAL_FILES</code></td><td><code>false</code></td><td>是否允许浏览目录位于<code>WORKSPACE_ROOT</code>之外的会话的文件</td></tr>
 <tr><td><code>RUNNER_MAX_FILE_BYTES</code></td><td><code>2097152</code></td><td>文件查看器中允许显示的最大文件大小（字节）</td></tr>
 </table></div>

@@ -57,6 +57,11 @@ def _find_claude_binary() -> str:
     return "claude"
 
 
+def _inbound(value: str | None) -> str:
+    value = (value or "").strip().lower()
+    return value if value in ("accept", "hold", "refuse") else ""
+
+
 @dataclass
 class Config:
     workspace_root: Path
@@ -73,6 +78,9 @@ class Config:
     max_file_bytes: int = 2 * 1024 * 1024
     # Claude in Chrome for hosted sessions: "auto" follows the user's /chrome default, or "on"/"off".
     chrome: str = "auto"
+    # Claude Code's crossSessionInbound for hosted sessions ("", "accept", "hold" or "refuse").
+    # Empty leaves the user's own setting in charge.
+    cross_session_inbound: str = ""
     extra_args: list[str] = field(default_factory=list)
 
     @property
@@ -126,5 +134,6 @@ def load_config(env_file: str | None = None) -> Config:
         allow_external_files=_bool(env.get("RUNNER_ALLOW_EXTERNAL_FILES"), False),
         max_file_bytes=int(env.get("RUNNER_MAX_FILE_BYTES") or 2 * 1024 * 1024),
         chrome=(env.get("RUNNER_CHROME") or "auto").strip().lower(),
+        cross_session_inbound=_inbound(env.get("RUNNER_CROSS_SESSION_INBOUND")),
         extra_args=extra,
     )
