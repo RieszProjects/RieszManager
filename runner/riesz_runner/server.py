@@ -101,6 +101,46 @@ async def plan_usage(request: web.Request) -> web.Response:
     return _json(await request.app[HUB].usage.get(force=force))
 
 
+MAX_PROJECT_NAME_BYTES = 200
+
+
+def _project_name_problem(name: str) -> str | None:
+    """Why `name` cannot be a new project folder, or None. The codes are mapped to messages by the web app."""
+    if not name:
+        return "empty"
+    if name in (".", "..") or name.startswith("."):
+        return "dot"            # hidden folders are not listed as projects
+    if "/" in name or "\\" in name or any(ord(c) < 32 or ord(c) == 127 for c in name):
+        return "chars"
+    if len(name.encode()) > MAX_PROJECT_NAME_BYTES:
+        return "long"
+    return None
+
+
+async def create_project(request: web.Request) -> web.Response:
+    """Create a folder directly under the workspace root; it becomes a project."""
+    hub = request.app[HUB]
+    body = await _body(request)
+    name = str(body.get("name") or "").strip()
+    problem = _project_name_problem(name)
+    if problem:
+        return _json({"error": "invalid project name", "code": problem}, status=400)
+    root = hub.cfg.workspace_root
+    if not root.is_dir():
+        return _json({"error": "the workspace root does not exist", "code": "no-root"}, status=409)
+    path = root / name
+    try:
+        path.mkdir()
+    except FileExistsError:
+        return _json({"error": "a file or folder with this name already exists", "code": "exists"}, status=409)
+    except OSError as exc:
+        return _json({"error": f"cannot create the folder: {exc.strerror}", "code": "os"}, status=409)
+    log.info("created project folder %s", path)
+    project = hub.projects.describe(name, path)
+    project.update(sessionCount=0, lastActivity=project.get("mtime"), liveCount=0)
+    return _json({"project": project})
+
+
 async def list_projects(request: web.Request) -> web.Response:
     hub = request.app[HUB]
     hub.store.refresh()
@@ -669,6 +709,7 @@ def build_app(cfg: Config) -> web.Application:
     r.add_get("/v1/health", health)
     r.add_get("/v1/usage", plan_usage)
     r.add_get("/v1/projects", list_projects)
+    r.add_post("/v1/projects", create_project)
     r.add_get("/v1/projects/{pid}", project_detail)
     r.add_get("/v1/sessions", list_sessions)
     r.add_post("/v1/sessions", create_session)

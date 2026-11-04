@@ -2,8 +2,8 @@
  * Sidebar project tree: each project expands to its sessions; clicking a project
  * opens it; projects can be dragged to reorder and archived from their menu.
  */
-import { ListItemIcon, Menu, MenuItem } from "@mui/material";
-import { Archive, ArchiveRestore, ChevronRight, Ellipsis, Folder, FolderGit2 } from "lucide-react";
+import { IconButton, ListItemIcon, Menu, MenuItem, Tooltip } from "@mui/material";
+import { Archive, ArchiveRestore, ChevronRight, Ellipsis, Folder, FolderGit2, FolderPlus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type HTMLAttributes } from "react";
 import type { Project, SessionSummary } from "@/api/types";
 import { StatusDot } from "@/components/StatusDot";
@@ -189,7 +189,12 @@ export function ProjectTree({ query }: { query: string }) {
   return (
     <div className="rz-side-list">
       <section>
-        <div className="rz-side-label">工作区</div>
+        <div className="rz-side-label rz-side-label-row">
+          <span>工作区</span>
+          <Tooltip title="新建项目">
+            <IconButton size="small" aria-label="新建项目" onClick={() => useUi.getState().setNewProjectOpen(true)}><FolderPlus size={15} /></IconButton>
+          </Tooltip>
+        </div>
         {section(workspace)}
         {workspace.length === 0 && <div className="rz-side-empty">{q ? "没有匹配的项目或会话" : "没有项目"}</div>}
       </section>

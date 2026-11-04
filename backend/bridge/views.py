@@ -23,6 +23,7 @@ ROUTES: list[tuple[str, re.Pattern[str], str]] = [
     (m, re.compile(p), t)
     for m, p, t in [
         ("GET", r"^projects$", "/v1/projects"),
+        ("POST", r"^projects$", "/v1/projects"),
         ("GET", r"^projects/(?P<pid>[^/]{1,512})$", "/v1/projects/{pid}"),
         ("GET", r"^sessions$", "/v1/sessions"),
         ("POST", r"^sessions$", "/v1/sessions"),

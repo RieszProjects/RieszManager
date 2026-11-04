@@ -52,6 +52,7 @@ interface UiStore {
   gallery: ImageGallery | null;
   settingsOpen: boolean;
   newSessionOpen: boolean;
+  newProjectOpen: boolean;
   renameTarget: { sessionId: string; title: string } | null;
   /** Show archived sessions and projects in lists (per device). */
   showArchived: boolean;
@@ -69,6 +70,7 @@ interface UiStore {
   openGallery: (gallery: ImageGallery | null) => void;
   setSettingsOpen: (open: boolean) => void;
   setNewSessionOpen: (open: boolean) => void;
+  setNewProjectOpen: (open: boolean) => void;
   setRenameTarget: (target: UiStore["renameTarget"]) => void;
   setShowArchived: (show: boolean) => void;
   toast: (message: string, severity?: Toast["severity"]) => void;
@@ -89,6 +91,7 @@ export const useUi = create<UiStore>((set) => ({
   gallery: null,
   settingsOpen: false,
   newSessionOpen: false,
+  newProjectOpen: false,
   renameTarget: null,
   showArchived: storage.get("showArchived", false),
   toasts: [],
@@ -120,6 +123,7 @@ export const useUi = create<UiStore>((set) => ({
   openGallery: (gallery) => set({ gallery }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setNewSessionOpen: (newSessionOpen) => set({ newSessionOpen }),
+  setNewProjectOpen: (newProjectOpen) => set({ newProjectOpen }),
   setRenameTarget: (renameTarget) => set({ renameTarget }),
   setShowArchived: (showArchived) => {
     storage.set("showArchived", showArchived);

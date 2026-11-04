@@ -1,5 +1,5 @@
 import { Dialog, DialogContent, DialogTitle } from "@mui/material";
-import { Folder, FolderGit2 } from "lucide-react";
+import { Folder, FolderGit2, FolderPlus } from "lucide-react";
 import { useMemo } from "react";
 import { useOrganizeView } from "@/lib/organize";
 import { useApp } from "@/store/app";
@@ -10,6 +10,7 @@ export function NewSessionDialog() {
   const open = useUi((s) => s.newSessionOpen);
   const setOpen = useUi((s) => s.setNewSessionOpen);
   const navigate = useUi((s) => s.navigate);
+  const setNewProjectOpen = useUi((s) => s.setNewProjectOpen);
   const allProjects = useApp((s) => s.projects);
   const view = useOrganizeView();
   const projects = useMemo(
@@ -36,6 +37,17 @@ export function NewSessionDialog() {
           </button>
         ))}
         {projects.length === 0 && <div className="rz-side-empty">工作区里还没有项目文件夹</div>}
+        <button
+          type="button"
+          className="rz-project-row rz-project-new"
+          onClick={() => {
+            setOpen(false);
+            setNewProjectOpen(true);
+          }}
+        >
+          <FolderPlus size={15} />
+          <span className="rz-project-name">新建项目</span>
+        </button>
       </DialogContent>
     </Dialog>
   );
