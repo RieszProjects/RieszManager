@@ -193,9 +193,12 @@ class MetaScanner:
             att = rec.get("attachment") or {}
             origin = att.get("origin")
             human = not isinstance(origin, dict) or origin.get("kind") in (None, "human")
-            if att.get("type") == "queued_command" and isinstance(att.get("prompt"), str) and human:
+            prompt = att.get("prompt")
+            if isinstance(prompt, list):  # a queued message with images: its text blocks
+                prompt = "\n".join(b.get("text") or "" for b in prompt if isinstance(b, dict) and b.get("type") == "text")
+            if att.get("type") == "queued_command" and isinstance(prompt, str) and human:
                 meta.prompt_count += 1
-                meta.last_prompt = _prompt_preview(att["prompt"])
+                meta.last_prompt = _prompt_preview(prompt)
 
 
 def _plain_user_text(rec: dict[str, Any]) -> str | None:
@@ -312,7 +315,7 @@ class TranscriptView:
         elif rtype == "system":
             self._system(rec)
         elif rtype == "attachment":
-            self._attachment(rec)
+            self._attachment(rec, offset)
 
     def _base(self, rec: dict[str, Any], kind: str, key: str | None = None) -> dict[str, Any]:
         return {
@@ -565,13 +568,30 @@ class TranscriptView:
             item["text"], _ = _clip(content.strip(), MAX_RESULT_CHARS)
             self._add(item)
 
-    def _attachment(self, rec: dict[str, Any]) -> None:
+    def _attachment(self, rec: dict[str, Any], offset: int) -> None:
         att = rec.get("attachment") or {}
         atype = att.get("type")
         if atype == "queued_command":
+            # A message sent while Claude was working, taken in mid-turn. Its prompt is a string, or a
+            # list of content blocks when it carries images.
             prompt = att.get("prompt")
             if isinstance(prompt, str) and prompt.strip():
                 self._add_prompt(rec, prompt, [], origin=att.get("origin") or {}, queued=True)
+            elif isinstance(prompt, list):
+                texts: list[str] = []
+                images: list[dict[str, Any]] = []
+                for idx, block in enumerate(prompt):
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "text":
+                        texts.append(block.get("text") or "")
+                    elif block.get("type") == "image":
+                        images.append(_image_ref(block, offset, ["attachment", "prompt", idx]))
+                    elif block.get("type") == "document":
+                        texts.append(f"[document: {(block.get('title') or 'attachment')}]")
+                text = "\n".join(t for t in texts if t)
+                if text.strip() or images:
+                    self._add_prompt(rec, text, images, origin=att.get("origin") or {}, queued=True)
         elif atype == "hook_system_message":
             text = att.get("content") or att.get("message")
             if isinstance(text, str) and text.strip():
