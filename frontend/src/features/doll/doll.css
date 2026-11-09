@@ -210,17 +210,25 @@
   .rz-doll-zzz span { opacity: 0.7; }
 }
 
-/* Quick phrases inside the bubble. */
-.rz-doll-foot { display: flex; justify-content: flex-start; margin-top: 8px; }
-.rz-doll-chip, .rz-doll-link {
-  display: inline-flex; align-items: center; gap: 5px;
-  border: 1px solid var(--line); border-radius: 999px; background: var(--bg3);
-  color: var(--text2); font: inherit; font-size: 12px; padding: 3px 10px; cursor: pointer;
+/* The panel opened by tapping her: quick phrases, Claude plan usage, other balances. */
+.rz-doll.desktop .rz-doll-bubble.status { width: 300px; max-width: calc(100vw - 32px); }
+.rz-doll.mobile .rz-doll-bubble.status { width: min(300px, calc(100vw - var(--doll-w) - 22px)); max-width: none; }
+.rz-doll-panel { max-height: min(560px, calc(100dvh - 120px)); overflow-y: auto; overscroll-behavior: contain; }
+.rz-doll-sec + .rz-doll-sec { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.rz-doll-sec-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-bottom: 6px; font-size: 11.5px; letter-spacing: 0.04em; color: var(--text3);
 }
-.rz-doll-chip:hover { border-color: var(--sage-deep); color: var(--text); }
-.rz-doll-link { border: 0; background: none; padding: 2px 0; color: var(--text3); }
+.rz-doll-sec .rz-doll-usage { margin-top: 6px; padding-top: 0; border-top: 0; }
+.rz-doll-balances { display: grid; gap: 5px; }
+.rz-doll-balance { display: flex; justify-content: space-between; gap: 12px; font-size: 12.5px; color: var(--text2); }
+.rz-doll-balance .mono { color: var(--text); font-size: 12px; white-space: nowrap; }
+.rz-doll-link {
+  display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; padding: 0;
+  color: var(--text3); font: inherit; font-size: 11.5px; cursor: pointer;
+}
 .rz-doll-link:hover { color: var(--sage-strong); }
-.rz-doll-phrases { display: grid; gap: 4px; margin-top: 8px; max-height: 240px; overflow-y: auto; }
+.rz-doll-phrases { display: grid; gap: 4px; max-height: 156px; overflow-y: auto; }
 .rz-doll-phrase {
   display: block; width: 100%; padding: 6px 9px; border: 1px solid var(--line-soft); border-radius: 9px;
   background: var(--bg1); color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer;

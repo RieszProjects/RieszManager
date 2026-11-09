@@ -139,6 +139,23 @@ cd RieszManager
 </ul>
 <p>各设备上的开启方法与触发时机见<a href="guide.html#push">使用指南：推送通知</a>。</p>
 
+<h2 id="balances">其他服务的余额</h2>
+<p>莉思玩偶的面板可以显示其他AI服务的账户余额，目前支持<code>deepseek</code>、<code>openrouter</code>和<code>novelai</code>三种。要用的话，在runner的状态目录里建一个<code>balances.json</code>（默认是<code>~/.local/state/riesz-manager/balances.json</code>，可以用<code>RUNNER_BALANCES_FILE</code>指定别的位置），列出每个服务和取得它API key的命令：</p>
+<pre><code>{
+  "providers": [
+    {"type": "deepseek", "keyCommand": "cat ~/.config/keys/deepseek"},
+    {"type": "openrouter", "keyCommand": "printenv OPENROUTER_API_KEY"},
+    {"type": "novelai", "keyCommand": "pass show novelai"}
+  ]
+}</code></pre>
+<ul>
+  <li><code>keyCommand</code>在runner用户的登录shell里运行，取输出的最后一个非空行作为key。可以是读文件、读环境变量或调用密码管理器的命令。</li>
+  <li>每次查询时才去取key，查完就丢掉；key不会写进日志，也不会发给浏览器，浏览器只拿到余额数字。</li>
+  <li>余额最多每15分钟查一次；在莉思的右键菜单里点「刷新用量」会马上重查（每分钟最多一次）。</li>
+  <li>改了这个文件不用重启runner，下次查询时就会生效。可选的<code>"label"</code>字段可以改显示的名字。</li>
+</ul>
+<p>这个文件里有你的key怎么取的信息，建议设成只有自己能读（<code>chmod 600</code>）。</p>
+
 <h2 id="upgrade">升级</h2>
 <p>拉取新代码后，依次更新runner和容器：</p>
 <pre><code>git pull
@@ -241,6 +258,7 @@ cd RieszManager
 <tr><td><code>RUNNER_LOGIN_SHELL</code></td><td><code>true</code></td><td>是否通过登录shell启动<code>claude</code>，使它看到与你终端相同的环境</td></tr>
 <tr><td><code>RUNNER_CHROME</code></td><td><code>auto</code></td><td>从网页端运行的会话是否连接Claude in Chrome：<code>auto</code>（跟随<code>~/.claude.json</code>里的<code>/chrome</code>默认设置）、<code>on</code>或<code>off</code>。非交互式<code>claude</code>只有带<code>--chrome</code>参数时才会连接</td></tr>
 <tr><td><code>RUNNER_CROSS_SESSION_INBOUND</code></td><td><code>accept</code></td><td>网页端会话如何处理来自其他会话的消息（Claude Code的<code>crossSessionInbound</code>设置）。权限模式不同的会话之间，消息默认会扣住等用户批准，但无头运行的会话没有人能批准，消息会过期作废；设为<code>accept</code>直接接收。也可以设为<code>hold</code>、<code>refuse</code>；留空则沿用你自己的Claude Code设置</td></tr>
+<tr><td><code>RUNNER_BALANCES_FILE</code></td><td>（空）</td><td>莉思玩偶显示的其他服务余额的配置文件，默认是<code>RUNNER_STATE_DIR</code>下的<code>balances.json</code>，见<a href="#balances">其他服务的余额</a>。</td></tr>
 <tr><td><code>RUNNER_ALLOW_EXTERNAL_FILES</code></td><td><code>false</code></td><td>是否允许浏览目录位于<code>WORKSPACE_ROOT</code>之外的会话的文件</td></tr>
 <tr><td><code>RUNNER_MAX_FILE_BYTES</code></td><td><code>2097152</code></td><td>文件查看器中允许显示的最大文件大小（字节）</td></tr>
 </table></div>

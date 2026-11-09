@@ -16,6 +16,7 @@ from .live import LiveProcess, scan_live
 from .process import ClaudeProcess, ControlError
 from .projects import ProjectResolver
 from .session_prefs import SessionPrefs
+from .balances import BalanceMonitor
 from .usage import UsageMonitor
 from .attention import LONG_TURN_SECONDS, describe_request, session_title
 from .store import SessionStore
@@ -53,6 +54,7 @@ class Hub:
         self.delivery: Delivery | None = None
         self.prefs = SessionPrefs(cfg.state_dir / "session_settings.json")
         self.usage = UsageMonitor(cfg)
+        self.balances = BalanceMonitor(cfg)
         # Terminal sessions: when each one started working (to spot long turns finishing).
         self._external_busy_since: dict[str, float] = {}
         # Sessions to keep running: (last start attempt, consecutive quick deaths).

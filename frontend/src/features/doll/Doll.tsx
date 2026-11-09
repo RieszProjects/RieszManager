@@ -6,6 +6,8 @@
  *   When the composer reaches into her corner she stands on top of it instead.
  * - Phone: only half of her head peeks in from a screen edge. Tap to bring her
  *   out (and see the usage), drag to move her along the edge or to the other side.
+ * - Tapping her opens a panel: quick phrases, the Claude plan usage and the balances
+ *   of other AI services (when the runner is configured to check them).
  * - Press and hold to squeeze. Right-click (desktop) or long-press (phone) for options.
  *
  * Everything lives in a fixed overlay that ignores pointer events except on her
@@ -23,6 +25,7 @@ import { toast, useUi } from "@/store/ui";
 import { ART, EXPRESSIONS, type Expression } from "./art";
 import { SIZE_LABELS } from "./DollSettings";
 import * as say from "./lines";
+import { formatBalance, useBalances, type Balances } from "./balances";
 import { phraseLabel, usePhrases } from "./phrases";
 import { PhrasesDialog } from "./PhrasesDialog";
 import { useDollPrefs, type DollSize } from "./prefs";
@@ -35,7 +38,7 @@ const DRAG_THRESHOLD = 6;
 const LONG_PRESS_MS = 900;
 const SQUEEZE_MS = 320;
 const SLEEP_AFTER_MS = 3 * 60 * 1000;
-const BUBBLE_MS = { status: 7000, squish: 2600, waiting: 9000, warn: 9000, phrases: 15000 } as const;
+const BUBBLE_MS = { status: 15000, squish: 2600, waiting: 9000, warn: 9000 } as const;
 /** Phones: fraction of her width hidden beyond the edge while she only peeks. */
 const PEEK_HIDDEN = 0.42;
 
@@ -45,6 +48,8 @@ interface Bubble {
   kind: BubbleKind;
   text: string;
   usage?: boolean;
+  /** Opened before the usage had loaded: say the line again once it has. */
+  awaitUsage?: boolean;
   action?: { label: string; run: () => void };
   id: number;
 }
@@ -101,6 +106,23 @@ function UsageRows({ usage }: { usage: Usage | null }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function BalanceRows({ balances }: { balances: Balances }) {
+  return (
+    <div className="rz-doll-balances">
+      {balances.providers.map((p) => (
+        <div key={p.id} className="rz-doll-balance">
+          <span>{p.label}</span>
+          {p.error ? (
+            <span className="dim" title={p.error}>查询失败</span>
+          ) : (
+            <span className="mono">{p.balances.map(formatBalance).join(" · ") || "—"}</span>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -167,6 +189,7 @@ export default function Doll() {
   const route = useUi((s) => s.route);
   const navigate = useUi((s) => s.navigate);
   const { usage, reload } = useUsage();
+  const { balances, reload: reloadBalances } = useBalances();
 
   const [pressed, setPressed] = useState(false);
   const [boing, setBoing] = useState(false);
@@ -246,14 +269,20 @@ export default function Doll() {
   useEffect(() => () => window.clearTimeout(bubbleTimer.current), []);
 
   // ---- quick phrases -----------------------------------------------------------
-  const openPhrases = useCallback(() => {
-    const show = () => {
-      setOut(true);
-      showBubble({ kind: "phrases", text: usePhrases.getState().phrases.length ? "要说什么？" : "还没有快捷短语。" });
-    };
-    if (usePhrases.getState().loaded) show();
-    else usePhrases.getState().load().then(show, () => toast("快捷短语加载失败", "error"));
-  }, [showBubble]);
+  const statusText = say.statusLine({ peak, limited, sleeping, busy });
+  const usageRef = useRef(usage);
+  usageRef.current = usage;
+  useEffect(() => {
+    if (usage && bubble?.kind === "status" && bubble.awaitUsage) setBubble({ ...bubble, text: statusText, awaitUsage: false });
+    // statusText is derived from usage; re-run only when usage arrives
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usage, bubble]);
+  /** The panel shown when she is tapped: quick phrases, plan usage, other balances. */
+  const openStatus = useCallback((text: string) => {
+    showBubble({ kind: "status", text, usage: true, awaitUsage: !usageRef.current });
+    if (!usePhrases.getState().loaded) usePhrases.getState().load().catch(() => toast("快捷短语加载失败", "error"));
+    void reloadBalances();
+  }, [showBubble, reloadBalances]);
 
   const pickPhrase = (text: string) => {
     if (composerBus.insert(text)) {
@@ -384,7 +413,7 @@ export default function Doll() {
     if (isMobile) setFlash(randomReaction());
     if (isMobile && !out) {
       setOut(true);
-      showBubble({ kind: "status", text: say.statusLine({ peak, limited, sleeping, busy }), usage: true });
+      openStatus(statusText);
       void reload(true);
       return;
     }
@@ -396,7 +425,7 @@ export default function Doll() {
       closeBubble();
       return;
     }
-    showBubble({ kind: "status", text: say.statusLine({ peak, limited, sleeping, busy }), usage: true });
+    openStatus(statusText);
     if (!usage || Date.now() / 1000 - usage.fetchedAt > 60) void reload(true);
   };
 
@@ -470,37 +499,47 @@ export default function Doll() {
           onPointerEnter={() => { hovering.current = true; }}
           onPointerLeave={() => { hovering.current = false; }}
         >
-          <div className="rz-doll-line">{bubble.text}</div>
-          {bubble.usage && <UsageRows usage={usage} />}
-          {bubble.action && (
-            <button type="button" className="rz-doll-action" onClick={() => { bubble.action?.run(); closeBubble(); }}>
-              {bubble.action.label} →
-            </button>
-          )}
-          {bubble.kind === "phrases" && (
-            <>
-              {phrases.length > 0 && (
-                <div className="rz-doll-phrases">
-                  {phrases.map((p) => (
-                    <button key={p.id} type="button" className="rz-doll-phrase" title={p.text} onClick={() => pickPhrase(p.text)}>
-                      {phraseLabel(p.text)}
-                    </button>
-                  ))}
+          {bubble.kind === "status" ? (
+            <div className="rz-doll-panel">
+              <section className="rz-doll-sec">
+                <div className="rz-doll-sec-head">
+                  <span>快捷短语</span>
+                  <button type="button" className="rz-doll-link" onClick={() => { closeBubble(); setEditingPhrases(true); }}>
+                    <Pencil size={11} /> {phrases.length ? "编辑" : "添加"}
+                  </button>
                 </div>
+                {phrases.length > 0 && (
+                  <div className="rz-doll-phrases">
+                    {phrases.map((p) => (
+                      <button key={p.id} type="button" className="rz-doll-phrase" title={p.text} onClick={() => pickPhrase(p.text)}>
+                        {phraseLabel(p.text)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+              <section className="rz-doll-sec">
+                <div className="rz-doll-sec-head"><span>Claude 额度</span></div>
+                <div className="rz-doll-line">{bubble.text}</div>
+                <UsageRows usage={usage} />
+              </section>
+              {balances && balances.providers.length > 0 && (
+                <section className="rz-doll-sec">
+                  <div className="rz-doll-sec-head"><span>余额</span></div>
+                  <BalanceRows balances={balances} />
+                </section>
               )}
-              <div className="rz-doll-foot">
-                <button type="button" className="rz-doll-link" onClick={() => { closeBubble(); setEditingPhrases(true); }}>
-                  <Pencil size={12} /> {phrases.length ? "编辑短语" : "添加短语"}
-                </button>
-              </div>
-            </>
-          )}
-          {(bubble.kind === "status" || bubble.kind === "warn") && (
-            <div className="rz-doll-foot">
-              <button type="button" className="rz-doll-chip" onClick={openPhrases}>
-                <MessageSquareText size={13} /> 快捷短语
-              </button>
             </div>
+          ) : (
+            <>
+              <div className="rz-doll-line">{bubble.text}</div>
+              {bubble.usage && <UsageRows usage={usage} />}
+              {bubble.action && (
+                <button type="button" className="rz-doll-action" onClick={() => { bubble.action?.run(); closeBubble(); }}>
+                  {bubble.action.label} →
+                </button>
+              )}
+            </>
           )}
         </div>
       )}
@@ -549,12 +588,12 @@ export default function Doll() {
           <ListItemIcon>{sound ? <Volume2 size={15} /> : <VolumeX size={15} />}</ListItemIcon>
           <ListItemText>{sound ? "关闭声音" : "打开声音"}</ListItemText>
         </MenuItem>
-        <MenuItem dense onClick={() => { setMenu(null); openPhrases(); }}>
+        <MenuItem dense onClick={() => { setMenu(null); setOut(true); openStatus(statusText); }}>
           <ListItemIcon><MessageSquareText size={15} /></ListItemIcon>
           <ListItemText>快捷短语</ListItemText>
         </MenuItem>
         {(Object.keys(SIZE_LABELS) as DollSize[]).map(sizeItem)}
-        <MenuItem dense onClick={() => { setMenu(null); void reload(true); showBubble({ kind: "status", text: "刚看了一眼。", usage: true }); }}>
+        <MenuItem dense onClick={() => { setMenu(null); void reload(true); void reloadBalances(true); openStatus("刚看了一眼。"); }}>
           <ListItemIcon><RefreshCw size={15} /></ListItemIcon>
           <ListItemText>刷新用量</ListItemText>
         </MenuItem>

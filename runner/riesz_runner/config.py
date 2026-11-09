@@ -81,6 +81,8 @@ class Config:
     # Claude Code's crossSessionInbound for hosted sessions ("", "accept", "hold" or "refuse").
     # Empty leaves the user's own setting in charge.
     cross_session_inbound: str = ""
+    # Other AI services whose balances the doll shows (see balances.py); empty: <state dir>/balances.json.
+    balances_path: str = ""
     extra_args: list[str] = field(default_factory=list)
 
     @property
@@ -102,6 +104,10 @@ class Config:
     @property
     def own_history_file(self) -> Path:
         return self.state_dir / "history.jsonl"
+
+    @property
+    def balances_file(self) -> Path:
+        return Path(os.path.expanduser(self.balances_path)) if self.balances_path else self.state_dir / "balances.json"
 
 
 def _state_dir(env: dict[str, str]) -> Path:
@@ -144,5 +150,6 @@ def load_config(env_file: str | None = None) -> Config:
         max_file_bytes=int(env.get("RUNNER_MAX_FILE_BYTES") or 2 * 1024 * 1024),
         chrome=(env.get("RUNNER_CHROME") or "auto").strip().lower(),
         cross_session_inbound=_inbound(env.get("RUNNER_CROSS_SESSION_INBOUND")),
+        balances_path=env.get("RUNNER_BALANCES_FILE") or "",
         extra_args=extra,
     )

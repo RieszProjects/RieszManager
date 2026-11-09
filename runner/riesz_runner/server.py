@@ -101,6 +101,12 @@ async def plan_usage(request: web.Request) -> web.Response:
     return _json(await request.app[HUB].usage.get(force=force))
 
 
+async def balances(request: web.Request) -> web.Response:
+    """Balances of other AI services (see balances.py). `?refresh=1` checks again unless checked in the last minute."""
+    force = request.query.get("refresh") in ("1", "true")
+    return _json(await request.app[HUB].balances.get(force=force))
+
+
 MAX_PROJECT_NAME_BYTES = 200
 
 
@@ -713,6 +719,7 @@ def build_app(cfg: Config) -> web.Application:
     r = app.router
     r.add_get("/v1/health", health)
     r.add_get("/v1/usage", plan_usage)
+    r.add_get("/v1/balances", balances)
     r.add_get("/v1/projects", list_projects)
     r.add_post("/v1/projects", create_project)
     r.add_get("/v1/projects/{pid}", project_detail)
