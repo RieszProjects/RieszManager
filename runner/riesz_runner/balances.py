@@ -36,7 +36,7 @@ MIN_REFRESH_SECONDS = 60
 KEY_TIMEOUT = 30
 HTTP_TIMEOUT = aiohttp.ClientTimeout(total=20)
 
-Balance = dict[str, Any]   # {"amount": float, "unit": "USD" | "CNY" | "Anlas"}
+Balance = dict[str, Any]   # {"amount": float, "unit": "USD" | "CNY" | "Anlas" | a NovelAI tier name}
 
 
 async def _json(session: aiohttp.ClientSession, url: str, auth: str) -> Any:
@@ -60,12 +60,20 @@ async def _openrouter(session: aiohttp.ClientSession, key: str) -> list[Balance]
     return [{"amount": float(data.get("total_credits") or 0) - float(data.get("total_usage") or 0), "unit": "USD"}]
 
 
+NOVELAI_TIERS = {1: "Tablet", 2: "Scroll", 3: "Opus"}
+
+
 async def _novelai(session: aiohttp.ClientSession, key: str) -> list[Balance]:
+    """The subscription's monthly Anlas (unit: the tier's name, e.g. Opus) and the purchased Anlas."""
     # api.novelai.net refuses third-party clients; the image host serves the same endpoint.
     data = await _json(session, "https://image.novelai.net/user/subscription", f"Bearer {key}")
     steps = data.get("trainingStepsLeft") or {}
-    anlas = int(steps.get("fixedTrainingStepsLeft") or 0) + int(steps.get("purchasedTrainingSteps") or 0)
-    return [{"amount": anlas, "unit": "Anlas"}]
+    out: list[Balance] = []
+    tier = NOVELAI_TIERS.get(data.get("tier"))
+    if tier and data.get("active"):
+        out.append({"amount": int(steps.get("fixedTrainingStepsLeft") or 0), "unit": tier})
+    out.append({"amount": int(steps.get("purchasedTrainingSteps") or 0), "unit": "Anlas"})
+    return out
 
 
 FETCHERS: dict[str, tuple[str, Callable[[aiohttp.ClientSession, str], Awaitable[list[Balance]]]]] = {

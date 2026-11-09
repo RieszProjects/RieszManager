@@ -7,7 +7,7 @@
  * - Phone: only half of her head peeks in from a screen edge. Tap to bring her
  *   out (and see the usage), drag to move her along the edge or to the other side.
  * - Tapping her opens a panel: quick phrases, the Claude plan usage and the balances
- *   of other AI services (when the runner is configured to check them).
+ *   of other AI services (when the runner is configured to check them), then what she says.
  * - Press and hold to squeeze. Right-click (desktop) or long-press (phone) for options.
  *
  * Everything lives in a fixed overlay that ignores pointer events except on her
@@ -520,7 +520,6 @@ export default function Doll() {
               </section>
               <section className="rz-doll-sec">
                 <div className="rz-doll-sec-head"><span>Claude 额度</span></div>
-                <div className="rz-doll-line">{bubble.text}</div>
                 <UsageRows usage={usage} />
               </section>
               {balances && balances.providers.length > 0 && (
@@ -529,6 +528,9 @@ export default function Doll() {
                   <BalanceRows balances={balances} />
                 </section>
               )}
+              <section className="rz-doll-sec">
+                <div className="rz-doll-line">{bubble.text}</div>
+              </section>
             </div>
           ) : (
             <>

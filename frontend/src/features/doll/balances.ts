@@ -21,11 +21,11 @@ export interface Balances {
 
 const SYMBOLS: Record<string, string> = { USD: "$", CNY: "¥" };
 
-/** "$58.33", "-¥1.28", "19,826 Anlas" */
+/** "$58.33", "-¥1.28", "Opus 10,000", "Anlas 9,826" */
 export function formatBalance(b: Balance): string {
   const symbol = SYMBOLS[b.unit];
   if (symbol) return `${b.amount < 0 ? "-" : ""}${symbol}${Math.abs(b.amount).toFixed(2)}`;
-  return `${Math.round(b.amount).toLocaleString("en-US")} ${b.unit}`;
+  return `${b.unit} ${Math.round(b.amount).toLocaleString("en-US")}`;
 }
 
 export function useBalances() {
