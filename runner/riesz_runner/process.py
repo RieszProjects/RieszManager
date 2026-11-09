@@ -27,6 +27,7 @@ _PARENT_ENV_PREFIXES = ("CLAUDE_CODE_", "CLAUDECODE")
 _PARENT_ENV_NAMES = {"CLAUDE_PID", "CLAUDE_EFFORT", "AI_AGENT"}
 
 STREAM_FLUSH_SECONDS = 0.06
+PROGRESS_EMIT_SECONDS = 1.5
 _EFFORT_COMMAND = re.compile(r"^/effort\s+(low|medium|high|xhigh|max)\b")
 STDERR_TAIL_LINES = 60
 
@@ -77,6 +78,7 @@ class ClaudeProcess:
         self.permissions: dict[str, dict[str, Any]] = {}
         # Top-level tasks claude is running (foreground tool runs, subagents, background jobs).
         self.tasks: dict[str, dict[str, Any]] = {}
+        self._progress_emitted = 0.0
         self.partial: dict[str, Any] | None = None
         self.last_result: dict[str, Any] | None = None
         self.stderr_tail: deque[str] = deque(maxlen=STDERR_TAIL_LINES)
@@ -463,6 +465,11 @@ class ClaudeProcess:
             await self.sink(self, {"ev": "notice", "level": "warning", "text": _retry_text(msg)})
         elif subtype in ("compact_boundary", "local_command_output", "informational"):
             await self.sink(self, {"ev": "transcript"})
+        elif subtype == "task_progress":
+            # Frequent (every tool a subagent runs): pass it on at most every PROGRESS_EMIT_SECONDS.
+            if self._track_progress(msg) and time.time() - self._progress_emitted > PROGRESS_EMIT_SECONDS:
+                self._progress_emitted = time.time()
+                await self._emit_state()
         elif subtype in ("task_started", "task_updated", "task_notification", "background_tasks_changed"):
             if self._track_task(subtype, msg):
                 await self._emit_state()
@@ -473,6 +480,28 @@ class ClaudeProcess:
             if isinstance(commands, list):
                 self.init_info["commands"] = commands
                 await self.sink(self, {"ev": "commands"})
+
+    def _track_progress(self, msg: dict[str, Any]) -> bool:
+        task = self.tasks.get(msg.get("task_id") or "")
+        if task is None:
+            return False
+        usage = msg.get("usage") if isinstance(msg.get("usage"), dict) else {}
+        task["progress"] = {
+            "tokens": usage.get("total_tokens"),
+            "toolUses": usage.get("tool_uses"),
+            "durationMs": usage.get("duration_ms"),
+            "lastTool": msg.get("last_tool_name"),
+        }
+        return True
+
+    async def stop_task(self, task_id: str) -> None:
+        """Stop one running task (a subagent or a background command); the session carries on."""
+        await self.control("stop_task", task_id=task_id)
+
+    async def background_task(self, tool_use_id: str) -> bool:
+        """Move a foreground task to the background, so the session can take the next message."""
+        result = await self.control("background_tasks", tool_use_id=tool_use_id)
+        return bool(result.get("backgrounded", True))
 
     def _track_task(self, subtype: str, msg: dict[str, Any]) -> bool:
         """Update `self.tasks` from a task event; returns True if anything changed."""

@@ -155,6 +155,19 @@
   background-image: repeating-conic-gradient(#1b1f1c 0% 25%, #222723 0% 50%); background-size: 22px 22px; }
 .rz-fileviewer-image img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .rz-fileviewer-pdf { width: 100%; height: 100%; border: none; background: #fff; }
+/* Subagents: the bar under an Agent card, and the window with the subagent's conversation. */
+.rz-subagent-bar { display: flex; align-items: center; gap: 6px; padding: 5px 10px 6px 34px; border-top: 1px dashed var(--line-soft); font-size: 12px; }
+.rz-subagent-progress { color: var(--text2); min-width: 0; }
+.rz-subagent-btn {
+  flex-shrink: 0; border: 1px solid var(--line); border-radius: 7px; background: var(--bg3); color: var(--text2);
+  font: inherit; font-size: 12px; padding: 2px 9px; cursor: pointer;
+}
+.rz-subagent-btn:hover:not(:disabled) { color: var(--text); border-color: var(--sage-deep); }
+.rz-subagent-btn:disabled { opacity: 0.5; cursor: default; }
+.rz-subagent-btn.danger:hover:not(:disabled), .rz-subagent-btn.danger.confirm { color: var(--danger); border-color: var(--danger); }
+.rz-subagent-body { padding: 8px 0 16px; }
+.rz-subagent-more { display: flex; justify-content: center; padding: 6px 0 2px; }
+.rz-subagent-running { display: flex; align-items: center; gap: 6px; font-size: 12.5px; padding-top: 6px; }
 .rz-fileviewer-audio { display: flex; align-items: center; justify-content: center; min-height: 100%; padding: 32px 20px; }
 .rz-fileviewer-audio audio { width: min(560px, 100%); color-scheme: dark; }
 

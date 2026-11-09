@@ -1,12 +1,12 @@
 import { CheckCircle2, ChevronRight, Circle, CircleDot, CircleSlash, LoaderCircle, TriangleAlert } from "lucide-react";
-import { memo, useState, type ReactNode } from "react";
-import { imageUrl } from "@/api/client";
+import { memo, useEffect, useState, type ReactNode } from "react";
+import { api, imageUrl } from "@/api/client";
 import type { ToolBlock as ToolBlockType, ToolResult } from "@/api/types";
 import { CodeBlock } from "@/components/CodeBlock";
 import { DiffView, diffStats, type Hunk } from "@/components/DiffView";
 import { Markdown } from "@/components/Markdown";
 import { languageFor } from "@/lib/language";
-import { useUi } from "@/store/ui";
+import { toast, useUi } from "@/store/ui";
 import { useSessionContext } from "../SessionContext";
 import { mcpParts, toolMeta } from "./toolMeta";
 
@@ -202,6 +202,67 @@ function headExtra(tool: ToolBlockType): ReactNode {
   return null;
 }
 
+/** Under a subagent's card: its progress while it runs, its conversation, and stop / background controls. */
+function SubagentBar({ tool }: { tool: ToolBlockType }) {
+  const { sessionId, cwd, projectId, tasks, hosted } = useSessionContext();
+  const openSubagent = useUi((s) => s.openSubagent);
+  const task = tasks.find((t) => t.toolUseId === tool.id);
+  const [confirmStop, setConfirmStop] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!confirmStop) return;
+    const timer = window.setTimeout(() => setConfirmStop(false), 3000);
+    return () => window.clearTimeout(timer);
+  }, [confirmStop]);
+
+  const run = async (call: () => Promise<unknown>) => {
+    setBusy(true);
+    try {
+      await call();
+    } catch (err) {
+      toast((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+      setConfirmStop(false);
+    }
+  };
+  const stop = () => {
+    if (!task) return;
+    if (!confirmStop) {
+      setConfirmStop(true);
+      return;
+    }
+    void run(() => api(`sessions/${sessionId}/tasks/${encodeURIComponent(task.id)}/stop`, { body: {} }));
+  };
+  const toBackground = () => void run(() => api(`sessions/${sessionId}/background`, { body: { toolUseId: tool.id } }));
+
+  const p = task?.progress;
+  const progress = task
+    ? [task.background ? "后台运行中" : "运行中",
+      p?.toolUses != null ? `${p.toolUses} 次工具调用` : null,
+      p?.tokens != null ? `${Math.round(p.tokens / 1000)}k tokens` : null,
+      p?.lastTool || null].filter(Boolean).join(" · ")
+    : null;
+  return (
+    <div className="rz-subagent-bar">
+      {progress && <span className="rz-subagent-progress clamp-1">{progress}</span>}
+      <span className="rz-spacer" />
+      <button type="button" className="rz-subagent-btn"
+        onClick={() => openSubagent({ sessionId, toolUseId: tool.id, title: str(tool.input?.description), cwd, projectId })}>
+        查看过程
+      </button>
+      {task && hosted && !task.background && (
+        <button type="button" className="rz-subagent-btn" disabled={busy} onClick={toBackground}>转到后台</button>
+      )}
+      {task && hosted && (
+        <button type="button" className={`rz-subagent-btn danger${confirmStop ? " confirm" : ""}`} disabled={busy} onClick={stop}>
+          {confirmStop ? "确认停止" : "停止"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function ToolBlockImpl({ tool }: { tool: ToolBlockType }) {
   const { cwd, pendingTools } = useSessionContext();
   const meta = toolMeta(tool.name, tool.input ?? {}, cwd);
@@ -223,6 +284,7 @@ function ToolBlockImpl({ tool }: { tool: ToolBlockType }) {
         {terminated ? <span className="rz-tool-terminated">已终止</span> : headExtra(tool)}
         <ChevronRight size={14} className="rz-chevron" />
       </button>
+      {(tool.name === "Agent" || tool.name === "Task") && <SubagentBar tool={tool} />}
       {open && (
         <div className="rz-tool-body">
           {body(tool)}

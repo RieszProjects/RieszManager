@@ -17,6 +17,7 @@ from .process import ClaudeProcess, ControlError
 from .projects import ProjectResolver
 from .session_prefs import SessionPrefs
 from .balances import BalanceMonitor
+from .subagents import SubagentStore
 from .usage import UsageMonitor
 from .attention import LONG_TURN_SECONDS, describe_request, session_title
 from .store import SessionStore
@@ -43,6 +44,7 @@ class Hub:
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
         self.store = SessionStore(cfg.projects_dir)
+        self.subagents = SubagentStore(self.store)
         self.projects = ProjectResolver(cfg)
         self.hosted: dict[str, ClaudeProcess] = {}
         self.live: dict[str, LiveProcess] = {}

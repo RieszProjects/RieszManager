@@ -13,6 +13,7 @@ import { ImageViewer } from "@/components/ImageViewer";
 import { HomeView, ProjectView } from "@/features/home/HomeView";
 import { AppShell } from "@/features/layout/AppShell";
 import { NewProjectDialog } from "@/features/sessions/NewProjectDialog";
+import { SubagentViewer } from "@/features/chat/SubagentViewer";
 import { NewSessionDialog } from "@/features/sessions/NewSessionDialog";
 import { RenameDialog } from "@/features/sessions/RenameDialog";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
@@ -99,6 +100,7 @@ export function App() {
       </AppShell>
       <FileViewer />
       <ImageViewer />
+      <SubagentViewer />
       <SettingsDialog />
       <NewSessionDialog />
       <NewProjectDialog />

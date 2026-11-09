@@ -209,6 +209,8 @@ export interface TaskInfo {
   background: boolean;
   toolUseId?: string | null;
   startedAt: number;
+  /** Subagents: what they have done so far (reported while they run). */
+  progress?: { tokens?: number | null; toolUses?: number | null; durationMs?: number | null; lastTool?: string | null };
 }
 
 export interface SessionState {

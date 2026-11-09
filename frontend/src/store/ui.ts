@@ -38,6 +38,15 @@ export interface FileTarget {
   path: string;
 }
 
+export interface SubagentTarget {
+  sessionId: string;
+  /** The Agent tool call that started the subagent. */
+  toolUseId: string;
+  title: string;
+  cwd: string | null;
+  projectId: string | null;
+}
+
 interface UiStore {
   route: Route;
   /** Project shown in the right panel (follows the current session/project). */
@@ -49,6 +58,8 @@ interface UiStore {
   rightTab: "sessions" | "files";
   sidebarTab: "recent" | "projects";
   file: FileTarget | null;
+  /** The subagent whose conversation is open (see SubagentViewer). */
+  subagent: SubagentTarget | null;
   gallery: ImageGallery | null;
   settingsOpen: boolean;
   newSessionOpen: boolean;
@@ -67,6 +78,7 @@ interface UiStore {
   setRightTab: (tab: UiStore["rightTab"]) => void;
   setSidebarTab: (tab: UiStore["sidebarTab"]) => void;
   openFile: (target: FileTarget | null) => void;
+  openSubagent: (target: SubagentTarget | null) => void;
   openGallery: (gallery: ImageGallery | null) => void;
   setSettingsOpen: (open: boolean) => void;
   setNewSessionOpen: (open: boolean) => void;
@@ -88,6 +100,7 @@ export const useUi = create<UiStore>((set) => ({
   rightTab: "files",
   sidebarTab: storage.get("sidebarTab.v2", "projects"),
   file: null,
+  subagent: null,
   gallery: null,
   settingsOpen: false,
   newSessionOpen: false,
@@ -120,6 +133,7 @@ export const useUi = create<UiStore>((set) => ({
     set({ sidebarTab });
   },
   openFile: (file) => set({ file }),
+  openSubagent: (subagent) => set({ subagent }),
   openGallery: (gallery) => set({ gallery }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setNewSessionOpen: (newSessionOpen) => set({ newSessionOpen }),

@@ -151,8 +151,11 @@ export function ChatView({ sessionId }: { sessionId: string }) {
   const project = projects.find((p) => p.id === projectId);
   const turn = useMemo(() => turnStatus(items, state), [items, state]);
   const ctx = useMemo(
-    () => ({ sessionId, cwd: summary?.cwd ?? null, projectId, pendingTools: turn.pendingTools }),
-    [sessionId, summary?.cwd, projectId, turn.pendingTools],
+    () => ({
+      sessionId, cwd: summary?.cwd ?? null, projectId, pendingTools: turn.pendingTools,
+      tasks: state?.tasks ?? [], hosted: Boolean(state?.hosted && state?.alive),
+    }),
+    [sessionId, summary?.cwd, projectId, turn.pendingTools, state?.tasks, state?.hosted, state?.alive],
   );
   const hostedHere = Boolean(state?.hosted && state.alive);
   const waitingSince = turn.waitingSince ? Date.parse(turn.waitingSince) : null;

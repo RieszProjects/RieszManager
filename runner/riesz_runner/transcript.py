@@ -240,6 +240,8 @@ class TranscriptView:
 
     items: list[dict[str, Any]] = field(default_factory=list)
     index: dict[str, int] = field(default_factory=dict)  # key -> position in items
+    # A subagent's own transcript, where every record is marked isSidechain (see subagents.py).
+    sidechain: bool = False
     tools: dict[str, _ToolLocation] = field(default_factory=dict)
     meta_scanner: MetaScanner = field(default_factory=MetaScanner)
     _seq: int = 0
@@ -301,7 +303,7 @@ class TranscriptView:
 
     def _feed(self, rec: dict[str, Any], offset: int) -> None:
         rtype = rec.get("type")
-        if rtype in SKIP_TYPES or rec.get("isSidechain"):
+        if rtype in SKIP_TYPES or (rec.get("isSidechain") and not self.sidechain):
             return
         if rtype == "user":
             self._user(rec, offset)

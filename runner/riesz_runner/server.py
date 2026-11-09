@@ -217,6 +217,49 @@ async def session_detail(request: web.Request) -> web.Response:
     return _json({"session": hub.session_summary(sid), "state": hub.session_state(sid)})
 
 
+async def session_subagents(request: web.Request) -> web.Response:
+    """The session's subagents (see subagents.py): agentId, the Agent tool call that started it, ..."""
+    hub = request.app[HUB]
+    return _json({"subagents": hub.subagents.list(_session_id(request))})
+
+
+async def subagent_items(request: web.Request) -> web.Response:
+    """A page of a subagent's display items, newest last (`before` = a seq, `limit`)."""
+    hub = request.app[HUB]
+    result = await hub.subagents.items(_session_id(request), request.match_info["aid"])
+    if result is None:
+        return _err(404, "unknown subagent")
+    items, mtime = result
+    before = request.query.get("before")
+    limit = min(int(request.query.get("limit", str(PAGE_ITEMS))), 1000)
+    if before is not None:
+        b = int(before)
+        items = [it for it in items if it["seq"] < b]
+    page = items[-limit:]
+    return _json({"items": page, "hasMore": len(items) > len(page), "mtime": mtime})
+
+
+async def stop_task(request: web.Request) -> web.Response:
+    """Stop one task (a subagent or background command) of a session running here."""
+    proc = request.app[HUB].get_hosted(_session_id(request))
+    if proc is None or not proc.alive:
+        return _err(409, "session is not running here")
+    await proc.stop_task(request.match_info["tid"])
+    return _json({"ok": True})
+
+
+async def background_task(request: web.Request) -> web.Response:
+    """Move a foreground task to the background (body: toolUseId of the tool call that runs it)."""
+    proc = request.app[HUB].get_hosted(_session_id(request))
+    if proc is None or not proc.alive:
+        return _err(409, "session is not running here")
+    body = await _body(request)
+    tool_use_id = body.get("toolUseId")
+    if not isinstance(tool_use_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", tool_use_id):
+        return _err(400, "invalid toolUseId")
+    return _json({"backgrounded": await proc.background_task(tool_use_id)})
+
+
 async def session_items(request: web.Request) -> web.Response:
     hub = request.app[HUB]
     sid = _session_id(request)
@@ -729,6 +772,10 @@ def build_app(cfg: Config) -> web.Application:
     r.add_get("/v1/commands", session_commands)
     r.add_get("/v1/sessions/{sid}", session_detail)
     r.add_get("/v1/sessions/{sid}/items", session_items)
+    r.add_get("/v1/sessions/{sid}/subagents", session_subagents)
+    r.add_get("/v1/sessions/{sid}/subagents/{aid}/items", subagent_items)
+    r.add_post("/v1/sessions/{sid}/tasks/{tid}/stop", stop_task)
+    r.add_post("/v1/sessions/{sid}/background", background_task)
     r.add_get("/v1/sessions/{sid}/image", session_image)
     r.add_get("/v1/sessions/{sid}/commands", session_commands)
     r.add_get("/v1/sessions/{sid}/context", context_usage)
