@@ -13,7 +13,7 @@ import uuid as uuidlib
 from collections import deque
 from typing import Any, Awaitable, Callable
 
-from .autoapprove import removes_only_project_tmp
+from .autoapprove import auto_approvable
 from .claude_settings import chrome_enabled_by_default
 from .config import Config
 from .procs import running_commands
@@ -512,7 +512,7 @@ class ClaudeProcess:
             return False
         command = (request.get("input") or {}).get("command")
         reason = request.get("decision_reason")
-        return isinstance(command, str) and removes_only_project_tmp(
+        return isinstance(command, str) and auto_approvable(
             command, self.cwd, self.cfg.workspace_root, reason if isinstance(reason, str) else None)
 
     async def _expire_permission(self, request_id: str) -> None:
