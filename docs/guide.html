@@ -100,7 +100,7 @@
   <li><b>「拒绝」</b>：拒绝操作，拒绝时可以附上理由告诉Claude。</li>
 </ul>
 <p>在「计划模式」下，Claude写好计划后也会在这里请你审批计划。</p>
-<p>确认卡片和提问不会一直挡住对话：如果30分钟内没人回应，就会自动拒绝，并告诉Claude你暂时不在，让它换一种办法继续，做不到的部分在最后说明（等多久由部署者的<code>RUNNER_PERMISSION_TIMEOUT</code>决定）。另外，即使在「跳过权限」模式下，Claude Code对一些删除操作仍会要你确认；部署者打开<code>RUNNER_ALLOW_TMP_REMOVAL</code>后，只删除项目<code>tmp</code>文件夹里内容的命令，以及其实没有删除、只是它没看懂的命令，会自动放行。</p>
+<p>确认卡片和提问不会一直挡住对话：如果30分钟内没人回应，就会自动拒绝，并告诉Claude你暂时不在，让它换一种办法继续，做不到的部分在最后说明（等多久由部署者的<code>RUNNER_PERMISSION_TIMEOUT</code>决定）。另外，即使在「跳过权限」模式下，Claude Code对一些删除操作仍会要你确认；部署者打开<code>RUNNER_AUTO_ALLOW_REMOVALS</code>后，这类确认会自动放行，只有可能删到系统文件的命令仍然留给你确认。</p>
 <figure><img class="shot" src="assets/shots/permission.webp" alt="对话底部的命令确认卡片，显示要执行的命令以及允许、不再询问、拒绝按钮" loading="lazy"><figcaption>Claude请求执行命令时的确认卡片。</figcaption></figure>
 <p>当Claude使用提问工具向你提问时，底部会出现选项卡片。你可以直接点选项（多选题可以选多个），或者在「其他（自行输入）」里写自己的回答，然后点「提交回答」；不想回答也可以点「跳过」。</p>
 <figure><img class="shot" src="assets/shots/question.webp" alt="Claude 向用户提问的选项卡片，包含预设选项和自行输入框" loading="lazy"><figcaption>Claude向你提问时的选项卡片。</figcaption></figure>

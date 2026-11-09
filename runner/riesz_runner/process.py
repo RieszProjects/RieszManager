@@ -506,7 +506,7 @@ class ClaudeProcess:
         return True
 
     def _auto_approvable(self, request: dict[str, Any]) -> bool:
-        if not self.cfg.allow_tmp_removal or self.permission_mode != "bypassPermissions":
+        if not self.cfg.auto_allow_removals or self.permission_mode != "bypassPermissions":
             return False
         if request.get("tool_name") != "Bash":
             return False
@@ -613,7 +613,7 @@ class ClaudeProcess:
         if subtype == "can_use_tool" and request_id:
             if self._auto_approvable(request):
                 command = str((request.get("input") or {}).get("command") or "")
-                log.info("approved a removal inside project tmp (%s): %s", self.session_id[:8], command[:200])
+                log.info("approved a removal prompt (%s): %s", self.session_id[:8], command[:200])
                 await self._write({
                     "type": "control_response",
                     "response": {"subtype": "success", "request_id": request_id,
