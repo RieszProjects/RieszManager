@@ -13,6 +13,7 @@ import uuid as uuidlib
 from collections import deque
 from typing import Any, Awaitable, Callable
 
+from .autoapprove import removes_only_project_tmp
 from .claude_settings import chrome_enabled_by_default
 from .config import Config
 from .procs import running_commands
@@ -78,6 +79,7 @@ class ClaudeProcess:
         self.permissions: dict[str, dict[str, Any]] = {}
         # Top-level tasks claude is running (foreground tool runs, subagents, background jobs).
         self.tasks: dict[str, dict[str, Any]] = {}
+        self._permission_timers: dict[str, asyncio.TimerHandle] = {}
         self._progress_emitted = 0.0
         self.partial: dict[str, Any] | None = None
         self.last_result: dict[str, Any] | None = None
@@ -320,6 +322,9 @@ class ClaudeProcess:
         await self._emit_state()
 
     async def answer_permission(self, request_id: str, decision: dict[str, Any]) -> None:
+        timer = self._permission_timers.pop(request_id, None)
+        if timer is not None:
+            timer.cancel()
         request = self.permissions.pop(request_id, None)
         if request is None:
             raise ControlError("permission request is no longer pending")
@@ -371,6 +376,9 @@ class ClaudeProcess:
         self.exit_code = code
         self.turn_active = False
         self.permissions.clear()
+        for timer in self._permission_timers.values():
+            timer.cancel()
+        self._permission_timers.clear()
         self.queue.clear()
         self.tasks.clear()
         self.partial = None
@@ -403,6 +411,9 @@ class ClaudeProcess:
             return
         if mtype == "control_cancel_request":
             request_id = msg.get("request_id")
+            timer = self._permission_timers.pop(request_id or "", None)
+            if timer is not None:
+                timer.cancel()
             if request_id and self.permissions.pop(request_id, None) is not None:
                 await self.sink(self, {"ev": "permission_resolved", "requestId": request_id})
                 await self._emit_state()
@@ -494,6 +505,41 @@ class ClaudeProcess:
         }
         return True
 
+    def _auto_approvable(self, request: dict[str, Any]) -> bool:
+        if not self.cfg.allow_tmp_removal or self.permission_mode != "bypassPermissions":
+            return False
+        if request.get("tool_name") != "Bash":
+            return False
+        command = (request.get("input") or {}).get("command")
+        reason = request.get("decision_reason")
+        return isinstance(command, str) and removes_only_project_tmp(
+            command, self.cwd, self.cfg.workspace_root, reason if isinstance(reason, str) else None)
+
+    async def _expire_permission(self, request_id: str) -> None:
+        """Nobody answered in time: decline, and tell Claude to carry on without the user."""
+        self._permission_timers.pop(request_id, None)
+        entry = self.permissions.get(request_id)
+        if entry is None or not self.alive:
+            return
+        minutes = max(1, round(self.cfg.permission_timeout / 60))
+        tool = entry.get("toolName")
+        if tool == "AskUserQuestion":
+            message = (f"用户 {minutes} 分钟内没有回答这个问题，可能暂时不在。请按你认为最合理的选项继续，"
+                       "并在这一轮最后的回复里说明你做了哪些假设。")
+        elif tool == "ExitPlanMode":
+            message = (f"用户 {minutes} 分钟内没有审批这个计划，可能暂时不在。计划还没有被批准，不要开始修改；"
+                       "先结束这一轮，等用户回来再说。")
+        else:
+            message = (f"用户 {minutes} 分钟内没有回应这个权限请求，可能暂时不在，所以这次请求被自动拒绝了。"
+                       "不要原样重试，也不要停下来等批准：先换一种不需要这项权限的办法继续完成任务；"
+                       "如果实在绕不开，就先完成其他能做的部分，并在这一轮最后的回复里说明需要用户处理什么。")
+        log.info("permission request %s (%s) timed out after %ss; declined", tool, self.session_id[:8],
+                 self.cfg.permission_timeout)
+        try:
+            await self.answer_permission(request_id, {"behavior": "deny", "message": message})
+        except Exception as exc:  # noqa: BLE001 - the process may have gone meanwhile
+            log.info("could not decline timed-out permission request: %s", exc)
+
     async def stop_task(self, task_id: str) -> None:
         """Stop one running task (a subagent or a background command); the session carries on."""
         await self.control("stop_task", task_id=task_id)
@@ -565,6 +611,15 @@ class ClaudeProcess:
         request = msg.get("request") or {}
         subtype = request.get("subtype")
         if subtype == "can_use_tool" and request_id:
+            if self._auto_approvable(request):
+                command = str((request.get("input") or {}).get("command") or "")
+                log.info("approved a removal inside project tmp (%s): %s", self.session_id[:8], command[:200])
+                await self._write({
+                    "type": "control_response",
+                    "response": {"subtype": "success", "request_id": request_id,
+                                 "response": {"behavior": "allow", "updatedInput": request.get("input") or {}}},
+                })
+                return
             entry = {
                 "requestId": request_id,
                 "toolName": request.get("tool_name"),
@@ -581,6 +636,15 @@ class ClaudeProcess:
                 "ts": time.time(),
             }
             self.permissions[request_id] = entry
+            if self.permission_mode == "bypassPermissions":
+                # Claude Code's own checks that bypass mode does not skip: worth knowing which ones come up.
+                command = (request.get("input") or {}).get("command")
+                log.info("bypass-mode ask (%s): %s; %s; %s", self.session_id[:8], request.get("tool_name"),
+                         str(request.get("decision_reason") or "")[:200],
+                         command[:300] if isinstance(command, str) else "")
+            if self.cfg.permission_timeout:
+                self._permission_timers[request_id] = asyncio.get_running_loop().call_later(
+                    self.cfg.permission_timeout, lambda: asyncio.ensure_future(self._expire_permission(request_id)))
             await self.sink(self, {"ev": "permission", "request": entry})
             await self._emit_state()
             return

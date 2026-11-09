@@ -83,6 +83,10 @@ class Config:
     cross_session_inbound: str = ""
     # Other AI services whose balances the doll shows (see balances.py); empty: <state dir>/balances.json.
     balances_path: str = ""
+    # In bypassPermissions mode, approve removals that stay inside project tmp folders (see autoapprove.py).
+    allow_tmp_removal: bool = False
+    # Answer a permission request or question nobody responded to after this many seconds (0: wait forever).
+    permission_timeout: int = 1800
     extra_args: list[str] = field(default_factory=list)
 
     @property
@@ -151,5 +155,7 @@ def load_config(env_file: str | None = None) -> Config:
         chrome=(env.get("RUNNER_CHROME") or "auto").strip().lower(),
         cross_session_inbound=_inbound(env.get("RUNNER_CROSS_SESSION_INBOUND")),
         balances_path=env.get("RUNNER_BALANCES_FILE") or "",
+        allow_tmp_removal=_bool(env.get("RUNNER_ALLOW_TMP_REMOVAL"), False),
+        permission_timeout=max(0, int(env.get("RUNNER_PERMISSION_TIMEOUT") or 1800)),
         extra_args=extra,
     )
