@@ -31,7 +31,13 @@ export function RightPanel({ variant = "drawer", onClose }: Props) {
   useEffect(() => {
     setDetail(null);
     if (!projectId) return;
-    api<{ project: Project }>(`projects/${encodeURIComponent(projectId)}`).then((r) => setDetail(r.project)).catch(() => undefined);
+    // Switching projects quickly: an answer for the previous project may still arrive; drop it.
+    // (The file tree below is keyed by project for the same reason.)
+    let current = true;
+    api<{ project: Project }>(`projects/${encodeURIComponent(projectId)}`).then((r) => current && setDetail(r.project)).catch(() => undefined);
+    return () => {
+      current = false;
+    };
   }, [projectId, tab]);
 
   const view = useOrganizeView();
@@ -89,7 +95,7 @@ export function RightPanel({ variant = "drawer", onClose }: Props) {
             {list.length === 0 && <div className="rz-side-empty">这个项目还没有会话</div>}
           </div>
         ) : (
-          <FileTree projectId={projectId} changes={changes} />
+          <FileTree key={projectId} projectId={projectId} changes={changes} />
         )}
       </div>
     </aside>

@@ -259,6 +259,8 @@ export interface FileEntry {
   mtime: number;
   heavy: boolean;
   symlink: boolean;
+  /** Ignored by git (.gitignore and friends). */
+  ignored?: boolean;
 }
 
 export interface FileInfo {

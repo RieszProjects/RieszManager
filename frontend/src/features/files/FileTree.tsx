@@ -85,7 +85,7 @@ export function FileTree({ projectId, changes = {} }: Props) {
         <div key={e.path}>
           <button
             type="button"
-            className={`rz-tree-row${activeFile === e.path ? " active" : ""}${e.heavy ? " heavy" : ""}`}
+            className={`rz-tree-row${activeFile === e.path ? " active" : ""}${e.heavy ? " heavy" : ""}${e.ignored ? " ignored" : ""}`}
             style={{ paddingLeft: 8 + depth * 14 }}
             onClick={() => (e.dir ? toggle(e.path) : openFile({ project: projectId, path: e.path }))}
             title={e.path}

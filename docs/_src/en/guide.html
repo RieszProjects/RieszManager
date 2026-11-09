@@ -121,7 +121,7 @@ rieszctl session stop 1a2b3c4d   # stop its process when done</code></pre>
 <p>A unique prefix of the session ID is enough. <code>new</code> also takes <code>-m</code> for the model, <code>--mode</code> for the permission mode, <code>--effort</code> for the effort level and <code>--keep</code> to keep the session running; pass <code>-</code> as the message to read a long one from standard input. If the new session needs your approval while <code>wait</code> is running, the command prints a note and keeps waiting until you answer in the web app. The session that started it is recorded (“started by” in <code>rieszctl session show</code>). Run <code>rieszctl session --help</code> for the full usage.</p>
 
 <h2 id="files">Project files</h2>
-<p>The “Files” (文件) tab in the right panel shows a read-only file tree of the current project, with git status badges on modified and untracked files. Click any file to open the preview modal:</p>
+<p>The “Files” (文件) tab in the right panel shows a read-only file tree of the current project, with git status badges on modified and untracked files; files and folders ignored by git are shown greyed out. Click any file to open the preview modal:</p>
 <ul>
   <li><b>Code files</b>: Syntax highlighting and line numbers, with a “Word wrap” (自动换行) toggle.</li>
   <li><b>Markdown</b>: Rendered as a formatted document; click “View source” (查看源码) to see the raw text.</li>

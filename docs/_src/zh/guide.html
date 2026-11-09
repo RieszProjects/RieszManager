@@ -120,7 +120,7 @@ rieszctl session stop 1a2b3c4d   # 用完关掉它的进程</code></pre>
 <p>会话 ID 写前几位就可以。<code>new</code>还可以用<code>-m</code>指定模型，用<code>--mode</code>指定权限模式，用<code>--effort</code>指定思考强度，用<code>--keep</code>让它一直保持运行；消息很长时可以写成<code>-</code>，从标准输入读入。新会话在<code>wait</code>期间需要你确认时，命令会打印一行提示，等你在网页上处理。开新会话的会话会记在新会话的信息里（<code>rieszctl session show</code>里的 started by）。完整用法见<code>rieszctl session --help</code>。</p>
 
 <h2 id="files">项目文件</h2>
-<p>右边面板的「文件」标签展示当前项目的文件树（只读），修改、新增等文件带有git状态标记。点任意文件可以打开预览窗口：</p>
+<p>右边面板的「文件」标签展示当前项目的文件树（只读），修改、新增等文件带有git状态标记，被git忽略的文件和文件夹显示为灰色。点任意文件可以打开预览窗口：</p>
 <ul>
   <li><b>代码文件</b>：带语法高亮和行号，可以切换「自动换行」。</li>
   <li><b>Markdown</b>：直接渲染成排版后的文档，可以点「查看源码」看原始文本。</li>

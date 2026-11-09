@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import mimetypes
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,22 @@ def safe_join(root: Path, rel: str) -> Path:
     return target
 
 
+def _git_ignored(directory: Path, entries: list[dict[str, Any]]) -> set[str]:
+    """Names in `directory` that git ignores (nothing when it is not in a git work tree)."""
+    if not entries:
+        return set()
+    # A trailing slash lets directory-only patterns such as "tmp/" match.
+    names = [e["name"] + ("/" if e["dir"] else "") for e in entries]
+    try:
+        proc = subprocess.run(["git", "check-ignore", "--stdin", "-z"], cwd=directory, input="\0".join(names).encode(),
+                              capture_output=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return set()
+    if proc.returncode not in (0, 1):  # 128: not a repository
+        return set()
+    return {n.rstrip("/") for n in proc.stdout.decode(errors="replace").split("\0") if n}
+
+
 def list_dir(root: Path, rel: str) -> list[dict[str, Any]]:
     directory = safe_join(root, rel)
     if not directory.is_dir():
@@ -62,6 +79,9 @@ def list_dir(root: Path, rel: str) -> list[dict[str, Any]]:
             "heavy": is_dir and child.name in HEAVY_DIRS,
             "symlink": child.is_symlink(),
         })
+    ignored = _git_ignored(directory, entries)
+    for e in entries:
+        e["ignored"] = e["name"] in ignored
     entries.sort(key=lambda e: (not e["dir"], e["name"].lower()))
     return entries
 

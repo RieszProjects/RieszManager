@@ -123,15 +123,18 @@
 .rz-tree-toolbar button:hover { color: var(--text); background: var(--bg3); }
 .rz-tree-row {
   width: 100%; display: flex; align-items: center; gap: 5px; height: 27px; padding-right: 8px; border: none; border-radius: 6px;
-  background: none; color: var(--text2); font: inherit; font-size: 13px; cursor: pointer; text-align: left;
+  background: none; color: #d2cbbb; font: inherit; font-size: 13px; cursor: pointer; text-align: left;
 }
 .rz-tree-row:hover { background: rgba(232, 226, 212, 0.045); color: var(--text); }
 .rz-tree-row.active { background: var(--bg3); color: var(--text); }
 .rz-tree-row.heavy { opacity: 0.55; }
+/* Ignored by git: dimmer than the rest. */
+.rz-tree-row.ignored { color: var(--text3); }
+.rz-tree-row.ignored .rz-tree-icon { color: var(--text4); }
 .rz-tree-chevron { flex-shrink: 0; color: var(--text4); transition: transform 0.15s; }
 .rz-tree-chevron.open { transform: rotate(90deg); }
 .rz-tree-chevron-space { width: 13px; flex-shrink: 0; }
-.rz-tree-icon { flex-shrink: 0; color: var(--text3); }
+.rz-tree-icon { flex-shrink: 0; color: #9a9384; }
 .rz-tree-name { flex: 1; }
 .rz-tree-loading, .rz-tree-empty { height: 26px; display: flex; align-items: center; font-size: 12px; color: var(--text4); }
 .rz-git { font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; width: 14px; text-align: center; }
