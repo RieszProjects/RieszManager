@@ -16,6 +16,8 @@ interface Props {
   session: SessionSummary;
   showProject?: boolean;
   active?: boolean;
+  /** Keep the subagent button when none is active (the project panel); elsewhere it shows only while some are. */
+  allSubagents?: boolean;
 }
 
 /** "⋯" menu with per-session actions. */
@@ -66,16 +68,17 @@ function SessionActions({ session, archived }: { session: SessionSummary; archiv
   );
 }
 
-function SessionRowImpl({ session, showProject, active }: Props) {
+function SessionRowImpl({ session, showProject, active, allSubagents }: Props) {
   const navigate = useUi((s) => s.navigate);
   const live = useApp((s) => s.live[session.sessionId]);
   const projectName = useApp((s) => (showProject ? s.projects.find((p) => p.id === session.project)?.name : undefined));
   const archived = useOrganize((s) => s.archived.session.has(session.sessionId));
   const scheduled = useSchedules((s) => s.items.some((x) => x.sessionId === session.sessionId && x.enabled));
   const agents = useSessionSubagents(session, live);
+  const agentsShown = agents.has && (agents.active > 0 || Boolean(allSubagents));
   return (
     <>
-    <div className={`rz-session-row${active ? " active" : ""}${archived ? " archived" : ""}${agents.has ? " has-agents" : ""}`}>
+    <div className={`rz-session-row${active ? " active" : ""}${archived ? " archived" : ""}${agentsShown ? " has-agents" : ""}`}>
       <button type="button" className="rz-session-row-btn" onClick={() => navigate({ view: "session", sessionId: session.sessionId })}>
         <div className="rz-session-row-main">
           <span className="rz-session-title clamp-1">{sessionTitle(session)}</span>
@@ -92,9 +95,9 @@ function SessionRowImpl({ session, showProject, active }: Props) {
         </div>
       </button>
       <SessionActions session={session} archived={archived} />
-      {agents.has && <SubagentToggle sessionId={session.sessionId} active={agents.active} running={agents.running} open={agents.open} />}
+      {agentsShown && <SubagentToggle sessionId={session.sessionId} active={agents.active} running={agents.running} open={agents.open} />}
     </div>
-    {agents.open && <SessionSubagents session={session} live={live} />}
+    {agentsShown && agents.open && <SessionSubagents session={session} live={live} />}
     </>
   );
 }

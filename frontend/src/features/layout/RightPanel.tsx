@@ -90,7 +90,7 @@ export function RightPanel({ variant = "drawer", onClose }: Props) {
         {!showFiles ? (
           <div className="rz-side-list">
             <SortableList items={list} getId={(s) => s.sessionId} onReorder={(ids) => void setOrder("session", ids)}>
-              {(s) => <SessionRow session={s} active={s.sessionId === activeSession} />}
+              {(s) => <SessionRow session={s} active={s.sessionId === activeSession} allSubagents />}
             </SortableList>
             {list.length === 0 && <div className="rz-side-empty">这个项目还没有会话</div>}
           </div>
