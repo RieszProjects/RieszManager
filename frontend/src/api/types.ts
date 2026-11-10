@@ -25,7 +25,7 @@ export interface LiveInfo {
   entrypoint?: string | null;
   status?: string | null;
   held?: number;
-  /** Hosted sessions: the Agent tool calls whose subagents are running now. */
+  /** The Agent tool calls whose subagents are running now. */
   agents?: string[];
 }
 
@@ -53,6 +53,8 @@ export interface SessionSummary {
   interrupted?: number | null;
   /** How many subagents the session has started. */
   subagents?: number;
+  /** When one of its subagents last wrote anything (unix seconds). */
+  subagentsActive?: number | null;
 }
 
 export interface LiveProcess {

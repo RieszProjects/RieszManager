@@ -1,10 +1,14 @@
-/** A session's subagents, listed under its row in the session lists; click one to open its conversation. */
+/** A session's subagents, listed under its row in the session lists; click one to open its conversation.
+ *
+ * The list shows the running subagents and those that finished in the last few minutes; older ones are
+ * folded into one line. It opens by itself while there is such activity, unless the user chose otherwise. */
 import { Bot, ChevronRight, LoaderCircle } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 import { api } from "@/api/client";
 import type { LiveInfo, SessionSummary } from "@/api/types";
 import { relativeTime } from "@/lib/format";
+import { useNowSeconds, useWithin } from "@/lib/useNow";
 import { useUi } from "@/store/ui";
 
 export interface SubagentEntry {
@@ -13,13 +17,12 @@ export interface SubagentEntry {
   description: string;
   agentType: string;
   background: boolean;
+  finished: boolean;
   mtime: number;
 }
 
-/** Finished subagents shown before "the rest". */
-const RECENT = 5;
-/** A terminal session's subagent counts as running while its transcript changed this recently. */
-const ACTIVE_SECONDS = 20;
+/** A finished subagent stays in the list this long (seconds). */
+const RECENT_SECONDS = 600;
 
 interface ListsStore {
   lists: Record<string, SubagentEntry[]>;
@@ -42,29 +45,28 @@ export const useSubagentLists = create<ListsStore>((set) => ({
   },
 }));
 
-function isRunning(a: SubagentEntry, live: LiveInfo | undefined): boolean {
-  if (!live) return false;
-  if (live.hosted) return Boolean(a.toolUseId && live.agents?.includes(a.toolUseId));
-  return Boolean(live.busy) && Date.now() / 1000 - a.mtime < ACTIVE_SECONDS;
-}
+const isRunning = (a: SubagentEntry, live: LiveInfo | undefined) => Boolean(a.toolUseId && live?.agents?.includes(a.toolUseId));
 
-/** Whether the session's subagents are listed: the user's choice; a running subagent opens the list (and it stays open). */
+/** Whether the row shows the subagent button, and whether the list under it is open. */
 export function useSubagentsShown(session: SessionSummary, live: LiveInfo | undefined): { has: boolean; open: boolean } {
-  const choice = useUi((s) => s.subagentsOpen[session.sessionId]);
+  const sessionId = session.sessionId;
+  const choice = useUi((s) => s.subagentsOpen[sessionId]);
   const setOpen = useUi((s) => s.setSubagentsOpen);
   const running = (live?.agents?.length ?? 0) > 0;
+  const recent = useWithin(session.subagentsActive, RECENT_SECONDS);
   const has = (session.subagents ?? 0) > 0 || running;
+  // A subagent starting is new activity: drop an earlier "closed" so the list shows it.
+  const wasRunning = useRef(running);
   useEffect(() => {
-    if (running && choice === undefined) setOpen(session.sessionId, true);
-  }, [running, choice, setOpen, session.sessionId]);
-  return { has, open: has && (choice ?? running) };
+    if (running && !wasRunning.current && choice === false) setOpen(sessionId, undefined);
+    wasRunning.current = running;
+  }, [running, choice, setOpen, sessionId]);
+  return { has, open: has && (choice ?? (running || recent)) };
 }
 
-/** The toggle at the bottom right of a session row: number of subagents, opens or closes the list. */
+/** The button at the bottom right of a session row: how many subagents are running; opens or closes the list. */
 export function SubagentToggle({ session, live, open }: { session: SessionSummary; live: LiveInfo | undefined; open: boolean }) {
   const setOpen = useUi((s) => s.setSubagentsOpen);
-  const loaded = useSubagentLists((s) => s.lists[session.sessionId]?.length);
-  const count = Math.max(session.subagents ?? 0, loaded ?? 0);
   const running = live?.agents?.length ?? 0;
   return (
     <button
@@ -72,13 +74,14 @@ export function SubagentToggle({ session, live, open }: { session: SessionSummar
       className={`rz-subagent-toggle${open ? " open" : ""}${running ? " running" : ""}`}
       aria-label={open ? "收起子代理" : "展开子代理"}
       aria-expanded={open}
+      title={`正在运行的子代理：${running}`}
       onClick={(e) => {
         e.stopPropagation();
         setOpen(session.sessionId, !open);
       }}
     >
       {running ? <LoaderCircle size={11} className="spin" /> : <Bot size={12} />}
-      <span>{count || running}</span>
+      <span>{running}</span>
       <ChevronRight size={11} className="rz-subagent-chevron" />
     </button>
   );
@@ -90,25 +93,31 @@ export function SessionSubagents({ session, live }: { session: SessionSummary; l
   const load = useSubagentLists((s) => s.load);
   const openSubagent = useUi((s) => s.openSubagent);
   const current = useUi((s) => (s.subagent?.sessionId === sessionId ? s.subagent : null));
-  const projectId = session.project;
-  const [all, setAll] = useState(false);
+  const now = useNowSeconds();
+  const [olderShown, setOlderShown] = useState<boolean | null>(null);
   const runningKey = (live?.agents ?? []).join(",");
 
-  // Reload when a subagent starts or finishes, or the session reports more of them.
+  // Reload when a subagent starts or finishes, or the session reports new activity.
   useEffect(() => {
     void load(sessionId).catch(() => undefined);
-  }, [load, sessionId, session.subagents, runningKey, live?.busy]);
+  }, [load, sessionId, session.subagents, session.subagentsActive, runningKey]);
 
-  const { running, finished } = useMemo(() => {
+  const { running, recent, older } = useMemo(() => {
     const sorted = [...(list ?? [])].sort((a, b) => b.mtime - a.mtime);
-    return { running: sorted.filter((a) => isRunning(a, live)), finished: sorted.filter((a) => !isRunning(a, live)) };
-  }, [list, live]);
+    const run = sorted.filter((a) => isRunning(a, live));
+    const rest = sorted.filter((a) => !isRunning(a, live));
+    return {
+      running: run,
+      recent: rest.filter((a) => now - a.mtime < RECENT_SECONDS),
+      older: rest.filter((a) => now - a.mtime >= RECENT_SECONDS),
+    };
+  }, [list, live, now]);
 
   if (!list) {
     return <div className="rz-subagent-rows"><div className="rz-subagent-row dim"><LoaderCircle size={12} className="spin" /></div></div>;
   }
-  const shown = all ? finished : finished.slice(0, RECENT);
-  const rest = finished.length - shown.length;
+  // Opened by hand with nothing active: show the finished ones right away.
+  const showOlder = olderShown ?? (running.length + recent.length === 0);
   const row = (a: SubagentEntry, active: boolean) => {
     const selected = current ? (current.agentId ? current.agentId === a.agentId : current.toolUseId === a.toolUseId) : false;
     return (
@@ -118,7 +127,7 @@ export function SessionSubagents({ session, live }: { session: SessionSummary; l
         className={`rz-subagent-row${active ? " running" : ""}${selected ? " selected" : ""}`}
         title={[a.description, a.agentType].filter(Boolean).join(" · ")}
         onClick={() => openSubagent({ sessionId, toolUseId: a.toolUseId, agentId: a.agentId, title: a.description,
-          cwd: session.cwd, projectId })}
+          cwd: session.cwd, projectId: session.project })}
       >
         {active ? <LoaderCircle size={12} className="spin" /> : <Bot size={12} />}
         <span className="rz-subagent-row-title clamp-1">{a.description || a.agentType || "子代理"}</span>
@@ -129,14 +138,15 @@ export function SessionSubagents({ session, live }: { session: SessionSummary; l
   return (
     <div className="rz-subagent-rows">
       {running.map((a) => row(a, true))}
-      {shown.map((a) => row(a, false))}
-      {rest > 0 && (
-        <button type="button" className="rz-subagent-row rz-subagent-rest" onClick={() => setAll(true)}>
-          其余 {rest} 个
+      {recent.map((a) => row(a, false))}
+      {older.length > 0 && !showOlder && (
+        <button type="button" className="rz-subagent-row rz-subagent-rest" onClick={() => setOlderShown(true)}>
+          已完成 {older.length} 个
         </button>
       )}
-      {all && finished.length > RECENT && (
-        <button type="button" className="rz-subagent-row rz-subagent-rest" onClick={() => setAll(false)}>收起</button>
+      {showOlder && older.map((a) => row(a, false))}
+      {showOlder && older.length > 0 && running.length + recent.length > 0 && (
+        <button type="button" className="rz-subagent-row rz-subagent-rest" onClick={() => setOlderShown(false)}>收起</button>
       )}
     </div>
   );

@@ -363,7 +363,7 @@ class Hub:
         data["keepAlive"] = self.prefs.keep_alive(session_id)
         data["startedBy"] = (self.prefs.get(session_id) or {}).get("startedBy")
         data["interrupted"] = self.prefs.interrupted(session_id)
-        data["subagents"] = self.subagents.count(session_id)
+        data["subagents"], data["subagentsActive"] = self.subagents.activity(session_id)
         return data
 
     def _live_info(self, session_id: str) -> dict[str, Any] | None:
@@ -376,8 +376,10 @@ class Hub:
         live = self.live.get(session_id)
         if live is not None:
             held = len(self.delivery.held.get(session_id, [])) if self.delivery else 0
+            since = (live.started_at or 0) / 1000
             return {"hosted": False, "busy": live.status == "busy", "pid": live.pid,
-                    "kind": live.kind, "entrypoint": live.entrypoint, "status": live.status, "held": held}
+                    "kind": live.kind, "entrypoint": live.entrypoint, "status": live.status, "held": held,
+                    "agents": self.subagents.unfinished(session_id, since)}
         return None
 
     def resume_settings(self, session_id: str) -> tuple[str | None, str | None]:

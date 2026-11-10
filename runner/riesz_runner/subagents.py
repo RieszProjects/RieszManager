@@ -34,29 +34,79 @@ class SubagentStore:
         self.store = store
         self._views: OrderedDict[str, LoadedView] = OrderedDict()
         self._locks: dict[str, asyncio.Lock] = {}
-        self._counts: dict[str, tuple[float, int]] = {}
+        self._known: dict[str, tuple[float, list[str]]] = {}
+        self._metas: dict[Path, tuple[float, dict[str, Any]]] = {}
 
-    def count(self, session_id: str) -> int:
-        """How many subagents the session has started (what `list` would return), cached by folder mtime."""
+    def _transcripts(self, session_id: str) -> tuple[Path, list[str]] | None:
+        """The session's subagent transcripts (those `list` returns), cached by folder mtime."""
         folder = self._dir(session_id)
         if folder is None:
-            return 0
+            return None
         try:
             mtime = folder.stat().st_mtime
         except OSError:
-            return 0
-        cached = self._counts.get(session_id)
+            return None
+        cached = self._known.get(session_id)
         if cached and cached[0] == mtime:
-            return cached[1]
+            return folder, cached[1]
         try:
             names = {e.name for e in os.scandir(folder)}
         except OSError:
-            return 0
-        n = sum(1 for name in names
-                if name.startswith("agent-") and name.endswith(".meta.json")
-                and name[:-len(".meta.json")] + ".jsonl" in names)
-        self._counts[session_id] = (mtime, n)
-        return n
+            return None
+        found = [name[:-len(".meta.json")] + ".jsonl" for name in names
+                 if name.startswith("agent-") and name.endswith(".meta.json")
+                 and name[:-len(".meta.json")] + ".jsonl" in names]
+        self._known[session_id] = (mtime, found)
+        return folder, found
+
+    def _meta(self, path: Path) -> dict[str, Any]:
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            return {}
+        cached = self._metas.get(path)
+        if cached and cached[0] == mtime:
+            return cached[1]
+        try:
+            meta = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            meta = {}
+        meta = meta if isinstance(meta, dict) else {}
+        self._metas[path] = (mtime, meta)
+        return meta
+
+    def unfinished(self, session_id: str, since: float) -> list[str]:
+        """Agent tool calls of subagents not marked finished that wrote after `since` (unix seconds):
+        the ones running in a session whose process this runner does not drive."""
+        known = self._transcripts(session_id)
+        if not known:
+            return []
+        folder, names = known
+        out = []
+        for name in names:
+            meta = self._meta(folder / (name[:-len(".jsonl")] + ".meta.json"))
+            if meta.get("finished") or not meta.get("toolUseId"):
+                continue
+            try:
+                if (folder / name).stat().st_mtime >= since:
+                    out.append(meta["toolUseId"])
+            except OSError:
+                continue
+        return out
+
+    def activity(self, session_id: str) -> tuple[int, float | None]:
+        """How many subagents the session has started, and when one of them last wrote anything."""
+        known = self._transcripts(session_id)
+        if not known or not known[1]:
+            return 0, None
+        folder, names = known
+        last = None
+        for name in names:
+            try:
+                last = max(last or 0.0, (folder / name).stat().st_mtime)
+            except OSError:
+                continue
+        return len(names), last
 
     def _dir(self, session_id: str) -> Path | None:
         entry = self.store.get(session_id)
@@ -84,6 +134,7 @@ class SubagentStore:
                 "description": meta.get("description") or "",
                 "agentType": meta.get("agentType") or "",
                 "background": meta.get("requestShape") == "background",
+                "finished": bool(meta.get("finished")),
                 "size": st.st_size,
                 "mtime": st.st_mtime,
             })

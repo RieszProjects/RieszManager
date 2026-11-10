@@ -62,8 +62,8 @@ interface UiStore {
   file: FileTarget | null;
   /** The subagent whose conversation is open (see SubagentViewer). */
   subagent: SubagentTarget | null;
-  /** Sessions whose subagents are shown (true) or hidden (false) in the session lists; unset: shown while one runs. */
-  subagentsOpen: Record<string, boolean>;
+  /** Sessions whose subagents are shown (true) or hidden (false) in the session lists; unset: shown while one runs or just finished. */
+  subagentsOpen: Record<string, boolean | undefined>;
   /** Session whose scheduled wake-ups are being managed (see ScheduleDialog). */
   scheduleSession: string | null;
   gallery: ImageGallery | null;
@@ -85,7 +85,8 @@ interface UiStore {
   setSidebarTab: (tab: UiStore["sidebarTab"]) => void;
   openFile: (target: FileTarget | null) => void;
   openSubagent: (target: SubagentTarget | null) => void;
-  setSubagentsOpen: (sessionId: string, open: boolean) => void;
+  /** `undefined` goes back to showing them only while there is activity. */
+  setSubagentsOpen: (sessionId: string, open: boolean | undefined) => void;
   setScheduleSession: (sessionId: string | null) => void;
   openGallery: (gallery: ImageGallery | null) => void;
   setSettingsOpen: (open: boolean) => void;
