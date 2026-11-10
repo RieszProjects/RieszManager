@@ -10,7 +10,7 @@ import { relativeTime } from "@/lib/format";
 import { sessionTitle, useApp } from "@/store/app";
 import { useOrganize } from "@/store/organize";
 import { toast, useUi } from "@/store/ui";
-import { SessionSubagents, SubagentToggle, useSubagentsShown } from "./SessionSubagents";
+import { SessionSubagents, SubagentToggle, useSessionSubagents } from "./SessionSubagents";
 
 interface Props {
   session: SessionSummary;
@@ -72,7 +72,7 @@ function SessionRowImpl({ session, showProject, active }: Props) {
   const projectName = useApp((s) => (showProject ? s.projects.find((p) => p.id === session.project)?.name : undefined));
   const archived = useOrganize((s) => s.archived.session.has(session.sessionId));
   const scheduled = useSchedules((s) => s.items.some((x) => x.sessionId === session.sessionId && x.enabled));
-  const agents = useSubagentsShown(session, live);
+  const agents = useSessionSubagents(session, live);
   return (
     <>
     <div className={`rz-session-row${active ? " active" : ""}${archived ? " archived" : ""}${agents.has ? " has-agents" : ""}`}>
@@ -92,7 +92,7 @@ function SessionRowImpl({ session, showProject, active }: Props) {
         </div>
       </button>
       <SessionActions session={session} archived={archived} />
-      {agents.has && <SubagentToggle session={session} live={live} open={agents.open} />}
+      {agents.has && <SubagentToggle sessionId={session.sessionId} active={agents.active} running={agents.running} open={agents.open} />}
     </div>
     {agents.open && <SessionSubagents session={session} live={live} />}
     </>

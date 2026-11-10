@@ -837,4 +837,6 @@ body.rz-dragging, body.rz-dragging * { cursor: grabbing !important; user-select:
 .rz-subagent-row.running > svg, .rz-subagent-row.running .rz-subagent-row-time { color: var(--sage-strong); }
 .rz-subagent-row-title { flex: 1; min-width: 0; }
 .rz-subagent-row-time { flex-shrink: 0; font-size: 11px; color: var(--text3); }
-.rz-subagent-rest { color: var(--text3); font-size: 11.5px; padding-left: 27px; }
+.rz-subagent-rest { color: var(--text3); font-size: 11.5px; gap: 5px; padding-left: 10px; }
+.rz-subagent-rest > svg { color: inherit; }
+.rz-subagent-chevron.open { transform: rotate(90deg); }

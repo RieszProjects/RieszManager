@@ -24,12 +24,13 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-/** Whether `seconds` (unix seconds) is less than `window` seconds ago; re-evaluated on each tick. */
-export function useWithin(seconds: number | null | undefined, window: number): boolean {
-  return useSyncExternalStore(subscribe, () => seconds != null && now / 1000 - seconds < window);
-}
-
 /** The current time in unix seconds, updated on each tick. */
 export function useNowSeconds(): number {
   return useSyncExternalStore(subscribe, () => Math.floor(now / 1000));
+}
+
+/** A value computed from the current time (unix seconds), recomputed on each tick; re-renders only when it changes.
+ * `compute` must return a primitive. */
+export function useTick<T extends string | number | boolean>(compute: (nowSeconds: number) => T): T {
+  return useSyncExternalStore(subscribe, () => compute(Math.floor(now / 1000)));
 }

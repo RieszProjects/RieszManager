@@ -113,19 +113,16 @@ class SubagentStore:
         return entry.path.with_suffix("") / "subagents" if entry else None
 
     def list(self, session_id: str) -> list[dict[str, Any]]:
-        folder = self._dir(session_id)
-        if folder is None or not folder.is_dir():
+        known = self._transcripts(session_id)
+        if not known:
             return []
+        folder, names = known
         out = []
-        for meta_path in folder.glob("agent-*.meta.json"):
-            agent_id = meta_path.name[len("agent-"):-len(".meta.json")]
+        for name in names:
+            agent_id = name[len("agent-"):-len(".jsonl")]
+            meta = self._meta(folder / f"agent-{agent_id}.meta.json")
             try:
-                meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                meta = {}
-            transcript = folder / f"agent-{agent_id}.jsonl"
-            try:
-                st = transcript.stat()
+                st = (folder / name).stat()
             except OSError:
                 continue
             out.append({
