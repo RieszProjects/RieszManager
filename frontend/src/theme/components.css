@@ -791,6 +791,8 @@ body.rz-dragging, body.rz-dragging * { cursor: grabbing !important; user-select:
 /* "Keep running" marks: a pin in session rows, a tag in the chat header, a check in menus. */
 .rz-keep-pin { flex-shrink: 0; color: var(--amber); margin-left: 2px; }
 .rz-tag.keep { display: inline-flex; align-items: center; gap: 3px; color: var(--amber-strong); border-color: rgba(198, 150, 107, 0.45); }
+.rz-tag-btn { font: inherit; font-size: 11px; cursor: pointer; }
+.rz-tag-btn:hover { background: rgba(198, 150, 107, 0.22); }
 .rz-menu-grow { flex: 1; }
 .rz-menu-check { margin-left: 14px; color: var(--sage-strong); }
 

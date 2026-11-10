@@ -12,6 +12,7 @@ import type { QueueEntry, SessionState } from "@/api/types";
 import { Mascot } from "@/components/Mascot";
 import { StatusDot } from "@/components/StatusDot";
 import { copyText } from "@/lib/clipboard";
+import { clockTime } from "@/lib/format";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { sessionTitle, useApp } from "@/store/app";
 import { useOrganize } from "@/store/organize";
@@ -142,6 +143,12 @@ export function ChatView({ sessionId }: { sessionId: string }) {
   const data = useSessions((s) => s.data[sessionId]);
   const loadOlder = useSessions((s) => s.loadOlder);
   const setContextProject = useUi((s) => s.setContextProject);
+  const setScheduleSession = useUi((s) => s.setScheduleSession);
+  /** Soonest next run of the session's enabled schedules (Infinity: none planned); undefined without any. */
+  const nextWake = useSchedules((s) => {
+    const mine = s.items.filter((x) => x.sessionId === sessionId && x.enabled);
+    return mine.length ? Math.min(...mine.map((x) => x.next ?? Infinity)) : undefined;
+  });
   const isMobile = useIsMobile();
   const dropRef = useRef<((files: File[]) => void) | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -238,6 +245,16 @@ export function ChatView({ sessionId }: { sessionId: string }) {
               {project && <span className="clamp-1">{project.name}</span>}
               {summary?.gitBranch && <span className="dim mono clamp-1">⎇ {summary.gitBranch}</span>}
               {keepAlive && <span className="rz-tag keep" title="保持运行：空闲时不会被关闭"><Pin size={10} />常驻</span>}
+              {nextWake !== undefined && (
+                <button
+                  type="button"
+                  className="rz-tag keep rz-tag-btn"
+                  title={Number.isFinite(nextWake) ? `下次 ${clockTime(nextWake)}` : "定时唤醒"}
+                  onClick={() => setScheduleSession(sessionId)}
+                >
+                  <AlarmClock size={10} />定时
+                </button>
+              )}
             </div>
           </div>
           <SessionMenu sessionId={sessionId} state={state} cwd={summary?.cwd ?? null} title={sessionTitle(summary)} keepAlive={keepAlive} />

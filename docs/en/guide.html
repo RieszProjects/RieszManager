@@ -169,7 +169,7 @@ rieszctl session stop 1a2b3c4d   # stop its process when done</code></pre>
 <tr><td>Catch up</td><td>“Run once if missed” (错过时补跑一次): when a run is missed by more than 10 minutes (the server was off, say), send it once when things are back. Otherwise that run is skipped.</td></tr>
 <tr><td>Message</td><td>“Message” (发送内容): what to send. <code>{now}</code> in it becomes the time it is sent.</td></tr>
 </table></div>
-<p>Sessions with a schedule show an alarm clock next to their title in the session lists. If the message from the previous run is still queued, the run is skipped, so messages do not pile up.</p>
+<p>Sessions with a schedule show an alarm clock next to their title in the session lists, and “Scheduled” (定时) in the conversation header; hover over it to see the next run, click it to open the schedules. If the message from the previous run is still queued, the run is skipped, so messages do not pile up.</p>
 <p>Claude Code's own timers (<code>/loop</code>, <code>CronCreate</code> and the like) live inside the session's process and are gone when it stops; use scheduled wake-ups for anything that should keep running. A session can also set them up from its Bash tool:</p>
 <pre><code># every day at 13:00 and 22:30, up to 20 minutes late
 rieszctl session schedule add --at 13:00,22:30 --jitter 20m "Routine check ({now})"
