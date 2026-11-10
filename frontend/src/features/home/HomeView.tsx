@@ -1,6 +1,6 @@
 /** Landing view (nothing selected) and the per-project "new session" view. */
-import { Button } from "@mui/material";
-import { ChevronRight } from "lucide-react";
+import { Button, Switch } from "@mui/material";
+import { AlarmClock, ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/api/client";
 import { Mascot } from "@/components/Mascot";
@@ -10,6 +10,7 @@ import { useIsMobile } from "@/lib/useIsMobile";
 import { sessionTitle, useApp } from "@/store/app";
 import { toast, useUi } from "@/store/ui";
 import { SessionRow } from "../sessions/SessionRow";
+import { useSchedules } from "../schedules/store";
 import { Composer } from "../composer/Composer";
 import { MobileHeaderButtons } from "../layout/MobileHeaderButtons";
 import { RightDock, RightPanelButton } from "../layout/RightDock";
@@ -171,6 +172,33 @@ function HomeInterrupted() {
   );
 }
 
+/** Every scheduled wake-up, soonest first: switch one off here, or open its session's schedules. */
+function HomeSchedules() {
+  const items = useSchedules((s) => s.items);
+  const sessions = useApp((s) => s.sessions);
+  const setScheduleSession = useUi((s) => s.setScheduleSession);
+  if (!items.length) return null;
+  const sorted = [...items].sort((a, b) => Number(!a.enabled) - Number(!b.enabled) || (a.next ?? Infinity) - (b.next ?? Infinity));
+  return (
+    <section className="rz-home-recent rz-home-schedules">
+      <div className="rz-home-recent-head"><span className="rz-side-label">定时唤醒</span></div>
+      {sorted.map((s) => (
+        <div key={s.id} className={`rz-interrupted-row${s.enabled ? "" : " off"}`}>
+          <button type="button" className="rz-interrupted-main" onClick={() => setScheduleSession(s.sessionId)}>
+            <AlarmClock size={14} className="rz-sched-mark" />
+            <span className="rz-interrupted-text">
+              <span className="clamp-1">{s.name || (sessions[s.sessionId] ? sessionTitle(sessions[s.sessionId]) : s.sessionId.slice(0, 8))}</span>
+              <span className="dim clamp-1">{s.rule} · {s.enabled && s.next ? `下次 ${clockTime(s.next)}` : "已暂停"}</span>
+            </span>
+          </button>
+          <Switch size="small" checked={s.enabled}
+            onChange={(e) => void useSchedules.getState().update(s.id, { enabled: e.target.checked }).catch((err: Error) => toast(err.message, "error"))} />
+        </div>
+      ))}
+    </section>
+  );
+}
+
 export function HomeView() {
   const setContextProject = useUi((s) => s.setContextProject);
   const isMobile = useIsMobile();
@@ -189,6 +217,7 @@ export function HomeView() {
         <HomeGreeting />
       </div>
       <HomeInterrupted />
+      <HomeSchedules />
       {isMobile && <HomeRecent />}
     </div>
   );

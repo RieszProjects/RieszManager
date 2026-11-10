@@ -14,6 +14,8 @@ import { HomeView, ProjectView } from "@/features/home/HomeView";
 import { AppShell } from "@/features/layout/AppShell";
 import { NewProjectDialog } from "@/features/sessions/NewProjectDialog";
 import { SubagentViewer } from "@/features/chat/SubagentViewer";
+import { ScheduleDialog } from "@/features/schedules/ScheduleDialog";
+import { startSchedules } from "@/features/schedules/store";
 import { NewSessionDialog } from "@/features/sessions/NewSessionDialog";
 import { RenameDialog } from "@/features/sessions/RenameDialog";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
@@ -51,6 +53,7 @@ function useLiveData(enabled: boolean) {
     socket.subscribeGlobal();
     const stopPresence = setupPresence();
     void syncPush();
+    startSchedules();
     const timer = window.setInterval(() => void useApp.getState().loadProjects().catch(() => undefined), 60000);
     return () => {
       offEvent();
@@ -101,6 +104,7 @@ export function App() {
       <FileViewer />
       <ImageViewer />
       <SubagentViewer />
+      <ScheduleDialog />
       <SettingsDialog />
       <NewSessionDialog />
       <NewProjectDialog />

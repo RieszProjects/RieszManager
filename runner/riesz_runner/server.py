@@ -24,6 +24,7 @@ from .history import PromptHistory
 from .hub import Hub
 from .probe import CapabilityProbe
 from .process import ControlError
+from .schedules import ScheduleError, system_timezone
 from .projects import ROOT_ID
 from .transcript import resolve_image
 from .uploads import UploadStore
@@ -448,6 +449,49 @@ async def send_message(request: web.Request) -> web.Response:
     return _json({**result, "state": hub.session_state(sid)})
 
 
+def _schedule_view(hub: Any, s: dict[str, Any]) -> dict[str, Any]:
+    from .schedules import describe
+    out = {k: v for k, v in s.items() if k not in ("lastUuid", "nextBase", "lastBase")}
+    out["rule"] = describe(s)
+    return out
+
+
+async def list_schedules(request: web.Request) -> web.Response:
+    hub = request.app[HUB]
+    sid = request.query.get("session")
+    return _json({"schedules": [_schedule_view(hub, s) for s in hub.schedules.list(sid or None)],
+                  "timezone": system_timezone()})
+
+
+async def create_schedule(request: web.Request) -> web.Response:
+    hub = request.app[HUB]
+    body = await _body(request)
+    try:
+        s = await hub.schedules.create(body, created_by=body.get("createdBy") if isinstance(body.get("createdBy"), str) else None)
+    except ScheduleError as exc:
+        return _err(400, str(exc))
+    return _json({"schedule": _schedule_view(hub, s)})
+
+
+async def schedule_action(request: web.Request) -> web.Response:
+    hub = request.app[HUB]
+    sched_id = request.match_info["id"]
+    action = request.match_info["action"]
+    try:
+        if action == "update":
+            s = await hub.schedules.update(sched_id, await _body(request))
+        elif action == "run":
+            s = await hub.schedules.run_now(sched_id)
+        elif action == "delete":
+            await hub.schedules.delete(sched_id)
+            return _json({"ok": True})
+        else:
+            return _err(404, "unknown action")
+    except ScheduleError as exc:
+        return _err(400, str(exc))
+    return _json({"schedule": _schedule_view(hub, s)})
+
+
 RESUME_TEXT = ("刚才服务器重启（或运行环境意外停止），你上一轮的工作被打断了，当时在跑的命令和后台任务也都停了。"
                "请先看看中断前在做什么、做到了哪一步，再接着完成。")
 
@@ -802,6 +846,9 @@ def build_app(cfg: Config) -> web.Application:
     r.add_post("/v1/sessions/{sid}/stop", stop_session)
     r.add_post("/v1/sessions/{sid}/keep-alive", keep_alive)
     r.add_post("/v1/sessions/{sid}/resume", resume_session)
+    r.add_get("/v1/schedules", list_schedules)
+    r.add_post("/v1/schedules", create_schedule)
+    r.add_post(r"/v1/schedules/{id:[0-9a-f]{1,32}}/{action:update|run|delete}", schedule_action)
     r.add_post("/v1/sessions/{sid}/dismiss-interrupted", dismiss_interrupted)
     r.add_post("/v1/sessions/{sid}/interrupt", interrupt)
     r.add_post("/v1/sessions/{sid}/cancel", cancel_message)

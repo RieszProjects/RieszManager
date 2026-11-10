@@ -1,8 +1,9 @@
 /** A conversation: header, transcript, live activity, pending prompts and the composer. */
 import { IconButton, ListItemIcon, Menu, MenuItem } from "@mui/material";
 import {
-  Archive, ArchiveRestore, Check, Copy, EllipsisVertical, GitFork, Hand, LoaderCircle, MonitorUp, Pencil, Pin, Power, SquareTerminal, TriangleAlert, X,
+  AlarmClock, Archive, ArchiveRestore, Check, Copy, EllipsisVertical, GitFork, Hand, LoaderCircle, MonitorUp, Pencil, Pin, Power, SquareTerminal, TriangleAlert, X,
 } from "lucide-react";
+import { useSchedules } from "@/features/schedules/store";
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { api } from "@/api/client";
 import { setKeepAlive } from "@/lib/keepAlive";
@@ -51,6 +52,8 @@ function QueueBar({ sessionId, queue }: { sessionId: string; queue: QueueEntry[]
 }
 
 function SessionMenu({ sessionId, state, cwd, title, keepAlive }: { sessionId: string; state: SessionState | null; cwd: string | null; title: string; keepAlive: boolean }) {
+  const setScheduleSession = useUi((s) => s.setScheduleSession);
+  const scheduleCount = useSchedules((s) => s.items.filter((x) => x.sessionId === sessionId && x.enabled).length);
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const navigate = useUi((s) => s.navigate);
   const setRenameTarget = useUi((s) => s.setRenameTarget);
@@ -82,6 +85,11 @@ function SessionMenu({ sessionId, state, cwd, title, keepAlive }: { sessionId: s
           navigate({ view: "session", sessionId: res.sessionId });
         })}>
           <ListItemIcon><GitFork size={16} /></ListItemIcon>分叉为新会话
+        </MenuItem>
+        <MenuItem onClick={() => { close(); setScheduleSession(sessionId); }}>
+          <ListItemIcon><AlarmClock size={16} /></ListItemIcon>
+          <span className="rz-menu-grow">定时唤醒</span>
+          {scheduleCount > 0 && <span className="dim">{scheduleCount}</span>}
         </MenuItem>
         <MenuItem onClick={() => run(() => setKeepAlive(sessionId, !keepAlive))}>
           <ListItemIcon><Pin size={16} /></ListItemIcon>

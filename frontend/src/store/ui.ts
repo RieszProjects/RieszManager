@@ -60,6 +60,8 @@ interface UiStore {
   file: FileTarget | null;
   /** The subagent whose conversation is open (see SubagentViewer). */
   subagent: SubagentTarget | null;
+  /** Session whose scheduled wake-ups are being managed (see ScheduleDialog). */
+  scheduleSession: string | null;
   gallery: ImageGallery | null;
   settingsOpen: boolean;
   newSessionOpen: boolean;
@@ -79,6 +81,7 @@ interface UiStore {
   setSidebarTab: (tab: UiStore["sidebarTab"]) => void;
   openFile: (target: FileTarget | null) => void;
   openSubagent: (target: SubagentTarget | null) => void;
+  setScheduleSession: (sessionId: string | null) => void;
   openGallery: (gallery: ImageGallery | null) => void;
   setSettingsOpen: (open: boolean) => void;
   setNewSessionOpen: (open: boolean) => void;
@@ -101,6 +104,7 @@ export const useUi = create<UiStore>((set) => ({
   sidebarTab: storage.get("sidebarTab.v2", "projects"),
   file: null,
   subagent: null,
+  scheduleSession: null,
   gallery: null,
   settingsOpen: false,
   newSessionOpen: false,
@@ -134,6 +138,7 @@ export const useUi = create<UiStore>((set) => ({
   },
   openFile: (file) => set({ file }),
   openSubagent: (subagent) => set({ subagent }),
+  setScheduleSession: (scheduleSession) => set({ scheduleSession }),
   openGallery: (gallery) => set({ gallery }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setNewSessionOpen: (newSessionOpen) => set({ newSessionOpen }),

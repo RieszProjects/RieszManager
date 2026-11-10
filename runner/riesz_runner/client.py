@@ -18,6 +18,7 @@ any python3, without the runner's virtualenv.
     rieszctl session list [--mine] [--all]    running sessions
     rieszctl session keep ID on|off           keep running (not stopped when idle)
     rieszctl session stop ID                  stop its claude process
+    rieszctl session schedule add --at 21:00 MESSAGE   wake this session daily (see schedule --help)
 
 IDs may be shortened to a unique prefix (at least 6 characters).
 """
@@ -318,6 +319,81 @@ def cmd_keep(runner: Runner, args: argparse.Namespace) -> None:
     print(f"{sid[:8]}: keep running {'on' if on else 'off'}" + (f" ({res['note']})" if res.get("note") else ""))
 
 
+# ---- scheduled wake-ups -----------------------------------------------------------
+
+DAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+
+
+def _minutes(text: str) -> int:
+    m = re.fullmatch(r"\s*(\d+)\s*([mh]?)\s*", text or "")
+    if not m:
+        raise CliError(f"not a duration: {text!r} (use 30m, 2h or a number of minutes)")
+    return int(m.group(1)) * (60 if m.group(2) == "h" else 1)
+
+
+def _schedule_session(runner: Runner, given: str | None) -> str:
+    if given:
+        return resolve(runner, given)
+    me = own_session()
+    if not me:
+        raise CliError("give --session ID (outside a Claude Code session there is no default)")
+    return me
+
+
+def _print_schedules(items: list[dict[str, Any]]) -> None:
+    if not items:
+        print("no schedules")
+        return
+    for s in items:
+        nxt = time.strftime("%m-%d %H:%M", time.localtime(s["next"])) if s.get("next") else "-"
+        state = "" if s.get("enabled") else " [paused]"
+        last = f"  last: {s['lastResult']}" if s.get("lastResult") else ""
+        name = f"  {s['name']}" if s.get("name") else ""
+        print(f"{s['id']}  {s['sessionId'][:8]}  next {nxt}  {s['rule']}{state}{name}{last}")
+
+
+def cmd_schedule_add(runner: Runner, args: argparse.Namespace) -> None:
+    body: dict[str, Any] = {"sessionId": _schedule_session(runner, args.session), "prompt": read_message(args.message),
+                            "catchUp": args.catch_up}
+    if bool(args.at) == bool(args.every):
+        raise CliError("give either --at HH:MM[,HH:MM...] or --every DURATION")
+    if args.at:
+        body["times"] = [t.strip() for t in args.at.split(",") if t.strip()]
+        if args.days:
+            try:
+                body["days"] = [DAYS[d.strip().lower()[:3]] for d in args.days.split(",") if d.strip()]
+            except KeyError:
+                raise CliError("days are mon,tue,wed,thu,fri,sat,sun") from None
+    else:
+        body["every"] = _minutes(args.every)
+    if args.jitter:
+        body["jitter"] = _minutes(args.jitter)
+    if args.name:
+        body["name"] = args.name
+    if args.tz:
+        body["tz"] = args.tz
+    if own_session():
+        body["createdBy"] = own_session()
+    s = runner.call("POST", "/v1/schedules", body)["schedule"]
+    _print_schedules([s])
+
+
+def cmd_schedule_list(runner: Runner, args: argparse.Namespace) -> None:
+    sid = None if args.all else (resolve(runner, args.session) if args.session else own_session())
+    query = f"?session={sid}" if sid else ""
+    _print_schedules(runner.call("GET", "/v1/schedules" + query)["schedules"])
+
+
+def _schedule_action(action: str, body: dict[str, Any] | None = None):
+    def run(runner: Runner, args: argparse.Namespace) -> None:
+        res = runner.call("POST", f"/v1/schedules/{args.id}/{action}", body or {})
+        if "schedule" in res:
+            _print_schedules([res["schedule"]])
+        else:
+            print(f"removed {args.id}")
+    return run
+
+
 def cmd_stop(runner: Runner, args: argparse.Namespace) -> None:
     sid = resolve(runner, args.id)
     not_self(sid, "stop")
@@ -386,6 +462,34 @@ def parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("stop", help="stop a session's claude process (also turns keep running off)")
     sp.add_argument("id")
     sp.set_defaults(func=cmd_stop)
+
+    sp = sub.add_parser("schedule", help="wake a session on a timetable (survives restarts; see schedule --help)",
+                        description="Scheduled wake-ups kept by RieszManager: at the given times the runner sends the "
+                                    "session the message, starting it if needed. Unlike /loop or CronCreate they "
+                                    "survive reboots and idle shutdowns. {now} in the message becomes the time.")
+    ssub = sp.add_subparsers(dest="schedule_cmd", required=True, metavar="ACTION")
+    a = ssub.add_parser("add", help="add a schedule (to this session unless --session)")
+    a.add_argument("--session", metavar="ID", help="session to wake (default: the one running this command)")
+    a.add_argument("--at", metavar="HH:MM,...", help="times of day, e.g. 13:00,22:30")
+    a.add_argument("--days", metavar="mon,thu", help="only on these weekdays (with --at)")
+    a.add_argument("--every", metavar="DURATION", help="interval instead of times, e.g. 30m or 2h (at least 5m)")
+    a.add_argument("--jitter", metavar="DURATION", help="random delay up to this much, e.g. 20m")
+    a.add_argument("--catch-up", action="store_true", help="if a run is missed (server down), run once when back")
+    a.add_argument("--name", help="a short name shown in the web UI")
+    a.add_argument("--tz", help="time zone for --at (default: the server's)")
+    a.add_argument("message", nargs="*", help="what to send (or '-' / standard input); {now} becomes the time")
+    a.set_defaults(func=cmd_schedule_add)
+    ls = ssub.add_parser("list", help="this session's schedules (or --session ID / --all)")
+    ls.add_argument("--session", metavar="ID")
+    ls.add_argument("--all", action="store_true")
+    ls.set_defaults(func=cmd_schedule_list)
+    for name, action, body, help_text in (("pause", "update", {"enabled": False}, "stop a schedule without removing it"),
+                                          ("resume", "update", {"enabled": True}, "start a paused schedule again"),
+                                          ("run", "run", None, "send its message now"),
+                                          ("remove", "delete", None, "remove a schedule")):
+        x = ssub.add_parser(name, help=help_text)
+        x.add_argument("id", help="schedule id (from list)")
+        x.set_defaults(func=_schedule_action(action, body))
     return p
 
 

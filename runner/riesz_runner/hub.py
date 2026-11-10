@@ -19,6 +19,7 @@ from .process import ClaudeProcess, ControlError
 from .projects import ProjectResolver
 from .session_prefs import SessionPrefs
 from .balances import BalanceMonitor
+from .schedules import Scheduler
 from .subagents import SubagentStore
 from .usage import UsageMonitor
 from .attention import LONG_TURN_SECONDS, describe_request, session_title
@@ -77,8 +78,10 @@ class Hub:
         self.store.refresh()
         self.live = scan_live(self.cfg.live_sessions_dir)
         self._mark_interrupted()
+        self.schedules = Scheduler(self)
         self._tasks = [
             asyncio.create_task(self._working_loop()),
+            asyncio.create_task(self.schedules.loop()),
             asyncio.create_task(self._live_loop()),
             asyncio.create_task(self._index_loop()),
             asyncio.create_task(self._reap_loop()),

@@ -1,8 +1,9 @@
 import { ListItemIcon, Menu, MenuItem } from "@mui/material";
-import { Archive, ArchiveRestore, Check, Copy, Ellipsis, Pencil, Pin } from "lucide-react";
+import { AlarmClock, Archive, ArchiveRestore, Check, Copy, Ellipsis, Pencil, Pin } from "lucide-react";
 import { memo, useState } from "react";
 import type { SessionSummary } from "@/api/types";
 import { StatusDot } from "@/components/StatusDot";
+import { useSchedules } from "@/features/schedules/store";
 import { copyText } from "@/lib/clipboard";
 import { setKeepAlive } from "@/lib/keepAlive";
 import { relativeTime } from "@/lib/format";
@@ -69,12 +70,14 @@ function SessionRowImpl({ session, showProject, active }: Props) {
   const live = useApp((s) => s.live[session.sessionId]);
   const projectName = useApp((s) => (showProject ? s.projects.find((p) => p.id === session.project)?.name : undefined));
   const archived = useOrganize((s) => s.archived.session.has(session.sessionId));
+  const scheduled = useSchedules((s) => s.items.some((x) => x.sessionId === session.sessionId && x.enabled));
   return (
     <div className={`rz-session-row${active ? " active" : ""}${archived ? " archived" : ""}`}>
       <button type="button" className="rz-session-row-btn" onClick={() => navigate({ view: "session", sessionId: session.sessionId })}>
         <div className="rz-session-row-main">
           <span className="rz-session-title clamp-1">{sessionTitle(session)}</span>
           {session.keepAlive && <Pin size={11} className="rz-keep-pin" aria-label="保持运行" />}
+          {scheduled && <AlarmClock size={11} className="rz-sched-mark" aria-label="定时唤醒" />}
           {session.interrupted && !live?.busy && !live?.waiting
             ? <span className="rz-interrupted-dot" title="被中断" />
             : <StatusDot live={live} size={7} />}

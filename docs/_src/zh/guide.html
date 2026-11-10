@@ -13,6 +13,7 @@
 </table></div>
 <p>首页（点左上角的Riesz Manager标志回到这里）上，莉思会按时间跟你打招呼，并说一句现在的情况：有几个会话在运行，或者有会话在等你确认；有会话在等你时，后面会出现「去看看「会话名」」按钮，点它直接跳过去。</p>
 <p>如果服务器重启、runner意外停止时有会话正在工作，这些会话会出现在首页的「被中断的会话」里，会话列表里也会在它旁边显示一个小红点。点「恢复」会让Claude先查看中断前做到哪一步，再接着完成；点「忽略」则去掉标记。给这个会话发任何消息，标记也会自动消失。</p>
+<p>设置了<a href="#schedules">定时唤醒</a>时，首页下方的「定时唤醒」列出所有定时和下次运行的时间，可以直接开关，点一条打开它所在会话的定时设置。</p>
 <p>左边栏的两个标签用来按不同方式查找会话，会话旁边的绿色小圆点表示它正在运行：</p>
 <ul>
   <li><b>「项目」</b>：工作区（部署时设置的一个文件夹，例如<code>~/workspace</code>）下的每个一级文件夹就是一个项目。点项目可以展开它下面的会话；点项目名进入项目页，点会话进入会话。</li>
@@ -88,6 +89,7 @@
 <tr><td>「复制会话 ID」</td><td>复制这个会话的ID。</td></tr>
 <tr><td>「复制终端恢复命令」</td><td>复制<code>claude --resume &lt;ID&gt;</code>命令，方便回到终端里接着用。</td></tr>
 <tr><td>「保持运行」</td><td>打开后，这个会话的<code>claude</code>进程空闲时不会被关闭，runner重启后也会自动启动，方便其他会话随时联系它；菜单项旁边打勾表示已开启，会话列表里标题旁有图钉，标题栏显示「常驻」。再点一次关闭；用「结束后台进程」也会同时关闭保持运行。每个常驻会话会一直占用一个进程的内存，适合留给少数需要随时在线的会话。</td></tr>
+<tr><td>「定时唤醒」</td><td>让Riesz Manager按时给这个会话发消息，见<a href="#schedules">定时唤醒</a>。菜单项旁边的数字是这个会话开着的定时数。</td></tr>
 <tr><td>「结束后台进程」</td><td>仅在会话由网页托管运行时出现。结束后台的<code>claude</code>进程，下次发消息时会自动恢复。</td></tr>
 <tr><td>「预先启动进程」</td><td>仅在会话还没启动时出现。提前把后台进程跑起来。</td></tr>
 <tr><td>「从终端转到这里」</td><td>仅在查看终端里运行的会话时出现，见<a href="#terminal">终端里的会话</a>。</td></tr>
@@ -120,6 +122,32 @@ rieszctl session send 1a2b3c4d "再检查一下 README" --wait
 rieszctl session list --mine     # 当前会话开过的会话
 rieszctl session stop 1a2b3c4d   # 用完关掉它的进程</code></pre>
 <p>会话 ID 写前几位就可以。<code>new</code>还可以用<code>-m</code>指定模型，用<code>--mode</code>指定权限模式，用<code>--effort</code>指定思考强度，用<code>--keep</code>让它一直保持运行；消息很长时可以写成<code>-</code>，从标准输入读入。新会话在<code>wait</code>期间需要你确认时，命令会打印一行提示，等你在网页上处理。开新会话的会话会记在新会话的信息里（<code>rieszctl session show</code>里的 started by）。完整用法见<code>rieszctl session --help</code>。</p>
+
+<h2 id="schedules">定时唤醒</h2>
+<p>Riesz Manager可以按时给某个会话发一条消息，比如每天晚上让它整理一次邮件，或者每隔一段时间看一眼任务进度。定时由runner保存和执行，服务器重启、会话进程被关掉都不影响：到点时会话没在运行就先启动它，正在工作就排队，等这一轮做完再送达。</p>
+<p>在会话菜单里点「定时唤醒」，可以添加、编辑、暂停和删除这个会话的定时，点▶会立即发送一次。每条定时可以设置：</p>
+<div class="wrap"><table style="--first-col: 8em">
+<tr><th>选项</th><th>说明</th></tr>
+<tr><td>时间</td><td>「固定时间」：填一天中的几个时刻，例如<code>13:00, 22:30</code>，再选星期几（都不选就是每天）。「每隔一段时间」：填间隔的分钟数，至少5分钟。</td></tr>
+<tr><td>随机推迟</td><td>到点后再随机推迟至多这么多分钟发送。</td></tr>
+<tr><td>时区</td><td>「固定时间」按哪个时区算，默认是服务器的时区。</td></tr>
+<tr><td>错过时补跑一次</td><td>服务器关机等原因错过了时间（晚了10分钟以上）时，打开这项会在恢复后补发一次；不打开就跳过这一次，等下一次。</td></tr>
+<tr><td>发送内容</td><td>发给会话的消息。其中的<code>{now}</code>会换成发送时的时间。</td></tr>
+</table></div>
+<p>有定时的会话在会话列表里标题旁有一个闹钟图标。如果上一次发的消息还在排队没送达，这一次会跳过，不会越积越多。</p>
+<p>Claude Code自带的定时（<code>/loop</code>、<code>CronCreate</code>等）只存在于会话的进程里，进程一结束就没有了；需要长期使用的定时请用这里的定时唤醒。会话也可以在Bash里自己设定：</p>
+<pre><code># 每天13:00和22:30，随机推迟至多20分钟
+rieszctl session schedule add --at 13:00,22:30 --jitter 20m "例行检查（{now}）"
+
+# 每周一、周四19:40，错过时补跑一次；消息从文件读入
+rieszctl session schedule add --at 19:40 --days mon,thu --catch-up --name 周报 - &lt; prompt.txt
+
+# 每2小时
+rieszctl session schedule add --every 2h "看看测试跑完没有"
+
+rieszctl session schedule list           # 当前会话的定时（--all 列出全部）
+rieszctl session schedule pause ID       # 暂停；resume 重新打开，run 立即发送，remove 删除</code></pre>
+<p>不加<code>--session</code>时，定时属于运行这条命令的会话。完整用法见<code>rieszctl session schedule --help</code>。</p>
 
 <h2 id="files">项目文件</h2>
 <p>右边面板的「文件」标签展示当前项目的文件树（只读），修改、新增等文件带有git状态标记，被git忽略的文件和文件夹显示为灰色。点任意文件可以打开预览窗口：</p>

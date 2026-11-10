@@ -29,7 +29,7 @@
     <div class="toc-title">Docs</div>
     <ul class="toc-site"><li><a href="index.html">Introduction</a></li><li><a href="quickstart.html">Quickstart</a></li><li><a href="guide.html" class="current">User Guide</a></li><li><a href="deploy.html">Deployment</a></li></ul>
     <div class="toc-title">On this page</div>
-    <ul class="toc-page"><li class="l2"><a href="#layout">Interface overview</a></li><li class="l2"><a href="#conversation">Conversation</a></li><li class="l2"><a href="#composer">Composer</a></li><li class="l2"><a href="#modes">Permission modes and models</a></li><li class="l2"><a href="#prompts">Approvals and questions</a></li><li class="l2"><a href="#context">Context usage</a></li><li class="l2"><a href="#sessions">Managing sessions</a></li><li class="l2"><a href="#terminal">Terminal sessions</a></li><li class="l2"><a href="#spawn">Starting sessions from other sessions</a></li><li class="l2"><a href="#files">Project files</a></li><li class="l2"><a href="#push">Push notifications</a></li><li class="l2"><a href="#doll">Riesz doll</a></li><li class="l2"><a href="#mobile">Using on mobile</a></li><li class="l2"><a href="#settings">Settings</a></li><li class="l2"><a href="#shortcuts">Keyboard shortcuts</a></li><li class="l2"><a href="#faq">FAQ</a></li></ul>
+    <ul class="toc-page"><li class="l2"><a href="#layout">Interface overview</a></li><li class="l2"><a href="#conversation">Conversation</a></li><li class="l2"><a href="#composer">Composer</a></li><li class="l2"><a href="#modes">Permission modes and models</a></li><li class="l2"><a href="#prompts">Approvals and questions</a></li><li class="l2"><a href="#context">Context usage</a></li><li class="l2"><a href="#sessions">Managing sessions</a></li><li class="l2"><a href="#terminal">Terminal sessions</a></li><li class="l2"><a href="#spawn">Starting sessions from other sessions</a></li><li class="l2"><a href="#schedules">Scheduled wake-ups</a></li><li class="l2"><a href="#files">Project files</a></li><li class="l2"><a href="#push">Push notifications</a></li><li class="l2"><a href="#doll">Riesz doll</a></li><li class="l2"><a href="#mobile">Using on mobile</a></li><li class="l2"><a href="#settings">Settings</a></li><li class="l2"><a href="#shortcuts">Keyboard shortcuts</a></li><li class="l2"><a href="#faq">FAQ</a></li></ul>
   </aside>
   <article>
 <h1>User Guide</h1>
@@ -48,6 +48,7 @@
 </table></div>
 <p>On the home page (click the Riesz Manager logo at the top left to get back to it), Riesz greets you for the time of day and says what is going on: how many sessions are running, or that a session is waiting for your approval. When one is waiting, a “Go see …” (去看看「…」) button follows, which takes you straight to it.</p>
 <p>If the server restarts or the runner stops while sessions are working, those sessions are listed under “Interrupted sessions” (被中断的会话) on the home page and get a small red dot in the session lists. “Resume” (恢复) asks Claude to check how far it got before the interruption and carry on; “Dismiss” (忽略) removes the mark. Sending the session any message removes it too.</p>
+<p>When there are <a href="#schedules">scheduled wake-ups</a>, the home page lists them all under “Scheduled wake-ups” (定时唤醒) with their next run. Each one can be switched on or off there; click one to open the schedules of its session.</p>
 <p>The two tabs in the sidebar let you browse sessions in different ways. A green dot next to a session means it is currently running:</p>
 <ul>
   <li><b>“Projects” (项目)</b>: Each top-level folder inside your workspace (the directory configured at deployment, such as <code>~/workspace</code>) is a project. Click a project to expand its sessions; click the project name to open the project page, or click a session to open that session.</li>
@@ -123,6 +124,7 @@
 <tr><td>“Copy session ID” (复制会话 ID)</td><td>Copy the ID of this session.</td></tr>
 <tr><td>“Copy terminal resume command” (复制终端恢复命令)</td><td>Copy the <code>claude --resume &lt;ID&gt;</code> command so you can pick the session back up in a terminal.</td></tr>
 <tr><td>“Keep running” (保持运行)</td><td>When on, the session's <code>claude</code> process is not stopped when idle and is started again after a runner restart, so other sessions can reach it at any time. A check next to the item means it is on; the session list shows a pin next to the title and the header shows “Always on” (常驻). Click again to turn it off; “Stop background process” (结束后台进程) also turns it off. Each kept-running session holds one process in memory, so keep this for the few sessions that need to stay reachable.</td></tr>
+<tr><td>“Scheduled wake-ups” (定时唤醒)</td><td>Have Riesz Manager send this session a message on a timetable; see <a href="#schedules">Scheduled wake-ups</a>. The number next to the item is how many of the session's schedules are on.</td></tr>
 <tr><td>“Stop background process” (结束后台进程)</td><td>Shown only when the session is hosted by the web app. Stops the background <code>claude</code> process; it resumes automatically next time you send a message.</td></tr>
 <tr><td>“Pre-start process” (预先启动进程)</td><td>Shown only when the session is not currently running. Spins up the background process ahead of time.</td></tr>
 <tr><td>“Take over from terminal” (从终端转到这里)</td><td>Shown only when viewing a session running in a terminal. See <a href="#terminal">Terminal sessions</a>.</td></tr>
@@ -155,6 +157,32 @@ rieszctl session send 1a2b3c4d "Check the README too" --wait
 rieszctl session list --mine     # sessions this session started
 rieszctl session stop 1a2b3c4d   # stop its process when done</code></pre>
 <p>A unique prefix of the session ID is enough. <code>new</code> also takes <code>-m</code> for the model, <code>--mode</code> for the permission mode, <code>--effort</code> for the effort level and <code>--keep</code> to keep the session running; pass <code>-</code> as the message to read a long one from standard input. If the new session needs your approval while <code>wait</code> is running, the command prints a note and keeps waiting until you answer in the web app. The session that started it is recorded (“started by” in <code>rieszctl session show</code>). Run <code>rieszctl session --help</code> for the full usage.</p>
+
+<h2 id="schedules">Scheduled wake-ups</h2>
+<p>Riesz Manager can send a session a message on a timetable, for example to have it sort the mail every evening or check on a task every so often. The runner keeps and runs these schedules, so they survive server restarts and stopped session processes: when one is due, a session that is not running is started first, and a session that is busy gets the message queued until it finishes its current turn.</p>
+<p>Click “Scheduled wake-ups” (定时唤醒) in the session menu to add, edit, pause and delete the session's schedules; ▶ sends one right away. Each schedule has:</p>
+<div class="wrap"><table style="--first-col: 8em">
+<tr><th>Option</th><th>Meaning</th></tr>
+<tr><td>Time</td><td>“Fixed times” (固定时间): times of day such as <code>13:00, 22:30</code>, and the weekdays (none selected means every day). “At an interval” (每隔一段时间): the interval in minutes, at least 5.</td></tr>
+<tr><td>Random delay</td><td>“Random delay (minutes)” (随机推迟（分钟）): send up to this many minutes late, at random.</td></tr>
+<tr><td>Time zone</td><td>The time zone for fixed times; the server's by default.</td></tr>
+<tr><td>Catch up</td><td>“Run once if missed” (错过时补跑一次): when a run is missed by more than 10 minutes (the server was off, say), send it once when things are back. Otherwise that run is skipped.</td></tr>
+<tr><td>Message</td><td>“Message” (发送内容): what to send. <code>{now}</code> in it becomes the time it is sent.</td></tr>
+</table></div>
+<p>Sessions with a schedule show an alarm clock next to their title in the session lists. If the message from the previous run is still queued, the run is skipped, so messages do not pile up.</p>
+<p>Claude Code's own timers (<code>/loop</code>, <code>CronCreate</code> and the like) live inside the session's process and are gone when it stops; use scheduled wake-ups for anything that should keep running. A session can also set them up from its Bash tool:</p>
+<pre><code># every day at 13:00 and 22:30, up to 20 minutes late
+rieszctl session schedule add --at 13:00,22:30 --jitter 20m "Routine check ({now})"
+
+# Mondays and Thursdays at 19:40, caught up if missed; message from a file
+rieszctl session schedule add --at 19:40 --days mon,thu --catch-up --name weekly - &lt; prompt.txt
+
+# every 2 hours
+rieszctl session schedule add --every 2h "See whether the tests have finished"
+
+rieszctl session schedule list           # this session's schedules (--all for every one)
+rieszctl session schedule pause ID       # resume turns it back on, run sends now, remove deletes</code></pre>
+<p>Without <code>--session</code>, the schedule belongs to the session running the command. Run <code>rieszctl session schedule --help</code> for the full usage.</p>
 
 <h2 id="files">Project files</h2>
 <p>The “Files” (文件) tab in the right panel shows a read-only file tree of the current project, with git status badges on modified and untracked files; files and folders ignored by git are shown greyed out. Click any file to open the preview modal:</p>
