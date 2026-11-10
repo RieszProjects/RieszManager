@@ -1,10 +1,11 @@
-/** A subagent's own conversation, opened from its tool card. Refreshes while the subagent runs. */
+/** A subagent's own conversation, opened from its tool card or a session list. Refreshes while the subagent runs. */
 import { Button, Dialog, IconButton } from "@mui/material";
 import { LoaderCircle, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/api/client";
 import type { Item, SessionState } from "@/api/types";
 import { useIsMobile } from "@/lib/useIsMobile";
+import { useApp } from "@/store/app";
 import { useSessions } from "@/store/sessions";
 import { useUi } from "@/store/ui";
 import { ItemView } from "./MessageItems";
@@ -40,11 +41,13 @@ export function SubagentViewer() {
   /** Earlier pages were loaded by hand: refreshes of the latest page leave "load earlier" alone. */
   const olderLoaded = useRef(false);
 
+  const toolUseId = target?.toolUseId ?? agent?.toolUseId ?? null;
   const task = useMemo(
-    () => (target ? (state?.tasks ?? []).find((t) => t.toolUseId === target.toolUseId) : undefined),
-    [state?.tasks, target],
+    () => (toolUseId ? (state?.tasks ?? []).find((t) => t.toolUseId === toolUseId) : undefined),
+    [state?.tasks, toolUseId],
   );
-  const running = Boolean(task && state?.alive);
+  const liveRunning = useApp((s) => Boolean(target && toolUseId && s.live[target.sessionId]?.agents?.includes(toolUseId)));
+  const running = Boolean(task && state?.alive) || liveRunning;
 
   // Find the subagent of this tool call.
   useEffect(() => {
@@ -60,7 +63,7 @@ export function SubagentViewer() {
     api<{ subagents: SubagentInfo[] }>(`sessions/${target.sessionId}/subagents`)
       .then((res) => {
         if (cancelled) return;
-        const found = res.subagents.find((a) => a.toolUseId === target.toolUseId);
+        const found = res.subagents.find((a) => (target.agentId ? a.agentId === target.agentId : a.toolUseId === target.toolUseId));
         if (found) setAgent(found);
         else setError("没有找到这个子代理的记录");
       })

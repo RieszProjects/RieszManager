@@ -31,6 +31,7 @@ function liveFromProcesses(list: LiveProcess[], previous: Record<string, LiveInf
       busy: p.hosted && prev ? prev.busy : p.status === "busy",
       pid: p.pid,
       waiting: p.hosted ? prev?.waiting : false,
+      agents: p.hosted ? prev?.agents : undefined,
       kind: p.kind,
       entrypoint: p.entrypoint,
       status: p.status,

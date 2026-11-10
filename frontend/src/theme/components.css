@@ -810,3 +810,31 @@ body.rz-dragging, body.rz-dragging * { cursor: grabbing !important; user-select:
 .rz-imgview-nav:hover { background: rgba(47, 54, 48, 0.85) !important; }
 .rz-imgview-nav.prev { left: 16px; }
 .rz-imgview-nav.next { right: 16px; }
+
+/* ---- Subagents under a session row ---- */
+.rz-session-row.has-agents .rz-session-row-sub { padding-right: 22px; }
+.rz-subagent-toggle {
+  position: absolute; right: 6px; bottom: 5px; display: inline-flex; align-items: center; gap: 3px;
+  height: 18px; padding: 0 4px 0 5px; border: none; border-radius: 6px; background: none;
+  color: var(--text3); font: inherit; font-size: 11px; cursor: pointer;
+}
+.rz-project-sessions .rz-subagent-toggle { bottom: 3px; }
+.rz-subagent-toggle:hover { color: var(--text); background: rgba(232, 226, 212, 0.08); }
+.rz-subagent-toggle.running { color: var(--sage-strong); }
+.rz-subagent-chevron { transition: transform 0.15s; }
+.rz-subagent-toggle.open .rz-subagent-chevron { transform: rotate(90deg); }
+.rz-subagent-rows {
+  display: flex; flex-direction: column; margin: 0 0 4px 14px; padding-left: 6px;
+  border-left: 1px solid var(--line);
+}
+.rz-subagent-row {
+  display: flex; align-items: center; gap: 7px; width: 100%; padding: 4px 8px; border: none; border-radius: 7px;
+  background: none; color: var(--text2); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer;
+}
+.rz-subagent-row > svg { flex-shrink: 0; color: var(--text3); }
+.rz-subagent-row:hover { background: rgba(232, 226, 212, 0.045); color: var(--text); }
+.rz-subagent-row.selected { background: var(--bg3); color: var(--text); }
+.rz-subagent-row.running > svg, .rz-subagent-row.running .rz-subagent-row-time { color: var(--sage-strong); }
+.rz-subagent-row-title { flex: 1; min-width: 0; }
+.rz-subagent-row-time { flex-shrink: 0; font-size: 11px; color: var(--text3); }
+.rz-subagent-rest { color: var(--text3); font-size: 11.5px; padding-left: 27px; }

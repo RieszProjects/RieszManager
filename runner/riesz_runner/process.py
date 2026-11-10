@@ -557,6 +557,7 @@ class ClaudeProcess:
                 "id": task_id,
                 "description": msg.get("description") or "",
                 "type": msg.get("subagent_type") or msg.get("task_type") or "task",
+                "kind": msg.get("task_type"),
                 "background": bool(msg.get("is_backgrounded")),
                 "toolUseId": msg.get("tool_use_id"),
                 "startedAt": time.time(),
@@ -584,7 +585,8 @@ class ClaudeProcess:
                 if tid and tid not in self.tasks:
                     self.tasks[tid] = {"id": tid, "description": t.get("description") or "",
                                        "type": t.get("subagent_type") or t.get("task_type") or "task",
-                                       "background": True, "toolUseId": None, "startedAt": time.time()}
+                                       "kind": t.get("task_type"), "background": True,
+                                       "toolUseId": t.get("tool_use_id"), "startedAt": time.time()}
                     changed = True
                 elif tid:
                     changed |= not self.tasks[tid]["background"]

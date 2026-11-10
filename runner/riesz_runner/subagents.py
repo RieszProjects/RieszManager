@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 from collections import OrderedDict
 from pathlib import Path
@@ -33,6 +34,29 @@ class SubagentStore:
         self.store = store
         self._views: OrderedDict[str, LoadedView] = OrderedDict()
         self._locks: dict[str, asyncio.Lock] = {}
+        self._counts: dict[str, tuple[float, int]] = {}
+
+    def count(self, session_id: str) -> int:
+        """How many subagents the session has started (what `list` would return), cached by folder mtime."""
+        folder = self._dir(session_id)
+        if folder is None:
+            return 0
+        try:
+            mtime = folder.stat().st_mtime
+        except OSError:
+            return 0
+        cached = self._counts.get(session_id)
+        if cached and cached[0] == mtime:
+            return cached[1]
+        try:
+            names = {e.name for e in os.scandir(folder)}
+        except OSError:
+            return 0
+        n = sum(1 for name in names
+                if name.startswith("agent-") and name.endswith(".meta.json")
+                and name[:-len(".meta.json")] + ".jsonl" in names)
+        self._counts[session_id] = (mtime, n)
+        return n
 
     def _dir(self, session_id: str) -> Path | None:
         entry = self.store.get(session_id)

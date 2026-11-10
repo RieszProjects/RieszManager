@@ -10,6 +10,7 @@ import { relativeTime } from "@/lib/format";
 import { sessionTitle, useApp } from "@/store/app";
 import { useOrganize } from "@/store/organize";
 import { toast, useUi } from "@/store/ui";
+import { SessionSubagents, SubagentToggle, useSubagentsShown } from "./SessionSubagents";
 
 interface Props {
   session: SessionSummary;
@@ -71,8 +72,10 @@ function SessionRowImpl({ session, showProject, active }: Props) {
   const projectName = useApp((s) => (showProject ? s.projects.find((p) => p.id === session.project)?.name : undefined));
   const archived = useOrganize((s) => s.archived.session.has(session.sessionId));
   const scheduled = useSchedules((s) => s.items.some((x) => x.sessionId === session.sessionId && x.enabled));
+  const agents = useSubagentsShown(session, live);
   return (
-    <div className={`rz-session-row${active ? " active" : ""}${archived ? " archived" : ""}`}>
+    <>
+    <div className={`rz-session-row${active ? " active" : ""}${archived ? " archived" : ""}${agents.has ? " has-agents" : ""}`}>
       <button type="button" className="rz-session-row-btn" onClick={() => navigate({ view: "session", sessionId: session.sessionId })}>
         <div className="rz-session-row-main">
           <span className="rz-session-title clamp-1">{sessionTitle(session)}</span>
@@ -89,7 +92,10 @@ function SessionRowImpl({ session, showProject, active }: Props) {
         </div>
       </button>
       <SessionActions session={session} archived={archived} />
+      {agents.has && <SubagentToggle session={session} live={live} open={agents.open} />}
     </div>
+    {agents.open && <SessionSubagents session={session} live={live} />}
+    </>
   );
 }
 

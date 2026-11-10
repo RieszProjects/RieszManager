@@ -363,13 +363,16 @@ class Hub:
         data["keepAlive"] = self.prefs.keep_alive(session_id)
         data["startedBy"] = (self.prefs.get(session_id) or {}).get("startedBy")
         data["interrupted"] = self.prefs.interrupted(session_id)
+        data["subagents"] = self.subagents.count(session_id)
         return data
 
     def _live_info(self, session_id: str) -> dict[str, Any] | None:
         hosted = self.hosted.get(session_id)
         if hosted is not None and hosted.alive:
+            agents = [t["toolUseId"] for t in hosted.tasks.values()
+                      if t.get("toolUseId") and t.get("kind") not in ("local_bash", "local_workflow")]
             return {"hosted": True, "busy": hosted.turn_active, "pid": hosted.pid,
-                    "waiting": bool(hosted.permissions)}
+                    "waiting": bool(hosted.permissions), "agents": agents}
         live = self.live.get(session_id)
         if live is not None:
             held = len(self.delivery.held.get(session_id, [])) if self.delivery else 0

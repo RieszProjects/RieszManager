@@ -41,7 +41,9 @@ export interface FileTarget {
 export interface SubagentTarget {
   sessionId: string;
   /** The Agent tool call that started the subagent. */
-  toolUseId: string;
+  toolUseId: string | null;
+  /** The subagent itself, when known (opened from a session list). */
+  agentId?: string;
   title: string;
   cwd: string | null;
   projectId: string | null;
@@ -60,6 +62,8 @@ interface UiStore {
   file: FileTarget | null;
   /** The subagent whose conversation is open (see SubagentViewer). */
   subagent: SubagentTarget | null;
+  /** Sessions whose subagents are shown (true) or hidden (false) in the session lists; unset: shown while one runs. */
+  subagentsOpen: Record<string, boolean>;
   /** Session whose scheduled wake-ups are being managed (see ScheduleDialog). */
   scheduleSession: string | null;
   gallery: ImageGallery | null;
@@ -81,6 +85,7 @@ interface UiStore {
   setSidebarTab: (tab: UiStore["sidebarTab"]) => void;
   openFile: (target: FileTarget | null) => void;
   openSubagent: (target: SubagentTarget | null) => void;
+  setSubagentsOpen: (sessionId: string, open: boolean) => void;
   setScheduleSession: (sessionId: string | null) => void;
   openGallery: (gallery: ImageGallery | null) => void;
   setSettingsOpen: (open: boolean) => void;
@@ -104,6 +109,7 @@ export const useUi = create<UiStore>((set) => ({
   sidebarTab: storage.get("sidebarTab.v2", "projects"),
   file: null,
   subagent: null,
+  subagentsOpen: {},
   scheduleSession: null,
   gallery: null,
   settingsOpen: false,
@@ -138,6 +144,7 @@ export const useUi = create<UiStore>((set) => ({
   },
   openFile: (file) => set({ file }),
   openSubagent: (subagent) => set({ subagent }),
+  setSubagentsOpen: (sessionId, open) => set((s) => ({ subagentsOpen: { ...s.subagentsOpen, [sessionId]: open } })),
   setScheduleSession: (scheduleSession) => set({ scheduleSession }),
   openGallery: (gallery) => set({ gallery }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),

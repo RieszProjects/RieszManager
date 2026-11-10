@@ -25,6 +25,8 @@ export interface LiveInfo {
   entrypoint?: string | null;
   status?: string | null;
   held?: number;
+  /** Hosted sessions: the Agent tool calls whose subagents are running now. */
+  agents?: string[];
 }
 
 export interface SessionSummary {
@@ -49,6 +51,8 @@ export interface SessionSummary {
   keepAlive?: boolean;
   /** When the runner stopped while this session was working (reboot, crash); cleared once it is taken up again. */
   interrupted?: number | null;
+  /** How many subagents the session has started. */
+  subagents?: number;
 }
 
 export interface LiveProcess {
