@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import json
 import logging
 import time
 import uuid as uuidlib
@@ -33,6 +35,9 @@ TAIL_INTERVAL = 0.35
 LIVE_INTERVAL = 1.5
 INDEX_INTERVAL = 3.0
 REAP_INTERVAL = 30.0
+# How often the sessions with work in progress are written down, to tell after an abrupt stop
+# (reboot, crash) which ones were interrupted.
+WORKING_SNAPSHOT_INTERVAL = 5.0
 KEEP_ALIVE_INTERVAL = 30.0
 # A kept-alive process that ends within this many seconds of being started counts as a crash.
 KEEP_ALIVE_CRASH_WINDOW = 600
@@ -63,13 +68,17 @@ class Hub:
         self._revive_state: dict[str, tuple[float, int]] = {}
         self.reload_pending = False
         self.reload_ready = asyncio.Event()
+        self._working_file = cfg.state_dir / "working.json"
+        self._working_saved: set[str] | None = None
 
     # ---- lifecycle ----------------------------------------------------------
 
     async def start(self) -> None:
         self.store.refresh()
         self.live = scan_live(self.cfg.live_sessions_dir)
+        self._mark_interrupted()
         self._tasks = [
+            asyncio.create_task(self._working_loop()),
             asyncio.create_task(self._live_loop()),
             asyncio.create_task(self._index_loop()),
             asyncio.create_task(self._reap_loop()),
@@ -104,6 +113,7 @@ class Hub:
                     break
             await asyncio.sleep(1.0)
         log.info("all hosted sessions idle; reloading")
+        self._save_working(set())  # nothing is interrupted by a reload
         self.reload_ready.set()
 
     async def close(self) -> None:
@@ -234,6 +244,44 @@ class Hub:
                     log.info("stopping idle claude process for %s", sid)
                     await proc.stop()
 
+    # ---- interrupted sessions ---------------------------------------------------
+
+    def _mark_interrupted(self) -> None:
+        """Sessions still working when the runner last stopped were cut off: mark them."""
+        try:
+            saved = json.loads(self._working_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            saved = {}
+        sessions = saved.get("sessions") if isinstance(saved, dict) else None
+        when = saved.get("time") if isinstance(saved, dict) and isinstance(saved.get("time"), (int, float)) else time.time()
+        for sid in sessions or []:
+            if isinstance(sid, str) and self.prefs.set_interrupted(sid, when):
+                log.info("session %s was interrupted when the runner stopped", sid[:8])
+        self._save_working(set())
+
+    def _save_working(self, working: set[str]) -> None:
+        if working == self._working_saved:
+            return
+        try:
+            self._working_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._working_file.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"sessions": sorted(working), "time": time.time()}), encoding="utf-8")
+            os.replace(tmp, self._working_file)
+            self._working_saved = working
+        except OSError as exc:
+            log.warning("cannot write %s: %s", self._working_file, exc)
+
+    async def _working_loop(self) -> None:
+        while True:
+            await asyncio.sleep(WORKING_SNAPSHOT_INTERVAL)
+            if self.reload_ready.is_set():
+                continue
+            self._save_working({sid for sid, p in self.hosted.items() if p.alive and p.working})
+
+    async def clear_interrupted(self, session_id: str) -> None:
+        if self.prefs.set_interrupted(session_id, None):
+            await self.broadcast_global({"ev": "sessions", "sessions": [self.session_summary(session_id)], "removed": []})
+
     # ---- keep running ---------------------------------------------------------
 
     async def _keep_alive_loop(self) -> None:
@@ -311,6 +359,7 @@ class Hub:
         data["live"] = self._live_info(session_id)
         data["keepAlive"] = self.prefs.keep_alive(session_id)
         data["startedBy"] = (self.prefs.get(session_id) or {}).get("startedBy")
+        data["interrupted"] = self.prefs.interrupted(session_id)
         return data
 
     def _live_info(self, session_id: str) -> dict[str, Any] | None:

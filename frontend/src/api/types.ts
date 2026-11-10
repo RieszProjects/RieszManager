@@ -47,6 +47,8 @@ export interface SessionSummary {
   size: number;
   /** The user asked for this session's claude process to stay running. */
   keepAlive?: boolean;
+  /** When the runner stopped while this session was working (reboot, crash); cleared once it is taken up again. */
+  interrupted?: number | null;
 }
 
 export interface LiveProcess {

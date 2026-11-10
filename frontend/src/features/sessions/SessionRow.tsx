@@ -75,7 +75,9 @@ function SessionRowImpl({ session, showProject, active }: Props) {
         <div className="rz-session-row-main">
           <span className="rz-session-title clamp-1">{sessionTitle(session)}</span>
           {session.keepAlive && <Pin size={11} className="rz-keep-pin" aria-label="保持运行" />}
-          <StatusDot live={live} size={7} />
+          {session.interrupted && !live?.busy && !live?.waiting
+            ? <span className="rz-interrupted-dot" title="被中断" />
+            : <StatusDot live={live} size={7} />}
         </div>
         <div className="rz-session-row-sub">
           {archived && <span className="rz-tag muted">已归档</span>}

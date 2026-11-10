@@ -1,11 +1,14 @@
 /** Landing view (nothing selected) and the per-project "new session" view. */
+import { Button } from "@mui/material";
 import { ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { api } from "@/api/client";
 import { Mascot } from "@/components/Mascot";
+import { clockTime } from "@/lib/format";
 import { useOrganizeView } from "@/lib/organize";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { sessionTitle, useApp } from "@/store/app";
-import { useUi } from "@/store/ui";
+import { toast, useUi } from "@/store/ui";
 import { SessionRow } from "../sessions/SessionRow";
 import { Composer } from "../composer/Composer";
 import { MobileHeaderButtons } from "../layout/MobileHeaderButtons";
@@ -111,6 +114,63 @@ function HomeRecent() {
   );
 }
 
+/** Sessions cut off while working (the server restarted, the runner stopped): carry on or let go. */
+function HomeInterrupted() {
+  const sessions = useApp((s) => s.sessions);
+  const projects = useApp((s) => s.projects);
+  const live = useApp((s) => s.live);
+  const navigate = useUi((s) => s.navigate);
+  const [pending, setPending] = useState<Set<string>>(new Set());
+  const list = useMemo(
+    () => Object.values(sessions)
+      .filter((s) => s.interrupted && !live[s.sessionId]?.busy)
+      .sort((a, b) => (b.interrupted ?? 0) - (a.interrupted ?? 0)),
+    [sessions, live],
+  );
+  if (!list.length) return null;
+
+  const act = async (sid: string, action: "resume" | "dismiss-interrupted") => {
+    setPending((p) => new Set(p).add(sid));
+    try {
+      await api(`sessions/${sid}/${action}`, { body: {} });
+    } catch (err) {
+      toast((err as Error).message, "error");
+    } finally {
+      setPending((p) => {
+        const n = new Set(p);
+        n.delete(sid);
+        return n;
+      });
+    }
+  };
+
+  return (
+    <section className="rz-home-recent rz-home-interrupted">
+      <div className="rz-home-recent-head">
+        <span className="rz-side-label">被中断的会话</span>
+        {list.length > 1 && (
+          <button type="button" className="rz-home-recent-all" onClick={() => list.forEach((s) => void act(s.sessionId, "resume"))}>
+            全部恢复
+          </button>
+        )}
+      </div>
+      {list.map((s) => (
+        <div key={s.sessionId} className="rz-interrupted-row">
+          <button type="button" className="rz-interrupted-main" onClick={() => navigate({ view: "session", sessionId: s.sessionId })}>
+            <span className="rz-interrupted-dot" />
+            <span className="rz-interrupted-text">
+              <span className="clamp-1">{sessionTitle(s)}</span>
+              <span className="dim clamp-1">{projects.find((p) => p.id === s.project)?.name ?? ""} · {clockTime(s.interrupted)}</span>
+            </span>
+          </button>
+          <Button size="small" variant="outlined" disabled={pending.has(s.sessionId)} onClick={() => void act(s.sessionId, "resume")}>恢复</Button>
+          <Button size="small" color="inherit" disabled={pending.has(s.sessionId)} onClick={() => void act(s.sessionId, "dismiss-interrupted")}>忽略</Button>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 export function HomeView() {
   const setContextProject = useUi((s) => s.setContextProject);
   const isMobile = useIsMobile();
@@ -128,6 +188,7 @@ export function HomeView() {
         <Mascot pose="sleepy" className="rz-home-mascot" />
         <HomeGreeting />
       </div>
+      <HomeInterrupted />
       {isMobile && <HomeRecent />}
     </div>
   );

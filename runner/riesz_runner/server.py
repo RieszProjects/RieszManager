@@ -448,6 +448,23 @@ async def send_message(request: web.Request) -> web.Response:
     return _json({**result, "state": hub.session_state(sid)})
 
 
+RESUME_TEXT = ("刚才服务器重启（或运行环境意外停止），你上一轮的工作被打断了，当时在跑的命令和后台任务也都停了。"
+               "请先看看中断前在做什么、做到了哪一步，再接着完成。")
+
+
+async def resume_session(request: web.Request) -> web.Response:
+    """Pick up an interrupted session: ask Claude to carry on from where it was cut off."""
+    hub = request.app[HUB]
+    sid = _session_id(request)
+    result = await request.app[DELIVERY].send(sid, RESUME_TEXT, [], str(uuidlib.uuid4()))
+    return _json({**result, "state": hub.session_state(sid)})
+
+
+async def dismiss_interrupted(request: web.Request) -> web.Response:
+    await request.app[HUB].clear_interrupted(_session_id(request))
+    return _json({"ok": True})
+
+
 async def start_session(request: web.Request) -> web.Response:
     hub = request.app[HUB]
     sid = _session_id(request)
@@ -784,6 +801,8 @@ def build_app(cfg: Config) -> web.Application:
     r.add_post("/v1/sessions/{sid}/start", start_session)
     r.add_post("/v1/sessions/{sid}/stop", stop_session)
     r.add_post("/v1/sessions/{sid}/keep-alive", keep_alive)
+    r.add_post("/v1/sessions/{sid}/resume", resume_session)
+    r.add_post("/v1/sessions/{sid}/dismiss-interrupted", dismiss_interrupted)
     r.add_post("/v1/sessions/{sid}/interrupt", interrupt)
     r.add_post("/v1/sessions/{sid}/cancel", cancel_message)
     r.add_post("/v1/sessions/{sid}/permissions/{rid}", answer_permission)

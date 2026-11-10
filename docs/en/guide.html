@@ -47,6 +47,7 @@
 <tr><td>Project panel</td><td>Has two tabs: “Files” (文件) and “Sessions” (会话). “Files” (文件) is a read-only file tree of the current project with git status badges (see <a href="#files">Project files</a>); “Sessions” (会话) lists every session in this project. On narrower screens the right panel collapses automatically; click the button on the right side of the header to open it.</td></tr>
 </table></div>
 <p>On the home page (click the Riesz Manager logo at the top left to get back to it), Riesz greets you for the time of day and says what is going on: how many sessions are running, or that a session is waiting for your approval. When one is waiting, a “Go see …” (去看看「…」) button follows, which takes you straight to it.</p>
+<p>If the server restarts or the runner stops while sessions are working, those sessions are listed under “Interrupted sessions” (被中断的会话) on the home page and get a small red dot in the session lists. “Resume” (恢复) asks Claude to check how far it got before the interruption and carry on; “Dismiss” (忽略) removes the mark. Sending the session any message removes it too.</p>
 <p>The two tabs in the sidebar let you browse sessions in different ways. A green dot next to a session means it is currently running:</p>
 <ul>
   <li><b>“Projects” (项目)</b>: Each top-level folder inside your workspace (the directory configured at deployment, such as <code>~/workspace</code>) is a project. Click a project to expand its sessions; click the project name to open the project page, or click a session to open that session.</li>

@@ -6,7 +6,9 @@
   in the transcript either;
 - keepAlive: the user asked for the session's claude process to stay running
   (not stopped when idle, started again after a runner restart);
-- startedBy: the session that asked for this one with `rieszctl session new`.
+- startedBy: the session that asked for this one with `rieszctl session new`;
+- interrupted: when the runner stopped (reboot, crash, restart) while the session was
+  working; cleared when the session gets a message or the mark is dismissed.
 """
 
 from __future__ import annotations
@@ -63,11 +65,30 @@ class SessionPrefs:
         self._prune()
         self._save()
 
+    def interrupted(self, session_id: str) -> float | None:
+        value = self._data.get(session_id, {}).get("interrupted")
+        return value if isinstance(value, (int, float)) else None
+
+    def set_interrupted(self, session_id: str, when: float | None) -> bool:
+        """Mark (when) or clear (None) an interruption; returns True if anything changed."""
+        current = dict(self._data.get(session_id, {}))
+        if current.get("interrupted") == when or (when is None and "interrupted" not in current):
+            return False
+        if when is None:
+            current.pop("interrupted", None)
+        else:
+            current["interrupted"] = when
+        current["time"] = time.time()
+        self._data[session_id] = current
+        self._prune()
+        self._save()
+        return True
+
     def _prune(self) -> None:
         """Forget the oldest entries beyond MAX_ENTRIES (never one marked keepAlive)."""
         if len(self._data) <= MAX_ENTRIES:
             return
-        candidates = sorted((k for k, v in self._data.items() if not v.get("keepAlive")),
+        candidates = sorted((k for k, v in self._data.items() if not v.get("keepAlive") and not v.get("interrupted")),
                             key=lambda k: self._data[k].get("time", 0))
         for key in candidates[: len(self._data) - MAX_ENTRIES]:
             del self._data[key]

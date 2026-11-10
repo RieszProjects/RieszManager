@@ -70,6 +70,7 @@ class Delivery:
     ) -> dict[str, Any]:
         """Deliver a prompt. Returns {"uuid", "held": bool}."""
         options = {"model": model, "permission_mode": permission_mode, "effort": effort}
+        await self.hub.clear_interrupted(session_id)  # the user has taken it up again
         proc = self.hub.get_hosted(session_id)
         if proc is None:
             live = self.hub.live.get(session_id)
