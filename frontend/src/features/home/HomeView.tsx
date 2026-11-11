@@ -243,9 +243,9 @@ export function ProjectView({ projectId }: { projectId: string }) {
       </header>
       <div className="rz-chat-row">
       <div className="rz-chat-col">
-      <div className="rz-chat-body">
+      <div className="rz-chat-body rz-project-body">
         <div className="rz-project-empty">
-          <Mascot pose="working" size={150} />
+          <Mascot pose="working" className="rz-project-mascot" />
           <h2 className="rz-home-title small">在 {project?.name ?? "此项目"} 中开始新会话</h2>
           <p className="dim">工作目录：<span className="mono">{project?.path}</span></p>
         </div>

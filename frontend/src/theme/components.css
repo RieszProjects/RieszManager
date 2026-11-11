@@ -514,8 +514,23 @@
 .rz-home-card svg { color: var(--sage); flex-shrink: 0; }
 .rz-home-card .dim { font-size: 12px; flex-shrink: 0; }
 .rz-home-card:hover { border-color: var(--line); background: var(--bg2); }
-.rz-project-empty { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; text-align: center; }
+.rz-project-body { container-type: size; }
+.rz-project-empty { height: 100%; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 24px; text-align: center; }
+.rz-project-empty > * { flex-shrink: 0; max-width: 100%; }
+.rz-project-empty > :first-child { margin-top: auto; }
+.rz-project-empty > :last-child { margin-bottom: auto; }
 .rz-project-empty p { margin: 0; font-size: 13px; }
+.rz-project-empty p .mono { display: inline-block; max-width: 100%; overflow-wrap: anywhere; vertical-align: top; }   /* a long path moves to its own lines */
+.rz-project-empty .rz-home-title { text-wrap: balance; overflow-wrap: anywhere; }
+.rz-project-mascot { width: 150px; }
+@container (max-height: 330px) {
+  .rz-project-empty { padding: 12px 20px; gap: 6px; }
+  .rz-project-mascot { width: 84px; }
+  .rz-project-empty .rz-home-title { font-size: 22px; }
+}
+@container (max-height: 190px) {
+  .rz-project-mascot { display: none; }
+}
 
 /* ---- Login ------------------------------------------------------------------ */
 .rz-login { min-height: 100dvh; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(360px, 1fr); }
@@ -696,13 +711,17 @@ body.rz-dragging, body.rz-dragging * { cursor: grabbing !important; user-select:
 .rz-project-row:hover .rz-project-more, .rz-project-row:focus-within .rz-project-more { opacity: 1; }
 
 /* ---- Landing view: just the mascot ---- */
-.rz-home-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; gap: 28px; padding: 24px; }
+/* The stage is never shorter than its content (it would spill over the lists below): the page scrolls instead. */
+.rz-home-stage { flex: 1 0 auto; display: flex; align-items: center; justify-content: center; gap: 28px; padding: 24px; }
+.rz-home > header, .rz-home > section { flex-shrink: 0; }
 .rz-home-greeting { margin: 0; white-space: nowrap; }
 .rz-home-words { display: flex; flex-direction: column; gap: 10px; max-width: 340px; }
 .rz-home-line { margin: 0; color: var(--text2); font-family: var(--font-serif); font-size: 17px; line-height: 1.65; }
 .rz-home-action { display: block; margin-top: 6px; padding: 0; border: 0; background: none; color: var(--sage-strong); font: inherit; font-size: 15px; text-align: inherit; cursor: pointer; }
 .rz-home-action:hover { text-decoration: underline; text-underline-offset: 3px; }
-.rz-shell.mobile .rz-home-words { align-items: center; text-align: center; max-width: 300px; }
+.rz-shell.mobile .rz-home-words { align-items: center; text-align: center; max-width: 100%; }
+.rz-shell.mobile .rz-home-greeting { font-size: min(40px, 9.4vw); }   /* the longest greeting (8 characters) on one line */
+.rz-shell.mobile .rz-home-line { max-width: 300px; }
 .rz-shell.mobile .rz-home-stage { flex-direction: column; gap: 14px; }
 .rz-home-stage .rz-home-mascot { width: auto; height: min(62vh, 560px); max-width: 80%; object-fit: contain; }
 .rz-shell.mobile .rz-home-stage .rz-home-mascot { width: auto; height: min(52vh, 420px); max-width: 86%; }
@@ -787,6 +806,9 @@ body.rz-dragging, body.rz-dragging * { cursor: grabbing !important; user-select:
 }
 .rz-home-recent-all:hover { color: var(--sage-strong); }
 .rz-shell.mobile .rz-home:has(.rz-home-recent) .rz-home-stage .rz-home-mascot { height: min(38vh, 340px); }
+/* Several lists under the mascot: make her smaller so more of them is on screen. */
+.rz-shell.mobile .rz-home:has(.rz-home-recent ~ .rz-home-recent) .rz-home-stage .rz-home-mascot { height: min(28vh, 240px); }
+.rz-shell.mobile .rz-home:has(.rz-home-recent) .rz-home-stage { padding: 8px 24px 20px; }
 
 /* "Keep running" marks: a pin in session rows, a tag in the chat header, a check in menus. */
 .rz-keep-pin { flex-shrink: 0; color: var(--amber); margin-left: 2px; }
@@ -812,7 +834,7 @@ body.rz-dragging, body.rz-dragging * { cursor: grabbing !important; user-select:
 .rz-imgview-nav.next { right: 16px; }
 
 /* ---- Subagents under a session row ---- */
-.rz-session-row.has-agents .rz-session-row-sub { padding-right: 22px; }
+.rz-session-row.has-agents .rz-session-row-sub { padding-right: 28px; }
 .rz-subagent-toggle {
   position: absolute; right: 6px; bottom: 5px; display: inline-flex; align-items: center; gap: 3px;
   height: 18px; padding: 0 4px 0 5px; border: none; border-radius: 6px; background: none;
