@@ -59,6 +59,10 @@ interface LiveSession {
   timer: number | null;
 }
 
+/**
+ * `onText(text, interim)`: interim text replaces the previous interim text of the same recording; the final
+ * text (possibly empty) replaces it for good. `cancel()` ends a recording and drops whatever it would still deliver.
+ */
 export function useVoiceInput(serverAvailable: boolean, liveAvailable: boolean, onText: (text: string, interim: boolean) => void) {
   const canRecord = serverAvailable && typeof MediaRecorder !== "undefined";
   const canStream = canRecord && liveAvailable && typeof AudioWorkletNode !== "undefined" && audioContextCtor() !== null;
@@ -70,6 +74,8 @@ export function useVoiceInput(serverAvailable: boolean, liveAvailable: boolean, 
   const recognition = useRef<SpeechRecognitionLike | null>(null);
   const live = useRef<LiveSession | null>(null);
   const timer = useRef<number | null>(null);
+  /** Bumped by cancel(): results of recordings started before it are dropped. */
+  const generation = useRef(0);
   const onTextRef = useRef(onText);
   onTextRef.current = onText;
 
@@ -101,8 +107,12 @@ export function useVoiceInput(serverAvailable: boolean, liveAvailable: boolean, 
 
   /** Upload a finished recording; `fallbackText` (from a stream that failed) is kept if that fails too. */
   const upload = async (blob: Blob, fallbackText = "") => {
+    const mine = generation.current;
+    const deliver = (text: string) => {
+      if (generation.current === mine) onTextRef.current(text, false);
+    };
     if (blob.size < 2000) {
-      onTextRef.current(fallbackText, !fallbackText);
+      deliver(fallbackText);
       return;
     }
     setTranscribing(true);
@@ -111,13 +121,12 @@ export function useVoiceInput(serverAvailable: boolean, liveAvailable: boolean, 
     for (const name of keywords()) form.append("keywords", name);
     try {
       const res = await api<{ text: string }>("transcribe", { body: form });
-      const text = res.text || fallbackText;
-      onTextRef.current(text, !text);
+      deliver(res.text || fallbackText);
     } catch (err) {
-      onTextRef.current(fallbackText, !fallbackText);
-      toast((err as Error).message, "error");
+      deliver(fallbackText);
+      if (generation.current === mine) toast((err as Error).message, "error");
     } finally {
-      setTranscribing(false);
+      if (generation.current === mine) setTranscribing(false);
     }
   };
 
@@ -147,7 +156,10 @@ export function useVoiceInput(serverAvailable: boolean, liveAvailable: boolean, 
   const startServer = async () => {
     const stream = await microphone();
     if (!stream) return;
-    record(stream, (blob) => void upload(blob));
+    const mine = generation.current;
+    record(stream, (blob) => {
+      if (generation.current === mine) void upload(blob);
+    });
     startTimer();
   };
 
@@ -238,7 +250,7 @@ export function useVoiceInput(serverAvailable: boolean, liveAvailable: boolean, 
             return;
           }
           s.state = "done";
-          onTextRef.current(text, !text);
+          onTextRef.current(text, false);
           settleLive(s);
         } else if (msg.type === "error") {
           fail();
@@ -271,10 +283,12 @@ export function useVoiceInput(serverAvailable: boolean, liveAvailable: boolean, 
     const Ctor = speechCtor();
     if (!Ctor) return;
     const r = new Ctor();
+    const mine = generation.current;
     r.lang = navigator.language?.startsWith("zh") ? "zh-CN" : navigator.language || "zh-CN";
     r.continuous = true;
     r.interimResults = true;
     r.onresult = (ev) => {
+      if (generation.current !== mine) return;
       let finalText = "";
       let interim = "";
       for (let i = ev.resultIndex; i < ev.results.length; i++) {
@@ -314,5 +328,22 @@ export function useVoiceInput(serverAvailable: boolean, liveAvailable: boolean, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recording, mode]);
 
-  return { available: mode !== "none", recording, transcribing, elapsed, toggle };
+  const cancel = useCallback(() => {
+    generation.current++;
+    stopTimer();
+    setRecording(false);
+    setTranscribing(false);
+    const s = live.current;
+    if (s) {
+      live.current = null;
+      s.state = "done";
+      closeLive(s);
+    }
+    recorder.current?.stop();   // releases the microphone; its recording is dropped
+    recorder.current = null;
+    recognition.current?.stop();
+    recognition.current = null;
+  }, []);
+
+  return { available: mode !== "none", recording, transcribing, elapsed, toggle, cancel };
 }

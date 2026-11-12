@@ -64,7 +64,6 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
   const [localModel, setLocalModel] = useState<string | null>(null);
   const [localMode, setLocalMode] = useState<string | null>(null);
   const [localEffort, setLocalEffort] = useState<string | null>(null);
-  const [interim, setInterim] = useState("");
   const ta = useRef<HTMLTextAreaElement>(null);
   const attachments = useAttachments();
   const history = usePromptHistory(projectId);
@@ -102,6 +101,9 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
   // It goes where the caret last was, or at the end; on its own line if the text before it is not empty.
   const textRef = useRef(text);
   textRef.current = text;
+  /** The stretch of `text` the voice input is writing while it is still recognising: its start, the separator
+   * put before the words, and what it holds now. */
+  const voiceSpan = useRef<{ start: number; sep: string; text: string } | null>(null);
   const caretTouched = useRef(false);
   useEffect(() => composerBus.register((phrase) => {
     const el = ta.current;
@@ -126,8 +128,10 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
     const max = Math.max(160, window.innerHeight * 0.4);
     el.style.height = `${Math.min(el.scrollHeight, max)}px`;
     el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
-    if (interim) el.scrollTop = el.scrollHeight;   // follow the words as they are recognised
-  }, [text, interim]);
+    // Follow the words as they are recognised, when they are written at the end.
+    const span = voiceSpan.current;
+    if (span && span.start + span.text.length >= text.length) el.scrollTop = el.scrollHeight;
+  }, [text]);
 
   if (dropRef) dropRef.current = (files) => void attachments.add(files);
 
@@ -254,6 +258,7 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
   };
 
   const submit = async (override?: string) => {
+    dropVoice();
     const value = override ?? text;
     if (attachments.uploading) {
       toast("附件仍在上传", "warning");
@@ -361,17 +366,38 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
   };
 
   const voice = useVoiceInput(Boolean(config?.transcription), Boolean(config?.transcriptionLive), (spoken, isInterim) => {
-    if (isInterim) {
-      setInterim(spoken);
+    // The words go into the text itself, at the caret; later versions of them replace that same stretch.
+    const cur = textRef.current;
+    let span = voiceSpan.current;
+    if (span && cur.slice(span.start, span.start + span.text.length) !== span.text) {
+      dropVoice();   // the text was changed under it: keep what is there
       return;
     }
-    setInterim("");
-    // The textarea was showing the interim text after `text`: keep the caret within `text`.
-    const el = ta.current;
-    const pos = Math.min(el?.selectionStart ?? text.length, text.length);
-    const sep = pos > 0 && !/\s$/.test(text.slice(0, pos)) ? " " : "";
-    replaceRange(pos, Math.max(pos, Math.min(el?.selectionEnd ?? pos, text.length)), sep + spoken);
+    if (!span) {
+      if (!spoken) return;
+      const el = ta.current;
+      const start = Math.min(el?.selectionStart ?? cur.length, cur.length);
+      // A space after Latin text; none after Chinese text, punctuation or whitespace.
+      span = { start, sep: /[A-Za-z0-9.,;:!?)\]"']$/.test(cur.slice(0, start)) ? " " : "", text: "" };
+    }
+    const insert = spoken ? span.sep + spoken : "";
+    const next = cur.slice(0, span.start) + insert + cur.slice(span.start + span.text.length);
+    span.text = insert;
+    voiceSpan.current = isInterim ? span : null;
+    textRef.current = next;
+    setText(next);
+    const pos = span.start + insert.length;
+    requestAnimationFrame(() => {
+      ta.current?.setSelectionRange(pos, pos);
+      setCaret(pos);
+    });
   });
+  /** The user took over (edited or sent what the voice input was writing): end the recording, keep the text as it is. */
+  const dropVoice = () => {
+    if (!voiceSpan.current) return;
+    voiceSpan.current = null;
+    voice.cancel();
+  };
 
   const fileInput = useRef<HTMLInputElement>(null);
   const photoInput = useRef<HTMLInputElement>(null);
@@ -426,9 +452,10 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
         <textarea
           ref={ta}
           rows={1}
-          value={interim ? `${text}${text && !/\s$/.test(text) ? " " : ""}${interim}` : text}
+          value={text}
           placeholder={placeholder ?? defaultPlaceholder}
           onChange={(e) => {
+            dropVoice();
             setText(e.target.value);
             setCaret(e.target.selectionStart);
             caretTouched.current = true;
