@@ -3,7 +3,7 @@
  * voice input, interrupting (Esc) and permission-mode cycling (Shift+Tab).
  */
 import { IconButton, Tooltip } from "@mui/material";
-import { ArrowUp, FileText, LoaderCircle, Mic, Paperclip, Square, X } from "lucide-react";
+import { ArrowUp, FileText, Image as ImageIcon, LoaderCircle, Mic, Paperclip, Square, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import { api } from "@/api/client";
 import type { SessionState } from "@/api/types";
@@ -372,6 +372,9 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
   });
 
   const fileInput = useRef<HTMLInputElement>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
+  /** Phones and tablets: the plain file input opens the camera / file browser, so offer the photo library directly. */
+  const photoButton = isMobile || isCoarse();
   const canSend = (text.trim().length > 0 || attachments.ids.length > 0) && !sending;
   const showStop = busy && hosted && !canSend;
   const defaultPlaceholder = external
@@ -439,8 +442,25 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
         />
         <div className="rz-composer-bar">
           <Tooltip title="添加图片或文件">
-            <IconButton size="small" onClick={() => fileInput.current?.click()}><Paperclip size={17} /></IconButton>
+            <IconButton size="small" aria-label="添加文件" onClick={() => fileInput.current?.click()}><Paperclip size={17} /></IconButton>
           </Tooltip>
+          {photoButton && (
+            <>
+              <IconButton size="small" aria-label="从相册选择照片" onClick={() => photoInput.current?.click()}><ImageIcon size={17} /></IconButton>
+              {/* accept="image/*" without `capture`: Android and iOS open the photo library instead of the file browser. */}
+              <input
+                ref={photoInput}
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                onChange={(e) => {
+                  void attachments.add(Array.from(e.target.files ?? []));
+                  e.target.value = "";
+                }}
+              />
+            </>
+          )}
           <input
             ref={fileInput}
             type="file"
