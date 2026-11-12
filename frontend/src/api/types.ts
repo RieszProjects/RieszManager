@@ -304,6 +304,8 @@ export interface AppConfig {
   allowBypass: boolean;
   defaultPermissionMode: string;
   transcription: boolean;
+  /** Live transcription (text while speaking) is available. */
+  transcriptionLive?: boolean;
   username: string;
 }
 

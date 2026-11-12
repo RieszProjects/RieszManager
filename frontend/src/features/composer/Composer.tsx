@@ -126,6 +126,7 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
     const max = Math.max(160, window.innerHeight * 0.4);
     el.style.height = `${Math.min(el.scrollHeight, max)}px`;
     el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
+    if (interim) el.scrollTop = el.scrollHeight;   // follow the words as they are recognised
   }, [text, interim]);
 
   if (dropRef) dropRef.current = (files) => void attachments.add(files);
@@ -359,16 +360,17 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
     }
   };
 
-  const voice = useVoiceInput(Boolean(config?.transcription), (spoken, isInterim) => {
+  const voice = useVoiceInput(Boolean(config?.transcription), Boolean(config?.transcriptionLive), (spoken, isInterim) => {
     if (isInterim) {
       setInterim(spoken);
       return;
     }
     setInterim("");
+    // The textarea was showing the interim text after `text`: keep the caret within `text`.
     const el = ta.current;
-    const pos = el?.selectionStart ?? text.length;
+    const pos = Math.min(el?.selectionStart ?? text.length, text.length);
     const sep = pos > 0 && !/\s$/.test(text.slice(0, pos)) ? " " : "";
-    replaceRange(pos, el?.selectionEnd ?? pos, sep + spoken);
+    replaceRange(pos, Math.max(pos, Math.min(el?.selectionEnd ?? pos, text.length)), sep + spoken);
   });
 
   const fileInput = useRef<HTMLInputElement>(null);

@@ -35,11 +35,11 @@ def _takes_hints(model: str) -> bool:
     return model.startswith("gpt-transcribe")
 
 
-def _keywords(request: HttpRequest) -> list[str]:
+def clean_keywords(sent: list[object]) -> list[str]:
     """Built-in names, the deployment's own, and the ones the web app sent (project names), without repeats."""
     out: list[str] = []
     seen: set[str] = set()
-    for word in (*BASE_KEYWORDS, *settings.TRANSCRIBE_KEYWORDS, *request.POST.getlist("keywords")):
+    for word in (*BASE_KEYWORDS, *settings.TRANSCRIBE_KEYWORDS, *sent):
         word = " ".join(str(word).split())
         if not word or len(word) > MAX_KEYWORD_CHARS or KEYWORD_FORBIDDEN.search(word) or word.lower() in seen:
             continue
@@ -80,7 +80,7 @@ async def transcribe(request: HttpRequest) -> HttpResponse:
     base = [("model", model), ("response_format", "json"), ("prompt", PROMPT)]
     hints: list[tuple[str, str]] = []
     if _takes_hints(model):
-        hints += [("keywords[]", word) for word in _keywords(request)]
+        hints += [("keywords[]", word) for word in clean_keywords(request.POST.getlist("keywords"))]
         hints += [("languages[]", code) for code in languages]
     elif languages:
         base.append(("language", languages[0]))

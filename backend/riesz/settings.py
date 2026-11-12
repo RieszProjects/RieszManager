@@ -134,6 +134,11 @@ TRANSCRIBE_MODEL = env("RIESZ_TRANSCRIBE_MODEL", "gpt-transcribe")
 # Comma-separated: language codes (none: detected), and extra names or terms the transcription should recognise.
 TRANSCRIBE_LANGUAGES = [x.strip() for x in (env("RIESZ_TRANSCRIBE_LANGUAGE") or "").split(",") if x.strip()]
 TRANSCRIBE_KEYWORDS = [x.strip() for x in (env("RIESZ_TRANSCRIBE_KEYWORDS") or "").split(",") if x.strip()]
+# Live transcription (text while speaking) through a Realtime transcription session; empty turns it off.
+# Other OpenAI-compatible services rarely have that API, so it is on by default only for OpenAI itself.
+TRANSCRIBE_LIVE_MODEL = env("RIESZ_TRANSCRIBE_LIVE_MODEL",
+                            "gpt-live-transcribe" if OPENAI_BASE_URL == "https://api.openai.com/v1" else "")
+TRANSCRIBE_LIVE_DELAY = env("RIESZ_TRANSCRIBE_LIVE_DELAY", "medium")
 
 LOGGING = {
     "version": 1,

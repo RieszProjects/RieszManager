@@ -1,14 +1,16 @@
 /**
- * Voice input. Prefers server-side transcription (record → upload, with the project
- * names as keywords) when the backend has it configured; otherwise falls back to the
- * browser's Web Speech API.
+ * Voice input, in order of preference:
+ * - live: the microphone's audio is streamed to the server (`/ws/transcribe`) and the text appears while
+ *   you speak. The recording is kept as well: if the stream fails at any point, it is uploaded instead.
+ * - server: record, then upload for transcription (with the project names as keywords).
+ * - browser: the browser's own Web Speech API, when the server has no transcription configured.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/api/client";
 import { useApp } from "@/store/app";
 import { toast } from "@/store/ui";
 
-type Mode = "server" | "browser" | "none";
+type Mode = "live" | "server" | "browser" | "none";
 
 interface SpeechRecognitionLike {
   lang: string;
@@ -26,14 +28,47 @@ function speechCtor(): (new () => SpeechRecognitionLike) | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
-export function useVoiceInput(serverAvailable: boolean, onText: (text: string, interim: boolean) => void) {
-  const mode: Mode = serverAvailable && typeof MediaRecorder !== "undefined" ? "server" : speechCtor() ? "browser" : "none";
+function audioContextCtor(): typeof AudioContext | null {
+  const w = window as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext };
+  return w.AudioContext ?? w.webkitAudioContext ?? null;
+}
+
+/** Names the transcription should recognise: the workspace's projects. */
+const keywords = () => useApp.getState().projects.slice(0, 60).map((p) => p.name);
+
+/** How long to wait for the final text after stopping before uploading the recording instead. */
+const LIVE_FINISH_MS = 25_000;
+/** Audio chunks (about 100 ms each) kept while the connection is still opening. */
+const LIVE_QUEUE = 200;
+/** The audio pipeline normally delivers within a few ms. When the first chunk comes later than this after the
+ * microphone opened, the stream missed the first words, so the final text is taken from the whole recording. */
+const LIVE_LATE_MS = 400;
+
+interface LiveSession {
+  ws: WebSocket | null;
+  ctx: AudioContext | null;
+  /** streaming: text is arriving; done: the final text was delivered; failed: upload the recording instead. */
+  state: "streaming" | "done" | "failed";
+  /** The latest text from the stream, kept if the upload fails too. */
+  text: string;
+  /** The stream started late and misses the beginning: show its text, but transcribe the recording at the end. */
+  late: boolean;
+  /** The complete recording, once the recorder has stopped. */
+  blob: Blob | null;
+  stopped: boolean;
+  timer: number | null;
+}
+
+export function useVoiceInput(serverAvailable: boolean, liveAvailable: boolean, onText: (text: string, interim: boolean) => void) {
+  const canRecord = serverAvailable && typeof MediaRecorder !== "undefined";
+  const canStream = canRecord && liveAvailable && typeof AudioWorkletNode !== "undefined" && audioContextCtor() !== null;
+  const mode: Mode = canStream ? "live" : canRecord ? "server" : speechCtor() ? "browser" : "none";
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const recorder = useRef<MediaRecorder | null>(null);
   const recognition = useRef<SpeechRecognitionLike | null>(null);
-  const chunks = useRef<Blob[]>([]);
+  const live = useRef<LiveSession | null>(null);
   const timer = useRef<number | null>(null);
   const onTextRef = useRef(onText);
   onTextRef.current = onText;
@@ -42,50 +77,194 @@ export function useVoiceInput(serverAvailable: boolean, onText: (text: string, i
     if (timer.current) window.clearInterval(timer.current);
     timer.current = null;
   };
+  const startTimer = () => {
+    setRecording(true);
+    setElapsed(0);
+    const started = Date.now();
+    timer.current = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 250);
+  };
+
+  const closeLive = (s: LiveSession) => {
+    if (s.timer) window.clearTimeout(s.timer);
+    s.timer = null;
+    void s.ctx?.close().catch(() => undefined);
+    s.ctx = null;
+    if (s.ws && s.ws.readyState <= WebSocket.OPEN) s.ws.close();
+  };
 
   useEffect(() => () => {
     stopTimer();
     recorder.current?.stream.getTracks().forEach((t) => t.stop());
     recognition.current?.stop();
+    if (live.current) closeLive(live.current);
   }, []);
 
-  const startServer = async () => {
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch {
-      toast("无法使用麦克风", "error");
+  /** Upload a finished recording; `fallbackText` (from a stream that failed) is kept if that fails too. */
+  const upload = async (blob: Blob, fallbackText = "") => {
+    if (blob.size < 2000) {
+      onTextRef.current(fallbackText, !fallbackText);
       return;
     }
+    setTranscribing(true);
+    const form = new FormData();
+    form.append("audio", blob, blob.type.includes("mp4") ? "speech.mp4" : "speech.webm");
+    for (const name of keywords()) form.append("keywords", name);
+    try {
+      const res = await api<{ text: string }>("transcribe", { body: form });
+      const text = res.text || fallbackText;
+      onTextRef.current(text, !text);
+    } catch (err) {
+      onTextRef.current(fallbackText, !fallbackText);
+      toast((err as Error).message, "error");
+    } finally {
+      setTranscribing(false);
+    }
+  };
+
+  /** Start recording `stream`; `onDone` gets the whole recording when it stops. */
+  const record = (stream: MediaStream, onDone: (blob: Blob) => void) => {
     const mime = ["audio/webm;codecs=opus", "audio/mp4", "audio/webm"].find((m) => MediaRecorder.isTypeSupported(m)) ?? "";
     const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
-    chunks.current = [];
-    rec.ondataavailable = (e) => e.data.size && chunks.current.push(e.data);
-    rec.onstop = async () => {
+    const chunks: Blob[] = [];
+    rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    rec.onstop = () => {
       stream.getTracks().forEach((t) => t.stop());
-      const type = rec.mimeType || "audio/webm";
-      const blob = new Blob(chunks.current, { type });
-      if (blob.size < 2000) return;
-      setTranscribing(true);
-      const form = new FormData();
-      form.append("audio", blob, type.includes("mp4") ? "speech.mp4" : "speech.webm");
-      // Names the transcription should recognise: the workspace's projects.
-      for (const p of useApp.getState().projects.slice(0, 60)) form.append("keywords", p.name);
-      try {
-        const res = await api<{ text: string }>("transcribe", { body: form });
-        if (res.text) onTextRef.current(res.text, false);
-      } catch (err) {
-        toast((err as Error).message, "error");
-      } finally {
-        setTranscribing(false);
-      }
+      onDone(new Blob(chunks, { type: rec.mimeType || "audio/webm" }));
     };
     rec.start(250);
     recorder.current = rec;
-    setRecording(true);
-    setElapsed(0);
-    const started = Date.now();
-    timer.current = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 250);
+  };
+
+  const microphone = async (): Promise<MediaStream | null> => {
+    try {
+      return await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      toast("无法使用麦克风", "error");
+      return null;
+    }
+  };
+
+  const startServer = async () => {
+    const stream = await microphone();
+    if (!stream) return;
+    record(stream, (blob) => void upload(blob));
+    startTimer();
+  };
+
+  /** The stream is over one way or the other: once the recording is complete too, finish. */
+  const settleLive = (s: LiveSession) => {
+    if (live.current !== s || !s.stopped || s.state === "streaming" || (s.state === "failed" && !s.blob)) return;
+    live.current = null;
+    closeLive(s);
+    if (s.state === "failed" && s.blob) void upload(s.blob, s.text);
+    else setTranscribing(false);
+  };
+
+  const startLive = async () => {
+    const Ctx = audioContextCtor();
+    if (!Ctx) return startServer();
+    // Created before the first await, while the tap still counts as a user gesture (Safari).
+    let ctx: AudioContext;
+    try {
+      ctx = new Ctx({ sampleRate: 24000 });
+    } catch {
+      ctx = new Ctx();
+    }
+    // Loaded while the microphone is being opened, so that capturing starts with the first word.
+    const worklet = ctx.resume().then(() => ctx.audioWorklet.addModule("/pcm-worklet.js"));
+    worklet.catch(() => undefined);
+    const stream = await microphone();
+    if (!stream) {
+      void ctx.close();
+      return;
+    }
+    const opened = performance.now();
+    const s: LiveSession = { ws: null, ctx, state: "streaming", text: "", late: false, blob: null, stopped: false, timer: null };
+    live.current = s;
+    record(stream, (blob) => {
+      s.blob = blob;
+      settleLive(s);
+    });
+    startTimer();
+    const fail = () => {
+      if (s.state !== "streaming") return;
+      s.state = "failed";
+      settleLive(s);
+    };
+    try {
+      await worklet;
+      if (live.current !== s || s.stopped) return fail();
+      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${proto}//${window.location.host}/ws/transcribe`);
+      ws.binaryType = "arraybuffer";
+      s.ws = ws;
+      const queue: ArrayBuffer[] = [];
+      const node = new AudioWorkletNode(ctx, "pcm-capture");
+      let first = true;
+      node.port.onmessage = (e: MessageEvent<ArrayBuffer>) => {
+        if (first) {
+          first = false;
+          s.late = performance.now() - opened - 100 > LIVE_LATE_MS;   // a chunk holds 100 ms
+        }
+        if (s.stopped || s.state !== "streaming") return;
+        if (ws.readyState === WebSocket.OPEN) ws.send(e.data);
+        else if (queue.length < LIVE_QUEUE) queue.push(e.data);
+      };
+      // Through a silent gain to the output, so that the graph is pulled and the worklet runs.
+      const mute = ctx.createGain();
+      mute.gain.value = 0;
+      ctx.createMediaStreamSource(stream).connect(node).connect(mute).connect(ctx.destination);
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: "start", keywords: keywords() }));
+        for (const chunk of queue.splice(0)) ws.send(chunk);
+        if (s.stopped) ws.send(JSON.stringify({ type: "stop" }));
+      };
+      ws.onmessage = (e) => {
+        if (typeof e.data !== "string" || s.state !== "streaming") return;
+        let msg: { type?: string; text?: string };
+        try {
+          msg = JSON.parse(e.data);
+        } catch {
+          return;
+        }
+        if (msg.type === "text") {
+          s.text = msg.text ?? "";
+          onTextRef.current(s.text, true);
+        } else if (msg.type === "done") {
+          const text = msg.text ?? s.text;
+          if (s.late) {
+            s.text = text;
+            fail();
+            return;
+          }
+          s.state = "done";
+          onTextRef.current(text, !text);
+          settleLive(s);
+        } else if (msg.type === "error") {
+          fail();
+        }
+      };
+      ws.onerror = fail;
+      ws.onclose = fail;
+    } catch {
+      fail();
+    }
+  };
+
+  const stopLive = (s: LiveSession) => {
+    s.stopped = true;
+    setTranscribing(true);
+    void s.ctx?.suspend().catch(() => undefined);
+    if (s.state === "streaming" && s.late) s.state = "failed";   // the recording has the whole of it
+    if (s.state === "streaming") {
+      if (s.ws?.readyState === WebSocket.OPEN) s.ws.send(JSON.stringify({ type: "stop" }));
+      s.timer = window.setTimeout(() => {
+        if (s.state !== "streaming") return;
+        s.state = "failed";
+        settleLive(s);
+      }, LIVE_FINISH_MS);
+    }
+    settleLive(s);
   };
 
   const startBrowser = () => {
@@ -115,23 +294,22 @@ export function useVoiceInput(serverAvailable: boolean, onText: (text: string, i
     };
     recognition.current = r;
     r.start();
-    setRecording(true);
-    setElapsed(0);
-    const started = Date.now();
-    timer.current = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 250);
+    startTimer();
   };
 
   const toggle = useCallback(async () => {
     if (recording) {
       stopTimer();
       setRecording(false);
+      if (live.current) stopLive(live.current);
       recorder.current?.stop();
       recorder.current = null;
       recognition.current?.stop();
       recognition.current = null;
       return;
     }
-    if (mode === "server") await startServer();
+    if (mode === "live") await startLive();
+    else if (mode === "server") await startServer();
     else if (mode === "browser") startBrowser();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recording, mode]);

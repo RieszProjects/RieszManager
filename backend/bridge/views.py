@@ -178,5 +178,6 @@ async def app_config(request: HttpRequest) -> HttpResponse:
         "allowBypass": bool(health.get("allowBypass")),
         "defaultPermissionMode": health.get("defaultPermissionMode") or "default",
         "transcription": bool(settings.OPENAI_API_KEY),
+        "transcriptionLive": bool(settings.OPENAI_API_KEY and settings.TRANSCRIBE_LIVE_MODEL),
         "username": request.user.username,
     })
