@@ -270,8 +270,9 @@ cd RieszManager
 <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
 <tr><td><code>OPENAI_API_KEY</code></td><td>empty</td><td>When set to an OpenAI-compatible API key, voice recordings are transcribed on the server; when empty, supported browsers fall back to built-in speech recognition</td></tr>
 <tr><td><code>OPENAI_BASE_URL</code></td><td><code>https://api.openai.com/v1</code></td><td>Base URL for the OpenAI-compatible API</td></tr>
-<tr><td><code>RIESZ_TRANSCRIBE_MODEL</code></td><td><code>gpt-4o-transcribe</code></td><td>Model used for server-side voice transcription</td></tr>
-<tr><td><code>RIESZ_TRANSCRIBE_LANGUAGE</code></td><td>empty (commented example: <code>zh</code>)</td><td>Language code for voice transcription</td></tr>
+<tr><td><code>RIESZ_TRANSCRIBE_MODEL</code></td><td><code>gpt-transcribe</code></td><td>Model used for server-side voice transcription</td></tr>
+<tr><td><code>RIESZ_TRANSCRIBE_LANGUAGE</code></td><td>empty (commented example: <code>zh,en</code>)</td><td>Language codes for voice transcription, comma-separated; detected automatically when empty. Models other than <code>gpt-transcribe</code> use only the first</td></tr>
+<tr><td><code>RIESZ_TRANSCRIBE_KEYWORDS</code></td><td>empty</td><td>Names and terms the transcription should get right, comma-separated. Only used with <code>gpt-transcribe</code> models; the workspace's project names and a few common names (Claude, Claude Code, …) are added automatically</td></tr>
 </table></div>
 
 <h3 id="env-misc">Miscellaneous</h3>

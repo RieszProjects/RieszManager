@@ -1,9 +1,11 @@
 /**
- * Voice input. Prefers server-side transcription (record → upload) when the
- * backend has it configured; otherwise falls back to the browser's Web Speech API.
+ * Voice input. Prefers server-side transcription (record → upload, with the project
+ * names as keywords) when the backend has it configured; otherwise falls back to the
+ * browser's Web Speech API.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/api/client";
+import { useApp } from "@/store/app";
 import { toast } from "@/store/ui";
 
 type Mode = "server" | "browser" | "none";
@@ -67,6 +69,8 @@ export function useVoiceInput(serverAvailable: boolean, onText: (text: string, i
       setTranscribing(true);
       const form = new FormData();
       form.append("audio", blob, type.includes("mp4") ? "speech.mp4" : "speech.webm");
+      // Names the transcription should recognise: the workspace's projects.
+      for (const p of useApp.getState().projects.slice(0, 60)) form.append("keywords", p.name);
       try {
         const res = await api<{ text: string }>("transcribe", { body: form });
         if (res.text) onTextRef.current(res.text, false);

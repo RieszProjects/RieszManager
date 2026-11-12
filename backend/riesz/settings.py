@@ -130,8 +130,10 @@ RUNNER_TOKEN = env("RUNNER_TOKEN")
 
 OPENAI_API_KEY = env("OPENAI_API_KEY")
 OPENAI_BASE_URL = env("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-TRANSCRIBE_MODEL = env("RIESZ_TRANSCRIBE_MODEL", "gpt-4o-transcribe")
-TRANSCRIBE_LANGUAGE = env("RIESZ_TRANSCRIBE_LANGUAGE")
+TRANSCRIBE_MODEL = env("RIESZ_TRANSCRIBE_MODEL", "gpt-transcribe")
+# Comma-separated: language codes (none: detected), and extra names or terms the transcription should recognise.
+TRANSCRIBE_LANGUAGES = [x.strip() for x in (env("RIESZ_TRANSCRIBE_LANGUAGE") or "").split(",") if x.strip()]
+TRANSCRIBE_KEYWORDS = [x.strip() for x in (env("RIESZ_TRANSCRIBE_KEYWORDS") or "").split(",") if x.strip()]
 
 LOGGING = {
     "version": 1,

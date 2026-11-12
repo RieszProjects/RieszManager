@@ -304,8 +304,9 @@ cd RieszManager
 <tr><th>变量</th><th>默认值</th><th>说明</th></tr>
 <tr><td><code>OPENAI_API_KEY</code></td><td>空</td><td>配置OpenAI兼容的API key后，录音会在服务端转写；留空则在支持的浏览器上使用浏览器内置的语音识别</td></tr>
 <tr><td><code>OPENAI_BASE_URL</code></td><td><code>https://api.openai.com/v1</code></td><td>OpenAI兼容接口的基础URL</td></tr>
-<tr><td><code>RIESZ_TRANSCRIBE_MODEL</code></td><td><code>gpt-4o-transcribe</code></td><td>服务端语音转写使用的模型</td></tr>
-<tr><td><code>RIESZ_TRANSCRIBE_LANGUAGE</code></td><td>空（注释示例为<code>zh</code>）</td><td>语音转写的语言代码</td></tr>
+<tr><td><code>RIESZ_TRANSCRIBE_MODEL</code></td><td><code>gpt-transcribe</code></td><td>服务端语音转写使用的模型</td></tr>
+<tr><td><code>RIESZ_TRANSCRIBE_LANGUAGE</code></td><td>空（注释示例为<code>zh,en</code>）</td><td>语音转写的语言代码，多个用逗号分隔；留空则自动识别。<code>gpt-transcribe</code>以外的模型只用第一个</td></tr>
+<tr><td><code>RIESZ_TRANSCRIBE_KEYWORDS</code></td><td>空</td><td>希望转写时认对的名字和术语，用逗号分隔。只对<code>gpt-transcribe</code>系列模型有效；工作区里的项目名和几个常用名字（Claude、Claude Code等）会自动加上</td></tr>
 </table></div>
 
 <h3 id="env-misc">其他</h3>
