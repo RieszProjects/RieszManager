@@ -7,6 +7,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/api/client";
+import { openMicrophone } from "@/lib/microphone";
 import { useApp } from "@/store/app";
 import { toast } from "@/store/ui";
 
@@ -146,7 +147,7 @@ export function useVoiceInput(serverAvailable: boolean, liveAvailable: boolean, 
 
   const microphone = async (): Promise<MediaStream | null> => {
     try {
-      return await navigator.mediaDevices.getUserMedia({ audio: true });
+      return await openMicrophone();
     } catch {
       toast("无法使用麦克风", "error");
       return null;

@@ -1,11 +1,12 @@
 /** Settings: two-factor authentication, signed-in devices, login history, notifications. */
-import { Button, Dialog, DialogContent, IconButton, Switch, Tab, Tabs, TextField } from "@mui/material";
-import { Archive, Download, LogOut, MonitorSmartphone, ShieldCheck, ShieldOff, X } from "lucide-react";
+import { Button, Dialog, DialogContent, IconButton, MenuItem, Switch, Tab, Tabs, TextField } from "@mui/material";
+import { Archive, Download, LogOut, Mic, MonitorSmartphone, ShieldCheck, ShieldOff, X } from "lucide-react";
 import QRCode from "qrcode";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/api/client";
 import { copyText } from "@/lib/clipboard";
 import { clockTime } from "@/lib/format";
+import { getMicChoice, listMicrophones, setMicChoice } from "@/lib/microphone";
 import { DollSettings } from "@/features/doll/DollSettings";
 import { PushSetting } from "./PushSetting";
 import { useIsMobile } from "@/lib/useIsMobile";
@@ -199,6 +200,38 @@ function DevicesSection({ data, reload }: { data: Security; reload: () => void }
   );
 }
 
+/** Which microphone the voice input uses on this device (see lib/microphone). */
+function MicrophoneSetting() {
+  const [choice, setChoice] = useState(getMicChoice);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  useEffect(() => {
+    const load = () => void listMicrophones().then(setDevices).catch(() => undefined);
+    load();
+    navigator.mediaDevices.addEventListener?.("devicechange", load);
+    return () => navigator.mediaDevices.removeEventListener?.("devicechange", load);
+  }, []);
+  const known = choice === "auto" || choice === "system" || devices.some((d) => d.deviceId === choice);
+  return (
+    <div className="rz-settings-row">
+      <div className="rz-settings-title" style={{ whiteSpace: "nowrap" }}><Mic size={17} /> 语音输入的麦克风</div>
+      <TextField
+        select
+        size="small"
+        className="rz-settings-select"
+        value={known ? choice : "auto"}
+        onChange={(e) => {
+          setChoice(e.target.value);
+          setMicChoice(e.target.value);
+        }}
+      >
+        <MenuItem value="auto">自动（不用蓝牙耳机）</MenuItem>
+        <MenuItem value="system">跟随系统</MenuItem>
+        {devices.map((d) => <MenuItem key={d.deviceId} value={d.deviceId}>{d.label}</MenuItem>)}
+      </TextField>
+    </div>
+  );
+}
+
 function GeneralSection() {
   const config = useApp((s) => s.config);
   const showArchived = useUi((s) => s.showArchived);
@@ -225,6 +258,7 @@ function GeneralSection() {
         </div>
         <Switch checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
       </div>
+      {config?.transcription && Boolean(navigator.mediaDevices?.enumerateDevices) && <MicrophoneSetting />}
       <DollSettings />
       {installEvent && (
         <div className="rz-settings-row">
