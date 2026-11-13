@@ -46,14 +46,21 @@ export function useAttachments() {
     for (const original of files) {
       const localId = ++nextId;
       const file = await prepareImage(original);
-      const previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
+      // No local preview for HEIC and the like: most browsers cannot show them; the server's JPEG is shown once uploaded.
+      const showable = file.type.startsWith("image/") && !/hei[cf]|avif|tiff|bmp/.test(file.type) && !/\.(hei[cf]|hif|avif|tiff?|bmp)$/i.test(file.name);
+      const previewUrl = showable ? URL.createObjectURL(file) : undefined;
       if (previewUrl) urls.current.add(previewUrl);
       setItems((cur) => [...cur, { localId, name: file.name || "粘贴的图片.png", size: file.size, mime: file.type, status: "uploading", previewUrl }]);
       const form = new FormData();
       form.append("file", file, file.name || "pasted.png");
       try {
         const res = await api<{ upload: UploadMeta }>("uploads", { body: form });
-        setItems((cur) => cur.map((a) => (a.localId === localId ? { ...a, status: "done", upload: res.upload } : a)));
+        // A photo the server converted (HEIC and the like, which this browser may not be able to show): its JPEG.
+        const converted = res.upload.mime.startsWith("image/") && res.upload.mime !== file.type;
+        setItems((cur) => cur.map((a) => (a.localId === localId
+          ? { ...a, status: "done", upload: res.upload,
+              ...(converted ? { name: res.upload.name, size: res.upload.size, mime: res.upload.mime, previewUrl: `/api/uploads/${res.upload.id}` } : {}) }
+          : a)));
       } catch (err) {
         toast(`上传失败：${(err as Error).message}`, "error");
         setItems((cur) => cur.map((a) => (a.localId === localId ? { ...a, status: "error" } : a)));

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Any
@@ -14,7 +15,7 @@ from django.views.decorators.http import require_http_methods
 
 from riesz.http import ApiError, api_view, error_response, ok
 
-from . import runner
+from . import images, runner
 
 UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
@@ -151,8 +152,14 @@ async def upload(request: HttpRequest) -> HttpResponse:
         raise ApiError(400, "缺少文件")
     if file.size > settings.MAX_UPLOAD_BYTES:
         raise ApiError(413, "文件过大")
+    data, name, mime = file.read(), file.name, file.content_type or "application/octet-stream"
+    if images.wants_conversion(name, mime):
+        converted = await asyncio.to_thread(images.to_jpeg, data, name)
+        if converted is not None:
+            data, name = converted
+            mime = "image/jpeg"
     form = aiohttp.FormData()
-    form.add_field("file", file.read(), filename=file.name, content_type=file.content_type or "application/octet-stream")
+    form.add_field("file", data, filename=name, content_type=mime)
     try:
         resp = await runner.request("POST", "/v1/uploads", data=form, timeout=300)
     except runner.RunnerUnavailable:
