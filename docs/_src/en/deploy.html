@@ -273,7 +273,7 @@ cd RieszManager
 <tr><td><code>RIESZ_TRANSCRIBE_MODEL</code></td><td><code>gpt-transcribe</code></td><td>Model used for server-side voice transcription</td></tr>
 <tr><td><code>RIESZ_TRANSCRIBE_LANGUAGE</code></td><td>empty (commented example: <code>zh,en</code>)</td><td>Language codes for voice transcription, comma-separated; detected automatically when empty. Models other than <code>gpt-transcribe</code> use only the first</td></tr>
 <tr><td><code>RIESZ_TRANSCRIBE_KEYWORDS</code></td><td>empty</td><td>Names and terms the transcription should get right, comma-separated. Only used with <code>gpt-transcribe</code> models; the workspace's project names and a few common names (Claude, Claude Code, …) are added automatically</td></tr>
-<tr><td><code>RIESZ_TRANSCRIBE_LIVE_MODEL</code></td><td><code>gpt-live-transcribe</code> (when <code>OPENAI_BASE_URL</code> is OpenAI's own), otherwise empty</td><td>Model for live transcription (text while you speak), through a Realtime transcription session. Empty turns it off: recordings are always transcribed afterwards</td></tr>
+<tr><td><code>RIESZ_TRANSCRIBE_LIVE_MODEL</code></td><td>empty</td><td>Model for live transcription (text while you speak), for example <code>gpt-live-transcribe</code>, through a Realtime transcription session of OpenAI's API. Off by default: transcribing the finished recording is more accurate</td></tr>
 <tr><td><code>RIESZ_TRANSCRIBE_LIVE_DELAY</code></td><td><code>medium</code></td><td>How long the live model listens before writing: <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code> or <code>xhigh</code>; later settings write later and more accurately</td></tr>
 </table></div>
 

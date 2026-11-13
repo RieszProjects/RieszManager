@@ -273,7 +273,7 @@ cd RieszManager
 <tr><td><code>RIESZ_TRANSCRIBE_MODEL</code></td><td><code>gpt-transcribe</code></td><td>服务端语音转写使用的模型</td></tr>
 <tr><td><code>RIESZ_TRANSCRIBE_LANGUAGE</code></td><td>空（注释示例为<code>zh,en</code>）</td><td>语音转写的语言代码，多个用逗号分隔；留空则自动识别。<code>gpt-transcribe</code>以外的模型只用第一个</td></tr>
 <tr><td><code>RIESZ_TRANSCRIBE_KEYWORDS</code></td><td>空</td><td>希望转写时认对的名字和术语，用逗号分隔。只对<code>gpt-transcribe</code>系列模型有效；工作区里的项目名和几个常用名字（Claude、Claude Code等）会自动加上</td></tr>
-<tr><td><code>RIESZ_TRANSCRIBE_LIVE_MODEL</code></td><td><code>gpt-live-transcribe</code>（<code>OPENAI_BASE_URL</code>是OpenAI官方地址时），否则为空</td><td>实时转写（边说边出字）使用的模型，走Realtime转写会话。设为空则关闭，始终录完再转写</td></tr>
+<tr><td><code>RIESZ_TRANSCRIBE_LIVE_MODEL</code></td><td>空</td><td>实时转写（边说边出字）使用的模型，例如<code>gpt-live-transcribe</code>，走OpenAI的Realtime转写会话。默认关闭：录完再整段转写更准</td></tr>
 <tr><td><code>RIESZ_TRANSCRIBE_LIVE_DELAY</code></td><td><code>medium</code></td><td>实时转写出字前等多久：<code>minimal</code>、<code>low</code>、<code>medium</code>、<code>high</code>、<code>xhigh</code>，越靠后出字越晚、越准</td></tr>
 </table></div>
 
