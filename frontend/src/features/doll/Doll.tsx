@@ -127,28 +127,65 @@ function BalanceRows({ balances }: { balances: Balances }) {
   );
 }
 
-/** Is the on-screen keyboard (probably) open? */
+/** The viewport is this much shorter than without the keyboard when the on-screen keyboard is open. */
+const KEYBOARD_SHRINK = 0.78;
+
+/**
+ * Is the on-screen keyboard open? Judged by the viewport's height: with the keyboard up it is much shorter
+ * than it has been at this width. (Focus does not tell: a text field keeps it when the keyboard is dismissed,
+ * and has it with a hardware keyboard.) Only touch devices have such a keyboard.
+ */
 function useKeyboardOpen(enabled: boolean) {
   const [open, setOpen] = useState(false);
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      setOpen(false);
+      return;
+    }
     const vv = window.visualViewport;
+    let base = { w: 0, h: 0 };   // the tallest the viewport has been at this width
     const check = () => {
-      const el = document.activeElement;
-      const typing = el instanceof HTMLTextAreaElement || (el instanceof HTMLInputElement && el.type !== "checkbox");
-      setOpen(typing || Boolean(vv && vv.height < window.innerHeight * 0.75));
+      const w = window.innerWidth;
+      const h = Math.min(vv?.height ?? window.innerHeight, window.innerHeight);
+      if (w !== base.w) {
+        // First look, or rotated. If the keyboard is already up, the height says nothing: go by the screen.
+        const el = document.activeElement;
+        const typing = el instanceof HTMLTextAreaElement || (el instanceof HTMLInputElement && el.type !== "checkbox");
+        base = { w, h: typing && h < window.screen.height * 0.6 ? window.screen.height * 0.8 : h };
+      } else if (h > base.h) {
+        base.h = h;
+      }
+      setOpen(h < base.h * KEYBOARD_SHRINK);
     };
-    const later = () => window.setTimeout(check, 50);
+    const later = () => window.setTimeout(check, 80);
+    check();
     vv?.addEventListener("resize", check);
-    document.addEventListener("focusin", check);
+    window.addEventListener("resize", check);
+    document.addEventListener("focusin", later);
     document.addEventListener("focusout", later);
     return () => {
       vv?.removeEventListener("resize", check);
-      document.removeEventListener("focusin", check);
+      window.removeEventListener("resize", check);
+      document.removeEventListener("focusin", later);
       document.removeEventListener("focusout", later);
     };
   }, [enabled]);
   return open;
+}
+
+/** Re-render when the viewport changes size (rotation, the keyboard, a resized window): her place depends on it. */
+function useViewportSize() {
+  const [, setSize] = useState("");
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const update = () => setSize(`${window.innerWidth}x${window.innerHeight}x${Math.round(vv?.height ?? 0)}`);
+    window.addEventListener("resize", update);
+    vv?.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      vv?.removeEventListener("resize", update);
+    };
+  }, []);
 }
 
 /** Bounding box of the composer, re-measured as the layout changes. */
@@ -210,8 +247,10 @@ export default function Doll() {
 
   const height = HEIGHTS[pose][size];
   const width = Math.round((height * art.width) / art.height);
-  const keyboard = useKeyboardOpen(isMobile);
+  const coarse = useMemo(() => window.matchMedia?.("(pointer: coarse)").matches ?? false, []);
+  const keyboard = useKeyboardOpen(isMobile && coarse);
   const composer = useComposerRect();
+  useViewportSize();
 
   // ---- what is going on ----------------------------------------------------
   const { busy, waiting } = useMemo(() => {
@@ -347,8 +386,29 @@ export default function Doll() {
 
   useEffect(() => endPress, [endPress]);
 
+  /** Give up the press in progress, whatever state it is in (its release never came, or will not count). */
+  const cancelPress = useCallback(() => {
+    const p = press.current;
+    if (!p) return;
+    endPress();
+    setPressed(false);
+    if (p.dragging) setDrag(null);
+    if (p.menu) swallowNextClick();
+  }, [endPress]);
+
+  // A release can get lost (the window lost focus while she was held): do not stay "pressed" forever.
+  useEffect(() => {
+    window.addEventListener("blur", cancelPress);
+    return () => window.removeEventListener("blur", cancelPress);
+  }, [cancelPress]);
+
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || press.current) return;
+    if (e.button !== 0) return;
+    if (press.current) {
+      // A second finger is ignored; a new first one means the earlier press ended without telling us.
+      if (!e.isPrimary) return;
+      cancelPress();
+    }
     e.currentTarget.setPointerCapture(e.pointerId);
     const touch = e.pointerType !== "mouse";
     // Keep the phone drawers from treating this as a swipe.
@@ -429,11 +489,10 @@ export default function Doll() {
     if (!usage || Date.now() / 1000 - usage.fetchedAt > 60) void reload(true);
   };
 
-  const onPointerCancel = () => {
-    const p = press.current;
-    endPress();
-    setPressed(false);
-    if (p?.dragging) setDrag(null);
+  const onPointerCancel = cancelPress;
+  /** Fires after every release as well; it only matters when the release itself never arrived. */
+  const onLostPointerCapture = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (press.current?.pointerId === e.pointerId) cancelPress();
   };
 
   // ---- geometry --------------------------------------------------------------
@@ -479,7 +538,7 @@ export default function Doll() {
     drag && "dragging",
     expression === "sleep" && "sleeping",
     out && "out",
-    keyboard && "away",
+    isMobile && keyboard && "away",
   ].filter(Boolean).join(" ");
 
   const sizeItem = (k: DollSize) => (
@@ -490,7 +549,7 @@ export default function Doll() {
   );
 
   return (
-    <div ref={root} className={classes} style={style as CSSProperties} aria-hidden={keyboard || undefined}>
+    <div ref={root} className={classes} style={style as CSSProperties} aria-hidden={(isMobile && keyboard) || undefined}>
       {bubble && (
         <div
           key={bubble.id}
@@ -558,6 +617,7 @@ export default function Doll() {
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
               onPointerCancel={onPointerCancel}
+              onLostPointerCapture={onLostPointerCapture}
               onPointerEnter={() => { hovering.current = true; }}
               onPointerLeave={() => { hovering.current = false; }}
               onContextMenu={(e) => {

@@ -149,6 +149,7 @@ export const useSessions = create<SessionsStore>((set, get) => {
             state: event.state,
             stream: overlayFromPartial(event.state),
             turnStartedAt: event.state.busy ? d.turnStartedAt ?? Date.now() : null,
+            notices: event.state.busy ? d.notices : [],
           }));
           break;
         case "reset":
@@ -157,7 +158,9 @@ export const useSessions = create<SessionsStore>((set, get) => {
         case "items":
           update(sid, (d) => {
             const items = mergeItems(d.items, event.items);
-            return { items, stream: pruneOverlay(d.stream, items) };
+            // A reply (or its error) arrived: the request a retry notice was about is over.
+            const answered = event.items.some((it) => it.kind === "assistant" || it.kind === "notice" || it.kind === "interrupted");
+            return { items, stream: pruneOverlay(d.stream, items), ...(answered && d.notices.length ? { notices: [] } : {}) };
           });
           break;
         case "state":
@@ -166,7 +169,7 @@ export const useSessions = create<SessionsStore>((set, get) => {
           break;
         case "stream":
           update(sid, (d) => {
-            if (event.op === "start") return { stream: { msgId: event.msgId, blocks: [] } };
+            if (event.op === "start") return { stream: { msgId: event.msgId, blocks: [] }, notices: [] };
             const stream: StreamOverlay = d.stream && d.stream.msgId === event.msgId
               ? { ...d.stream, blocks: [...d.stream.blocks] }
               : { msgId: event.msgId, blocks: [] };
@@ -181,25 +184,27 @@ export const useSessions = create<SessionsStore>((set, get) => {
               stream.blocks[idx] = { ...stream.blocks[idx], text: stream.blocks[idx].text + (event.text ?? "") };
             } else if (event.op === "block_stop" && idx >= 0) {
               stream.blocks[idx] = { ...stream.blocks[idx], done: true };
-              return { stream: pruneOverlay(stream, d.items), turnStartedAt: d.turnStartedAt ?? Date.now() };
+              return { stream: pruneOverlay(stream, d.items), turnStartedAt: d.turnStartedAt ?? Date.now(), notices: [] };
             }
-            return { stream, turnStartedAt: d.turnStartedAt ?? Date.now() };
+            // Output is arriving, so the retry worked.
+            return { stream, turnStartedAt: d.turnStartedAt ?? Date.now(), notices: [] };
           });
           break;
         case "result":
           update(sid, (d) => ({
             stream: null,
             turnStartedAt: null,
+            notices: [],
             state: d.state ? { ...d.state, lastResult: event.result } : d.state,
           }));
           break;
         case "notice":
-          update(sid, (d) => ({
-            notices: [...d.notices.slice(-4), { id: ++noticeId, level: event.level, text: event.text, ts: Date.now() }],
-          }));
+          // What the request in progress is going through ("overloaded, retrying (2/7)"): only the latest counts,
+          // and it goes away when output arrives or the turn ends (above and below).
+          update(sid, () => ({ notices: [{ id: ++noticeId, level: event.level, text: event.text, ts: Date.now() }] }));
           break;
         case "exit":
-          update(sid, () => ({ exited: { code: event.code, stderr: event.stderr }, stream: null, turnStartedAt: null }));
+          update(sid, () => ({ exited: { code: event.code, stderr: event.stderr }, stream: null, turnStartedAt: null, notices: [] }));
           break;
         default:
           break;

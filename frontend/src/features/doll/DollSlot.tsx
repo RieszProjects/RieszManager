@@ -3,10 +3,11 @@
  * are only downloaded once it is switched on in the settings; while it is off
  * this renders nothing.
  */
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, type ComponentType } from "react";
 import { useDollPrefs } from "./prefs";
 
-const Doll = lazy(() => import("./Doll"));
+// If her code cannot be fetched (offline, or a new version replaced the files), go without her rather than fail the app.
+const Doll = lazy<ComponentType>(() => import("./Doll").catch(() => ({ default: () => null })));
 
 export function DollSlot() {
   const enabled = useDollPrefs((s) => s.enabled);
