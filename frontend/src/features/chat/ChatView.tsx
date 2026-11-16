@@ -136,6 +136,9 @@ function SessionMenu({ sessionId, state, cwd, title, keepAlive }: { sessionId: s
   );
 }
 
+/** Browsers repeat `dragover` at least about every half second while a drag is above an element. */
+const DRAG_IDLE_MS = 700;
+
 export function ChatView({ sessionId }: { sessionId: string }) {
   const summary = useApp((s) => s.sessions[sessionId]);
   const live = useApp((s) => s.live[sessionId]);
@@ -152,6 +155,14 @@ export function ChatView({ sessionId }: { sessionId: string }) {
   const isMobile = useIsMobile();
   const dropRef = useRef<((files: File[]) => void) | null>(null);
   const [dragging, setDragging] = useState(false);
+  // The drop hint. A drag that ends elsewhere (dropped outside, left the window, cancelled) sends no reliable
+  // "it is over" event here, but `dragover` keeps coming while it is above us: the hint goes when that stops.
+  const dragTimer = useRef<number | undefined>(undefined);
+  const endDrag = () => {
+    window.clearTimeout(dragTimer.current);
+    setDragging(false);
+  };
+  useEffect(() => () => window.clearTimeout(dragTimer.current), []);
 
   useEffect(() => socket.subscribeSession(sessionId), [sessionId]);
 
@@ -186,7 +197,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
 
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
-    setDragging(false);
+    endDrag();
     const files = Array.from(e.dataTransfer.files ?? []);
     if (files.length) dropRef.current?.(files);
   };
@@ -231,9 +242,15 @@ export function ChatView({ sessionId }: { sessionId: string }) {
           if (e.dataTransfer.types.includes("Files")) {
             e.preventDefault();
             setDragging(true);
+            window.clearTimeout(dragTimer.current);
+            dragTimer.current = window.setTimeout(() => setDragging(false), DRAG_IDLE_MS);
           }
         }}
-        onDragLeave={(e) => e.currentTarget === e.target && setDragging(false)}
+        onDragLeave={(e) => {
+          // Leaving a child for another fires this too: only when the pointer is outside the whole area.
+          const r = e.currentTarget.getBoundingClientRect();
+          if (e.clientX <= r.left || e.clientX >= r.right || e.clientY <= r.top || e.clientY >= r.bottom) endDrag();
+        }}
         onDrop={onDrop}
       >
         <header className="rz-chat-head">
