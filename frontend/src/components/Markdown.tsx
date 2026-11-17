@@ -1,4 +1,4 @@
-import { memo, useState, type ReactNode } from "react";
+import { memo, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
@@ -7,6 +7,7 @@ import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
 import { Check, Copy } from "lucide-react";
 import { copyText } from "@/lib/clipboard";
+import { prepareMath } from "@/lib/mathDelimiters";
 
 function textOf(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
@@ -57,14 +58,16 @@ interface Props {
 }
 
 function MarkdownImpl({ text, sans, className }: Props) {
+  // Formulas: `$…$`, `$$…$$`, `\(…\)` and `\[…\]`; dollars that are money stay text (see lib/mathDelimiters).
+  const source = useMemo(() => prepareMath(text), [text]);
   return (
     <div className={`md${sans ? " md-sans" : ""}${className ? ` ${className}` : ""}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, [remarkMath, { singleDollarTextMath: false }]]}
+        remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[[rehypeHighlight, { detect: false, ignoreMissing: true }], rehypeKatex]}
         components={components}
       >
-        {text}
+        {source}
       </ReactMarkdown>
     </div>
   );
