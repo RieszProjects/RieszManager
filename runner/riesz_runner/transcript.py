@@ -247,6 +247,11 @@ class TranscriptView:
     sidechain: bool = False
     tools: dict[str, _ToolLocation] = field(default_factory=dict)
     meta_scanner: MetaScanner = field(default_factory=MetaScanner)
+    # Replies by a model other than the chosen one (a refusal fallback, a server-side reroute) get
+    # `modelNote`, on the first such reply of a turn. Claude Code keeps asking for the fallback model
+    # for the rest of the session, so the chosen model is remembered until another one is asked for.
+    _fallbacks: dict[str, str] = field(default_factory=dict)   # fallback model -> the model it stands in for
+    _noted_model: str | None = None
     _seq: int = 0
     _dirty: set[str] = field(default_factory=set)
 
@@ -420,6 +425,8 @@ class TranscriptView:
             self._add(item)
             return
         item = self._base(rec, "user")
+        if not queued:
+            self._noted_model = None                  # a new turn: note the stand-in model again
         peer = _PEER_RE.search(text)
         if peer:
             item["peerName"] = peer.group("name")
@@ -483,6 +490,7 @@ class TranscriptView:
             item["synthetic"] = model == "<synthetic>"
             item["blocks"] = []
             item["stopReason"] = None
+            self._note_model(item, rec, model)
             self._add(item)
         if message.get("stop_reason"):
             item["stopReason"] = message.get("stop_reason")
@@ -507,6 +515,21 @@ class TranscriptView:
         if rec.get("isApiErrorMessage") or rec.get("error"):
             item["isError"] = True
         self._touch(key)
+
+    def _note_model(self, item: dict[str, Any], rec: dict[str, Any], model: str | None) -> None:
+        if not model or model == "<synthetic>":
+            return
+        requested = rec.get("requestedModel") or model
+        if requested in self._fallbacks:
+            chosen = self._fallbacks[requested]
+        else:
+            chosen = requested
+            self._fallbacks.clear()                   # another model was asked for: the fallback is over
+        if model == chosen:
+            self._noted_model = None
+        elif model != self._noted_model:
+            item["modelNote"] = model
+            self._noted_model = model
 
     @staticmethod
     def _convert_block(block: dict[str, Any], rec: dict[str, Any]) -> dict[str, Any] | None:
@@ -541,6 +564,8 @@ class TranscriptView:
     def _system(self, rec: dict[str, Any]) -> None:
         subtype = rec.get("subtype")
         content = rec.get("content")
+        if subtype == "model_refusal_fallback" and rec.get("fallbackModel") and rec.get("originalModel"):
+            self._fallbacks[rec["fallbackModel"]] = rec["originalModel"]
         if subtype == "compact_boundary":
             item = self._base(rec, "compact")
             meta = rec.get("compactMetadata") or {}

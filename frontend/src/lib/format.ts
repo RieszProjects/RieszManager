@@ -66,7 +66,9 @@ export function modelLabel(model: string | null | undefined): string {
   const m = model.toLowerCase();
   const pick = (name: string) => {
     const ver = m.match(/(\d+)[-.](\d+)/);
-    return ver ? `${name} ${ver[1]}.${ver[2]}` : name;
+    if (ver) return `${name} ${ver[1]}.${ver[2]}`;
+    const major = m.match(/-(\d+)$/);                     // e.g. claude-opus-5
+    return major ? `${name} ${major[1]}` : name;
   };
   if (m.includes("opus")) return pick("Opus");
   if (m.includes("sonnet")) return pick("Sonnet");

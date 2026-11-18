@@ -121,6 +121,8 @@ export interface AssistantItem extends ItemBase {
   blocks: AssistantBlock[];
   stopReason: string | null;
   isError?: boolean;
+  /** Set on the first reply of a turn that a model other than the chosen one gave (a refusal fallback, a reroute). */
+  modelNote?: string | null;
   /** Token usage reported by the API for this message. */
   usage?: {
     input_tokens?: number | null;

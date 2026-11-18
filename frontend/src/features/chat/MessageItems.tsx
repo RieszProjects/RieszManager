@@ -100,6 +100,7 @@ const AssistantMessage = memo(function AssistantMessage({ item }: { item: Assist
   }
   return (
     <div className="rz-assistant">
+      {item.modelNote && <div className="rz-model-note">{modelLabel(item.modelNote)}</div>}
       {item.blocks.map((block, i) => {
         if (block.type === "text") return <Markdown key={i} text={block.text} />;
         if (block.type === "thinking") return <ThinkingBlock key={i} block={block} />;
