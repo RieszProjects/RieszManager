@@ -44,6 +44,11 @@ export function toolMeta(name: string, input: Record<string, unknown>, cwd?: str
     case "Edit":
     case "MultiEdit":
       return { icon: FilePen, label: "编辑", summary: path() };
+    case "ApplyPatch": {
+      const changes = (input.changes as { path?: string }[] | undefined) ?? [];
+      const first = changes[0]?.path ? shortPath(changes[0].path, cwd) : "";
+      return { icon: FilePen, label: "修改文件", summary: changes.length > 1 ? `${first} 等 ${changes.length} 个文件` : first };
+    }
     case "NotebookEdit":
       return { icon: FilePen, label: "编辑笔记本", summary: path("notebook_path") };
     case "Grep":

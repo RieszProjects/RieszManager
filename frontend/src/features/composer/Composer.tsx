@@ -9,6 +9,7 @@ import { api } from "@/api/client";
 import type { SessionState } from "@/api/types";
 import { composerBus } from "@/lib/composerBus";
 import { fileSize } from "@/lib/format";
+import { harnessLabel, useHarnesses, useHarnessModels } from "@/lib/harnesses";
 import { storage } from "@/lib/storage";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { uuid4 } from "@/lib/uuid";
@@ -16,7 +17,7 @@ import { useApp } from "@/store/app";
 import { toast } from "@/store/ui";
 import { ContextMeter } from "./ContextMeter";
 import { useCommands } from "./useCommands";
-import { cycleMode, ModelPicker, ModePicker } from "./SessionControls";
+import { cycleMode, HarnessPicker, ModelPicker, ModePicker } from "./SessionControls";
 import { SuggestMenu, type Suggestion } from "./SuggestMenu";
 import { useAttachments } from "./useAttachments";
 import { usePromptHistory } from "./useHistory";
@@ -33,6 +34,8 @@ interface Props {
   placeholder?: string;
   /** Files dropped onto the surrounding view are forwarded here. */
   dropRef?: React.MutableRefObject<((files: File[]) => void) | null>;
+  /** The session's harness as the session list knows it, until its state arrives. */
+  harness?: string | null;
 }
 
 const isCoarse = () => window.matchMedia?.("(pointer: coarse)").matches ?? false;
@@ -51,7 +54,7 @@ function mentionToken(text: string, caret: number): { query: string; start: numb
   return { query: m[2], start: caret - m[2].length - 1 };
 }
 
-export function Composer({ sessionId, projectId, state, defaultModel, defaultMode, onCreated, autoFocus, placeholder, dropRef }: Props) {
+export function Composer({ sessionId, projectId, state, defaultModel, defaultMode, onCreated, autoFocus, placeholder, dropRef, harness: knownHarness }: Props) {
   const config = useApp((s) => s.config);
   const isMobile = useIsMobile();
   const draftKey = `draft:${sessionId ?? `new:${projectId ?? ""}`}`;
@@ -67,15 +70,36 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
   const ta = useRef<HTMLTextAreaElement>(null);
   const attachments = useAttachments();
   const history = usePromptHistory(projectId);
-  const { commands, models, defaults } = useCommands(sessionId, projectId);
+  const { commands, models: sessionModels, defaults } = useCommands(sessionId, projectId);
+
+  // Which harness runs the session: Claude Code, or another one (Codex, DeepSeek Harness), picked for a new session.
+  const harnesses = useHarnesses();
+  const [pickedHarness, setPickedHarness] = useState<string>(() => storage.get("composer:harness", "claude"));
+  const harness = sessionId
+    ? state?.harness ?? knownHarness ?? "claude"
+    : harnesses.some((h) => h.id === pickedHarness && h.available) ? pickedHarness : "claude";
+  const other = harness !== "claude";
+  const info = harnesses.find((h) => h.id === harness);
+  const harnessModes = other ? state?.modes ?? info?.modes ?? [] : null;
+  const newSessionModels = useHarnessModels(!sessionId && other ? harness : null);
+  const models = !sessionId && other ? newSessionModels : sessionModels;
 
   const hosted = Boolean(state?.hosted && state.alive);
   const external = Boolean(state?.external && state.alive && !hosted);
   const busy = Boolean(state?.busy);
-  const model = (hosted ? state?.model : localModel ?? state?.model ?? defaultModel) ?? defaults?.model ?? null;
-  const effort = (hosted ? state?.effort : localEffort ?? state?.effort) ?? defaults?.effort ?? null;
+  const model = (hosted ? state?.model : localModel ?? state?.model ?? defaultModel)
+    ?? (other ? info?.defaultModel ?? models.find((m) => m.isDefault)?.value : defaults?.model) ?? null;
+  const effort = (hosted ? state?.effort : localEffort ?? state?.effort) ?? (other ? null : defaults?.effort) ?? null;
   const mode = (hosted ? state?.permissionMode : localMode ?? state?.permissionMode ?? defaultMode)
-    ?? config?.defaultPermissionMode ?? "default";
+    ?? (other ? info?.defaultMode ?? harnessModes?.[0]?.id : config?.defaultPermissionMode) ?? "default";
+
+  const pickHarness = (next: string) => {
+    setPickedHarness(next);
+    storage.set("composer:harness", next);
+    setLocalModel(null);
+    setLocalMode(null);
+    setLocalEffort(null);
+  };
 
   // Restore the draft when switching sessions.
   useEffect(() => {
@@ -136,7 +160,7 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
   if (dropRef) dropRef.current = (files) => void attachments.add(files);
 
   // ---- suggestions -----------------------------------------------------------
-  const slash = slashToken(text, caret);
+  const slash = other ? null : slashToken(text, caret);
   const mention = slash === null ? mentionToken(text, caret) : null;
 
   const slashItems = useMemo<Suggestion[]>(() => {
@@ -282,6 +306,7 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
           body: {
             ...body, project: projectId, model: localModel ?? defaultModel ?? undefined,
             permissionMode: localMode ?? defaultMode ?? undefined, effort: localEffort ?? undefined,
+            ...(other ? { harness } : {}),
           },
         });
         storage.remove(draftKey);
@@ -331,7 +356,7 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
     }
     if (e.key === "Tab" && e.shiftKey) {
       e.preventDefault();
-      void changeMode(cycleMode(mode, Boolean(config?.allowBypass)));
+      void changeMode(cycleMode(mode, Boolean(config?.allowBypass), harnessModes));
       return;
     }
     if (e.key === "Enter" && !e.shiftKey && !e.altKey && !isCoarse()) {
@@ -411,11 +436,14 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
       : "发送后，这个终端会话会转到这里继续"
     : busy
       ? "继续输入，消息会在合适时机送达…"
-      : "给 Claude 发消息，/ 打开命令，@ 引用文件";
+      : other
+        ? sessionId ? `给 ${harnessLabel(harness)} 发消息，@ 引用文件` : "描述你想做的事，@ 引用文件"
+        : "给 Claude 发消息，/ 打开命令，@ 引用文件";
 
   const chips = (
     <>
-      <ModePicker value={mode} allowBypass={Boolean(config?.allowBypass)} onChange={changeMode} />
+      {!sessionId && harnesses.length > 0 && <HarnessPicker value={harness} harnesses={harnesses} onChange={pickHarness} />}
+      <ModePicker value={mode} allowBypass={Boolean(config?.allowBypass)} onChange={changeMode} options={harnessModes} />
       <ModelPicker value={model} effort={effort} models={models} onChange={changeModel} onEffort={changeEffort} />
     </>
   );
@@ -453,7 +481,7 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
           ref={ta}
           rows={1}
           value={text}
-          placeholder={placeholder ?? defaultPlaceholder}
+          placeholder={(other ? undefined : placeholder) ?? defaultPlaceholder}
           onChange={(e) => {
             dropVoice();
             setText(e.target.value);
@@ -502,7 +530,7 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
           />
           {!isMobile && chips}
           <div className="rz-spacer" />
-          {sessionId && <ContextMeter sessionId={sessionId} model={state?.model} hosted={hosted} />}
+          {sessionId && <ContextMeter sessionId={sessionId} model={state?.model} hosted={hosted} live={other ? state?.context ?? null : undefined} />}
           {voice.available && (
             <Tooltip title={voice.recording ? "停止录音" : "语音输入"}>
               <IconButton size="small" className={voice.recording ? "rz-mic-on" : ""} onClick={() => void voice.toggle()} disabled={voice.transcribing}>

@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { TaskInfo } from "@/api/types";
+import type { HarnessCapabilities, TaskInfo } from "@/api/types";
 
 export interface SessionContextValue {
   sessionId: string;
@@ -11,6 +11,9 @@ export interface SessionContextValue {
   tasks: TaskInfo[];
   /** The session's claude process runs here, so its tasks can be stopped or backgrounded. */
   hosted: boolean;
+  /** Sessions of other harnesses: which one, and what it offers. */
+  harness?: string | null;
+  capabilities?: HarnessCapabilities | null;
 }
 
 export const SessionContext = createContext<SessionContextValue>({

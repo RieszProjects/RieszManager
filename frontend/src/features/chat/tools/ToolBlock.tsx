@@ -3,14 +3,15 @@ import { memo, useEffect, useState, type ReactNode } from "react";
 import { api, imageUrl } from "@/api/client";
 import type { ToolBlock as ToolBlockType, ToolResult } from "@/api/types";
 import { CodeBlock } from "@/components/CodeBlock";
-import { DiffView, diffStats, type Hunk } from "@/components/DiffView";
+import { DiffView, diffStats, patchHunks, type Hunk, type PatchChange } from "@/components/DiffView";
+import { shortPath } from "@/lib/format";
 import { Markdown } from "@/components/Markdown";
 import { languageFor } from "@/lib/language";
 import { toast, useUi } from "@/store/ui";
 import { useSessionContext } from "../SessionContext";
 import { mcpParts, toolMeta } from "./toolMeta";
 
-const OPEN_BY_DEFAULT = new Set(["Edit", "MultiEdit", "Write", "TodoWrite", "ExitPlanMode", "AskUserQuestion", "NotebookEdit"]);
+const OPEN_BY_DEFAULT = new Set(["Edit", "MultiEdit", "Write", "TodoWrite", "ExitPlanMode", "AskUserQuestion", "NotebookEdit", "ApplyPatch"]);
 const str = (v: unknown): string => (typeof v === "string" ? v : v === undefined || v === null ? "" : JSON.stringify(v, null, 2));
 
 function ResultImages({ result }: { result: ToolResult }) {
@@ -79,6 +80,36 @@ function EditBody({ name, input, result }: { name: string; input: Record<string,
     );
   }
   return <DiffView oldText={str(input.old_string)} newText={str(input.new_string)} maxHeight={420} />;
+}
+
+const KIND_LABEL: Record<string, string> = { add: "新建", delete: "删除", update: "修改" };
+
+/** Codex's file changes, or a patch text (DeepSeek Harness's apply_patch). */
+export function PatchBody({ input, result, maxHeight = 420 }: { input: Record<string, unknown>; result?: ToolResult | null; maxHeight?: number }) {
+  const { cwd } = useSessionContext();
+  const changes = (input.changes as PatchChange[] | undefined) ?? [];
+  if (result?.isError && result.text) return <Output text={result.text} error />;
+  if (!changes.length) {
+    const text = str(input.patch ?? input.input ?? "");
+    return text ? <CodeBlock code={text} language="diff" maxHeight={maxHeight} wrap /> : <GenericBody input={input} result={result ?? null} />;
+  }
+  return (
+    <>
+      {changes.map((c, i) => {
+        const kind = typeof c.kind === "string" ? c.kind : c.kind?.type ?? "update";
+        const moved = typeof c.kind === "object" ? c.kind?.move_path : null;
+        return (
+          <div key={i}>
+            <div className="rz-patch-file mono">
+              <span className="kind">{KIND_LABEL[kind] ?? kind}</span>
+              <span>{shortPath(c.path, cwd)}{moved ? ` → ${shortPath(moved, cwd)}` : ""}</span>
+            </div>
+            <DiffView hunks={patchHunks(c)} maxHeight={maxHeight} />
+          </div>
+        );
+      })}
+    </>
+  );
 }
 
 function WriteBody({ input, result }: { input: Record<string, unknown>; result: ToolResult | null }) {
@@ -158,6 +189,8 @@ function body(tool: ToolBlockType): ReactNode {
       return <EditBody name={name} input={input} result={result} />;
     case "Write":
       return <WriteBody input={input} result={result} />;
+    case "ApplyPatch":
+      return <PatchBody input={input} result={result} />;
     case "TodoWrite":
       return <TodoBody input={input} />;
     case "AskUserQuestion":
@@ -186,6 +219,20 @@ function headExtra(tool: ToolBlockType): ReactNode {
     let stats: { add: number; del: number };
     if (name === "Write" && !(patch && patch.length)) stats = { add: str(input.content).split("\n").length, del: 0 };
     else stats = diffStats(patch, name === "Edit" ? str(input.old_string) : undefined, name === "Edit" ? str(input.new_string) : undefined);
+    if (!stats.add && !stats.del) return null;
+    return (
+      <span className="rz-tool-stats">
+        {stats.add > 0 && <span className="add">+{stats.add}</span>}
+        {stats.del > 0 && <span className="del">−{stats.del}</span>}
+      </span>
+    );
+  }
+  if (name === "ApplyPatch" && !result?.isError) {
+    const changes = (input.changes as PatchChange[] | undefined) ?? [];
+    const stats = changes.reduce((acc, c) => {
+      const s = diffStats(patchHunks(c));
+      return { add: acc.add + s.add, del: acc.del + s.del };
+    }, { add: 0, del: 0 });
     if (!stats.add && !stats.del) return null;
     return (
       <span className="rz-tool-stats">

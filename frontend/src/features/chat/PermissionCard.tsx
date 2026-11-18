@@ -7,9 +7,11 @@ import type { PermissionRequest, PermissionSuggestion } from "@/api/types";
 import { CodeBlock } from "@/components/CodeBlock";
 import { DiffView } from "@/components/DiffView";
 import { Markdown } from "@/components/Markdown";
+import { harnessLabel } from "@/lib/harnesses";
 import { languageFor } from "@/lib/language";
 import { toast } from "@/store/ui";
 import { useSessionContext } from "./SessionContext";
+import { PatchBody } from "./tools/ToolBlock";
 import { toolMeta } from "./tools/toolMeta";
 
 const str = (v: unknown): string => (typeof v === "string" ? v : v === undefined || v === null ? "" : JSON.stringify(v, null, 2));
@@ -42,13 +44,15 @@ function Preview({ req }: { req: PermissionRequest }) {
       return <DiffView oldText={str(input.old_string)} newText={str(input.new_string)} maxHeight={300} />;
     case "Write":
       return <CodeBlock code={str(input.content)} language={languageFor(str(input.file_path))} lineNumbers maxHeight={300} />;
+    case "ApplyPatch":
+      return <PatchBody input={input} maxHeight={300} />;
     default:
       return Object.keys(input).length ? <CodeBlock code={JSON.stringify(input, null, 2)} language="json" wrap maxHeight={220} /> : null;
   }
 }
 
 function ToolPermission({ req }: { req: PermissionRequest }) {
-  const { sessionId, cwd } = useSessionContext();
+  const { sessionId, cwd, harness, capabilities } = useSessionContext();
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [showFeedback, setShowFeedback] = useState(false);
@@ -78,7 +82,7 @@ function ToolPermission({ req }: { req: PermissionRequest }) {
           fullWidth
           multiline
           maxRows={4}
-          placeholder="告诉 Claude 应该怎么做（可选）"
+          placeholder={`告诉 ${harness ? harnessLabel(harness) : "Claude"} 应该怎么做（可选）`}
           value={feedback}
           onChange={(e) => setFeedback(e.target.value)}
           sx={{ mt: 1 }}
@@ -94,6 +98,11 @@ function ToolPermission({ req }: { req: PermissionRequest }) {
             {label}
           </Button>
         ))}
+        {harness && capabilities?.approveForSession && (
+          <Button variant="outlined" disabled={busy} onClick={() => run({ behavior: "allow", scope: "session" })}>
+            允许，本会话不再询问
+          </Button>
+        )}
         <Button
           variant="outlined"
           color="error"

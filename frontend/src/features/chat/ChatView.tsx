@@ -13,6 +13,7 @@ import { Mascot } from "@/components/Mascot";
 import { StatusDot } from "@/components/StatusDot";
 import { copyText } from "@/lib/clipboard";
 import { clockTime } from "@/lib/format";
+import { harnessLabel } from "@/lib/harnesses";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { sessionTitle, useApp } from "@/store/app";
 import { useOrganize } from "@/store/organize";
@@ -52,7 +53,16 @@ function QueueBar({ sessionId, queue }: { sessionId: string; queue: QueueEntry[]
   );
 }
 
-function SessionMenu({ sessionId, state, cwd, title, keepAlive }: { sessionId: string; state: SessionState | null; cwd: string | null; title: string; keepAlive: boolean }) {
+/** How to continue a session in a terminal, by harness. */
+function resumeCommand(harness: string | null | undefined, sessionId: string): string {
+  if (harness === "codex") return `codex resume ${sessionId}`;
+  if (harness === "dsh") return `dsh tui --resume ${sessionId}`;
+  return `claude --resume ${sessionId}`;
+}
+
+function SessionMenu({ sessionId, state, cwd, title, keepAlive, harness }: {
+  sessionId: string; state: SessionState | null; cwd: string | null; title: string; keepAlive: boolean; harness?: string;
+}) {
   const setScheduleSession = useUi((s) => s.setScheduleSession);
   const scheduleCount = useSchedules((s) => s.items.filter((x) => x.sessionId === sessionId && x.enabled).length);
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
@@ -81,22 +91,26 @@ function SessionMenu({ sessionId, state, cwd, title, keepAlive }: { sessionId: s
           <ListItemIcon>{archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}</ListItemIcon>
           {archived ? "取消归档" : "归档"}
         </MenuItem>
-        <MenuItem onClick={() => run(async () => {
-          const res = await api<{ sessionId: string }>(`sessions/${sessionId}/fork`, { body: {} });
-          navigate({ view: "session", sessionId: res.sessionId });
-        })}>
-          <ListItemIcon><GitFork size={16} /></ListItemIcon>分叉为新会话
-        </MenuItem>
+        {!harness && (
+          <MenuItem onClick={() => run(async () => {
+            const res = await api<{ sessionId: string }>(`sessions/${sessionId}/fork`, { body: {} });
+            navigate({ view: "session", sessionId: res.sessionId });
+          })}>
+            <ListItemIcon><GitFork size={16} /></ListItemIcon>分叉为新会话
+          </MenuItem>
+        )}
         <MenuItem onClick={() => { close(); setScheduleSession(sessionId); }}>
           <ListItemIcon><AlarmClock size={16} /></ListItemIcon>
           <span className="rz-menu-grow">定时唤醒</span>
           {scheduleCount > 0 && <span className="dim">{scheduleCount}</span>}
         </MenuItem>
-        <MenuItem onClick={() => run(() => setKeepAlive(sessionId, !keepAlive))}>
-          <ListItemIcon><Pin size={16} /></ListItemIcon>
-          <span className="rz-menu-grow">保持运行</span>
-          {keepAlive && <Check size={15} className="rz-menu-check" />}
-        </MenuItem>
+        {!harness && (
+          <MenuItem onClick={() => run(() => setKeepAlive(sessionId, !keepAlive))}>
+            <ListItemIcon><Pin size={16} /></ListItemIcon>
+            <span className="rz-menu-grow">保持运行</span>
+            {keepAlive && <Check size={15} className="rz-menu-check" />}
+          </MenuItem>
+        )}
         {state?.hosted && state.alive && (
           <MenuItem onClick={() => run(async () => {
             const res = await api<{ keepAliveCleared?: boolean }>(`sessions/${sessionId}/stop`, { body: {} });
@@ -126,7 +140,7 @@ function SessionMenu({ sessionId, state, cwd, title, keepAlive }: { sessionId: s
           <ListItemIcon><Copy size={16} /></ListItemIcon>复制会话 ID
         </MenuItem>
         <MenuItem onClick={() => run(async () => {
-          const cmd = `${cwd ? `cd ${JSON.stringify(cwd)} && ` : ""}claude --resume ${sessionId}`;
+          const cmd = `${cwd ? `cd ${JSON.stringify(cwd)} && ` : ""}${resumeCommand(harness, sessionId)}`;
           if (await copyText(cmd)) toast("已复制终端恢复命令", "success");
         })}>
           <ListItemIcon><SquareTerminal size={16} /></ListItemIcon>复制终端恢复命令
@@ -172,6 +186,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
   }, [projectId, setContextProject]);
 
   const state = data?.state ?? null;
+  const harness = state?.harness ?? summary?.harness;
   const keepAlive = Boolean(state?.keepAlive ?? summary?.keepAlive);
   const items = data?.items ?? [];
   const project = projects.find((p) => p.id === projectId);
@@ -180,8 +195,9 @@ export function ChatView({ sessionId }: { sessionId: string }) {
     () => ({
       sessionId, cwd: summary?.cwd ?? null, projectId, pendingTools: turn.pendingTools,
       tasks: state?.tasks ?? [], hosted: Boolean(state?.hosted && state?.alive),
+      harness: harness ?? null, capabilities: state?.capabilities ?? null,
     }),
-    [sessionId, summary?.cwd, projectId, turn.pendingTools, state?.tasks, state?.hosted, state?.alive],
+    [sessionId, summary?.cwd, projectId, turn.pendingTools, state?.tasks, state?.hosted, state?.alive, harness, state?.capabilities],
   );
   const hostedHere = Boolean(state?.hosted && state.alive);
   const waitingSince = turn.waitingSince ? Date.parse(turn.waitingSince) : null;
@@ -209,7 +225,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
       {data?.notices.map((n) => <div key={n.id} className={`rz-notice level-${n.level}`}>{n.text}</div>)}
       {data?.exited && data.exited.code !== 0 && !state?.alive && (
         <div className="rz-exit">
-          <TriangleAlert size={14} /> Claude 进程异常退出（代码 {data.exited.code}）
+          <TriangleAlert size={14} /> {harness ? harnessLabel(harness) : "Claude"} 进程异常退出（代码 {data.exited.code}）
           {data.exited.stderr.length > 0 && <pre>{data.exited.stderr.join("\n")}</pre>}
         </div>
       )}
@@ -259,6 +275,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
             <div className="rz-chat-title-text"><EditableTitle sessionId={sessionId} title={sessionTitle(summary)} /></div>
             <div className="rz-chat-sub">
               <StatusDot live={live} size={7} />
+              {harness && <span className={`rz-tag harness harness-${harness}`}>{harnessLabel(harness)}</span>}
               {project && <span className="clamp-1">{project.name}</span>}
               {summary?.gitBranch && <span className="dim mono clamp-1">⎇ {summary.gitBranch}</span>}
               {keepAlive && <span className="rz-tag keep" title="保持运行：空闲时不会被关闭"><Pin size={10} />常驻</span>}
@@ -274,7 +291,8 @@ export function ChatView({ sessionId }: { sessionId: string }) {
               )}
             </div>
           </div>
-          <SessionMenu sessionId={sessionId} state={state} cwd={summary?.cwd ?? null} title={sessionTitle(summary)} keepAlive={keepAlive} />
+          <SessionMenu sessionId={sessionId} state={state} cwd={summary?.cwd ?? null} title={sessionTitle(summary)} keepAlive={keepAlive}
+            harness={harness} />
           {isMobile ? <MobileHeaderButtons side="right" /> : <RightPanelButton />}
         </header>
         <div className="rz-chat-row">
@@ -307,6 +325,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
             state={state}
             defaultModel={summary?.model}
             defaultMode={summary?.permissionMode}
+            harness={harness}
             autoFocus
             dropRef={dropRef}
           />

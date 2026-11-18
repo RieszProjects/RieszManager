@@ -31,6 +31,8 @@ export interface LiveInfo {
 
 export interface SessionSummary {
   sessionId: string;
+  /** Sessions of other harnesses ("codex", "dsh"); absent for Claude Code. */
+  harness?: string;
   cwd: string | null;
   gitBranch: string | null;
   title: string | null;
@@ -223,7 +225,46 @@ export interface TaskInfo {
   progress?: { tokens?: number | null; toolUses?: number | null; durationMs?: number | null; lastTool?: string | null };
 }
 
+/** What the web app may offer for a session of another harness (runner/riesz_runner/drivers/base.py). */
+export interface HarnessCapabilities {
+  steer: boolean;
+  queue: boolean;
+  interrupt: boolean;
+  interruptRestarts: boolean;
+  images: boolean;
+  approveForSession: boolean;
+  userQuestions: boolean;
+  modelSwitch: string;
+  effortSwitch: string;
+  streamingText: boolean;
+  backgroundTasks: boolean;
+  rateLimits: boolean;
+  history: boolean;
+}
+
+export interface HarnessMode {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+export interface HarnessInfo {
+  id: string;
+  name: string;
+  available: boolean;
+  reason: string | null;
+  modes: HarnessMode[];
+  defaultMode: string | null;
+  defaultModel: string | null;
+  capabilities: HarnessCapabilities;
+}
+
 export interface SessionState {
+  /** Set for sessions of other harnesses, with what they offer. */
+  harness?: string;
+  modes?: HarnessMode[];
+  capabilities?: HarnessCapabilities;
+  context?: { used: number; window: number | null } | null;
   keepAlive?: boolean;
   hosted: boolean;
   alive: boolean;
@@ -259,6 +300,9 @@ export interface ModelInfo {
   displayName: string;
   description?: string;
   supportedEffortLevels?: string[];
+  /** Other harnesses: the model they use when none is chosen, and its usual effort. */
+  isDefault?: boolean;
+  defaultEffort?: string | null;
 }
 
 export interface FileEntry {

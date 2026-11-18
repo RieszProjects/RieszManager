@@ -45,7 +45,15 @@ function fmt(n: number): string {
   return String(n);
 }
 
-export function ContextMeter({ sessionId, model, hosted }: { sessionId: string; model?: string | null; hosted: boolean }) {
+interface Props {
+  sessionId: string;
+  model?: string | null;
+  hosted: boolean;
+  /** Other harnesses report the size and window themselves (undefined: a Claude Code session). */
+  live?: { used: number; window: number | null } | null;
+}
+
+export function ContextMeter({ sessionId, model, hosted, live }: Props) {
   const items = useSessions((s) => s.data[sessionId]?.items ?? EMPTY);
   const size = useMemo(() => contextSize(items), [items]);
   const usedModel = model || size.model;
@@ -54,7 +62,9 @@ export function ContextMeter({ sessionId, model, hosted }: { sessionId: string; 
   const [open, setOpen] = useState(false);
   const touch = useRef(noHover());
 
+  const reported = live !== undefined;
   useEffect(() => {
+    if (reported) return;
     const hit = cache.get(key);
     if (hit) {
       setLimits(hit);
@@ -72,12 +82,13 @@ export function ContextMeter({ sessionId, model, hosted }: { sessionId: string; 
       cancelled = true;
     };
     // size.model only matters for the first fetch of a key, so it is not a dependency.
-  }, [key, sessionId]);
+  }, [key, sessionId, reported]);
 
-  if (!limits) return null;
-  const threshold = Math.max(1, limits.maxTokens - limits.autocompactBuffer);
-  const justCompacted = size.tokens === null && size.compactions > 0; // compacted, size not recorded
-  const used = size.tokens ?? limits.liveTokens ?? null;
+  const shown = live !== undefined ? (live?.window ? { maxTokens: live.window, autocompactBuffer: 0 } : null) : limits;
+  if (!shown) return null;
+  const threshold = Math.max(1, shown.maxTokens - shown.autocompactBuffer);
+  const justCompacted = live === undefined && size.tokens === null && size.compactions > 0; // compacted, size not recorded
+  const used = live !== undefined ? live?.used ?? null : size.tokens ?? limits?.liveTokens ?? null;
   if (used === null && !justCompacted) return null;
   const ratio = used === null ? 0 : Math.min(1, used / threshold);
   const pct = Math.round(ratio * 100);
