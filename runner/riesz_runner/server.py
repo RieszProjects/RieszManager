@@ -6,6 +6,7 @@ import asyncio
 import hmac
 import json
 import logging
+import mimetypes
 import os
 import re
 import time
@@ -20,6 +21,7 @@ from .claude_settings import user_defaults
 from .config import Config
 from .context_limits import ContextLimits, limits_from_usage
 from .delivery import Delivery
+from .harnesses import HARNESSES
 from .history import PromptHistory
 from .hub import Hub
 from .probe import CapabilityProbe
@@ -202,6 +204,7 @@ async def list_sessions(request: web.Request) -> web.Response:
         if project and summary.get("project") != project:
             continue
         sessions.append(summary)
+    sessions.extend(hub.harnesses.summaries(project))
     sessions.sort(key=lambda s: s.get("mtime") or 0, reverse=True)
     return _json({"sessions": sessions[:limit]})
 
@@ -416,6 +419,9 @@ async def create_session(request: web.Request) -> web.Response:
     started_by = body.get("startedBy")
     if started_by is not None and not (isinstance(started_by, str) and _UUID_RE.match(started_by)):
         return _err(400, "invalid startedBy")
+    harness = body.get("harness")
+    if harness and harness != "claude":
+        return await _create_harness_session(request, str(path), str(harness), body)
     mode = _validate_mode(hub.cfg, body.get("permissionMode"))
     proc = await hub.create_session(str(path), model=body.get("model") or None, permission_mode=mode,
                                     effort=_validate_effort(body.get("effort")))
@@ -428,6 +434,25 @@ async def create_session(request: web.Request) -> web.Response:
     if body.get("keepAlive"):
         await hub.set_keep_alive(proc.session_id, True)
     return _json({"sessionId": proc.session_id, "uuid": message_uuid, "state": proc.snapshot()})
+
+
+async def _create_harness_session(request: web.Request, cwd: str, harness: str, body: dict[str, Any]) -> web.Response:
+    hub = request.app[HUB]
+    if harness not in HARNESSES:
+        return _err(400, "unknown harness")
+    model = body.get("model") or None
+    if model is not None and not (isinstance(model, str) and re.fullmatch(r"[A-Za-z0-9._:/-]{1,100}", model)):
+        return _err(400, "invalid model")
+    mode = body.get("permissionMode") or None
+    if mode is not None and mode not in {m.id for m in HARNESSES[harness]["driver"](cwd="/", sink=None).modes()}:
+        return _err(400, "invalid permission mode")
+    driver = await hub.harnesses.create(harness, cwd, model=model, effort=_harness_effort(body.get("effort")), mode=mode)
+    sid = str(driver.session_id)
+    message_uuid = None
+    if body.get("text") or body.get("attachments"):
+        text, attachments, message_uuid = _prompt(request, body)
+        await request.app[DELIVERY].send(sid, text, attachments, message_uuid)
+    return _json({"sessionId": sid, "uuid": message_uuid, "state": hub.harnesses.state(sid)})
 
 
 def _probe_info(proc: Any) -> dict[str, Any]:
@@ -769,6 +794,15 @@ async def websocket(request: web.Request) -> web.WebSocketResponse:
                 if not _UUID_RE.match(sid):
                     continue
                 # A repeated "sub" just asks for a fresh snapshot.
+                if hub.harnesses.has(sid):
+                    items = hub.harnesses.items(sid)
+                    queue.put_nowait({"ev": "snapshot", "sessionId": sid, "items": items[-SNAPSHOT_ITEMS:],
+                                      "hasMore": len(items) > SNAPSHOT_ITEMS, "state": hub.harnesses.state(sid),
+                                      "session": hub.harnesses.summary(sid)})
+                    if sid not in subscriptions:
+                        hub.subscribe(sid, sub)
+                        subscriptions[sid] = sub
+                    continue
                 view = await hub.catch_up(sid)
                 items = view.items[-SNAPSHOT_ITEMS:] if view else []
                 queue.put_nowait({
@@ -796,10 +830,192 @@ async def websocket(request: web.Request) -> web.WebSocketResponse:
     return ws
 
 
+
+# ---- sessions of other harnesses (harnesses.py) --------------------------------
+# Requests for a Codex or DeepSeek Harness session take the same paths as Claude
+# Code's; `harness_middleware` hands them to these handlers instead.
+
+HARNESS_EFFORT_RE = re.compile(r"[a-z]{1,16}")
+
+
+def _harness_mode(hub: Hub, sid: str, mode: Any) -> str | None:
+    if mode in (None, ""):
+        return None
+    if mode not in {m["id"] for m in hub.harnesses.state(sid)["modes"]}:
+        raise web.HTTPBadRequest(text="invalid permission mode")
+    return str(mode)
+
+
+def _harness_effort(effort: Any) -> str | None:
+    if effort in (None, ""):
+        return None
+    if not isinstance(effort, str) or not HARNESS_EFFORT_RE.fullmatch(effort):
+        raise web.HTTPBadRequest(text="invalid effort level")
+    return effort
+
+
+async def h_detail(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    return _json({"session": hub.harnesses.summary(sid), "state": hub.harnesses.state(sid)})
+
+
+async def h_items(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    all_items = hub.harnesses.items(sid)
+    before = request.query.get("before")
+    limit = min(int(request.query.get("limit", str(PAGE_ITEMS))), 1000)
+    items = [it for it in all_items if it["seq"] < int(before)] if before is not None else all_items
+    page = items[-limit:]
+    return _json({"items": page, "hasMore": len(items) > len(page), "total": len(all_items)})
+
+
+async def h_image(request: web.Request, hub: Hub, sid: str) -> web.StreamResponse:
+    """An image the user attached (only files in the upload folder are served)."""
+    ref = request.query.get("ref", "")
+    if not ref.startswith("file:"):
+        return _err(404, "not found")
+    path = Path(os.path.realpath(ref[5:]))
+    if not path.is_relative_to(Path(os.path.realpath(hub.cfg.uploads_dir))) or not path.is_file():
+        return _err(404, "not found")
+    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    if not mime.startswith("image/"):
+        return _err(404, "not found")
+    return web.FileResponse(path, headers={"Content-Type": mime, "Cache-Control": "private, max-age=86400"})
+
+
+async def h_commands(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    try:
+        models = await hub.harnesses.models(sid)
+    except ControlError:
+        models = []
+    return _json({"commands": [], "models": models, "source": "session", "defaults": {}})
+
+
+async def h_context_limits(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    context = hub.harnesses.state(sid).get("context") or {}
+    if not context.get("window"):
+        return _err(503, "context window unknown")
+    return _json({"maxTokens": context["window"], "autocompactBuffer": 0, "liveTokens": context.get("used"),
+                  "model": hub.harnesses.summary(sid).get("model"), "source": "live"})
+
+
+async def h_send(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    body = await _body(request)
+    text, attachments, message_uuid = _prompt(request, body)
+    model = body.get("model") or None
+    if model is not None and not (isinstance(model, str) and re.fullmatch(r"[A-Za-z0-9._:/-]{1,100}", model)):
+        return _err(400, "invalid model")
+    result = await request.app[DELIVERY].send(sid, text, attachments, message_uuid, model=model,
+                                              permission_mode=_harness_mode(hub, sid, body.get("permissionMode")),
+                                              effort=_harness_effort(body.get("effort")))
+    return _json({**result, "state": hub.harnesses.state(sid)})
+
+
+async def h_resume(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    result = await request.app[DELIVERY].send(sid, RESUME_TEXT, [], str(uuidlib.uuid4()))
+    return _json({**result, "state": hub.harnesses.state(sid)})
+
+
+async def h_start(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    await hub.harnesses.ensure(sid)
+    return _json({"state": hub.harnesses.state(sid)})
+
+
+async def h_stop(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    return _json({"stopped": await hub.harnesses.stop(sid), "keepAliveCleared": False})
+
+
+async def h_interrupt(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    return _json({"result": await hub.harnesses.interrupt(sid)})
+
+
+async def h_cancel(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    return _json({"result": {"cancelled": False}})
+
+
+async def h_permission(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    body = await _body(request)
+    if body.get("behavior") not in ("allow", "deny"):
+        return _err(400, "behavior must be allow or deny")
+    if not hub.harnesses.answer(sid, request.match_info["rid"], body):
+        return _err(409, "permission request is no longer pending")
+    return _json({"ok": True})
+
+
+async def h_model(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    body = await _body(request)
+    model = body.get("model") or None
+    if model is not None and not (isinstance(model, str) and re.fullmatch(r"[A-Za-z0-9._:/-]{1,100}", model)):
+        return _err(400, "invalid model")
+    await hub.harnesses.set(sid, "model", model)
+    return _json({"state": hub.harnesses.state(sid)})
+
+
+async def h_mode(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    mode = _harness_mode(hub, sid, (await _body(request)).get("mode"))
+    if mode is None:
+        return _err(400, "mode is required")
+    await hub.harnesses.set(sid, "mode", mode)
+    return _json({"state": hub.harnesses.state(sid)})
+
+
+async def h_effort(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    effort = _harness_effort((await _body(request)).get("effort"))
+    if effort is None:
+        return _err(400, "effort is required")
+    await hub.harnesses.set(sid, "effort", effort)
+    return _json({"state": hub.harnesses.state(sid)})
+
+
+async def h_rename(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    title = " ".join(str((await _body(request)).get("title") or "").split())[:200]
+    if not title:
+        return _err(400, "title is required")
+    await hub.harnesses.rename(sid, title)
+    return _json({"session": hub.harnesses.summary(sid)})
+
+
+async def h_subagents(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    return _json({"subagents": []})
+
+
+async def h_dismiss(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    await hub.clear_interrupted(sid)
+    return _json({"ok": True})
+
+
+async def h_unsupported(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    harness = hub.harnesses.harness_of(sid) or "this harness"
+    return _err(409, f"not supported for {harness} sessions")
+
+
+HARNESS_HANDLERS: dict[Any, Any] = {}       # filled in build_app: Claude Code handler -> harness handler
+
+
+@web.middleware
+async def harness_middleware(request: web.Request, handler: Any) -> web.StreamResponse:
+    sid = request.match_info.get("sid")
+    if sid and _UUID_RE.match(sid):
+        hub = request.app[HUB]
+        if hub.harnesses.has(sid):
+            return await HARNESS_HANDLERS.get(request.match_info.handler, h_unsupported)(request, hub, sid)
+    return await handler(request)
+
+
+async def harnesses(request: web.Request) -> web.Response:
+    """The other harnesses this runner can start sessions of, and whether each is ready."""
+    return _json({"harnesses": await asyncio.to_thread(request.app[HUB].harnesses.available)})
+
+
+async def harness_models(request: web.Request) -> web.Response:
+    harness = request.match_info["harness"]
+    if harness not in HARNESSES:
+        return _err(404, "unknown harness")
+    return _json({"models": await request.app[HUB].harnesses.models(harness=harness)})
+
+
 # ---- app ---------------------------------------------------------------------
 
 def build_app(cfg: Config) -> web.Application:
-    app = web.Application(middlewares=[auth_middleware], client_max_size=210 * 1024 * 1024)
+    app = web.Application(middlewares=[auth_middleware, harness_middleware], client_max_size=210 * 1024 * 1024)
     hub = Hub(cfg)
     app[CFG] = cfg
     app[HUB] = hub
@@ -867,6 +1083,15 @@ def build_app(cfg: Config) -> web.Application:
     r.add_post("/v1/uploads", upload)
     r.add_get("/v1/uploads/{uid}", upload_raw)
     r.add_get("/v1/ws", websocket)
+    r.add_get("/v1/harnesses", harnesses)
+    r.add_get(r"/v1/harnesses/{harness:[a-z]{1,16}}/models", harness_models)
+    HARNESS_HANDLERS.update({
+        session_detail: h_detail, session_items: h_items, session_image: h_image, session_commands: h_commands,
+        context_limits: h_context_limits, send_message: h_send, resume_session: h_resume, start_session: h_start,
+        stop_session: h_stop, interrupt: h_interrupt, cancel_message: h_cancel, answer_permission: h_permission,
+        set_model: h_model, set_mode: h_mode, set_effort: h_effort, rename_session: h_rename,
+        session_subagents: h_subagents, dismiss_interrupted: h_dismiss,
+    })
     return app
 
 

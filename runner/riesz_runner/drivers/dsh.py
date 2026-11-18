@@ -62,6 +62,7 @@ MODES = [
     Mode("danger-full-access", "完全访问", "不受沙箱限制"),
 ]
 DEFAULT_MODE = "workspace-write"
+QUIET_COMMANDS = {"permission"}
 
 TOOL_NAMES = {
     "bash": "Bash", "edit": "Edit", "read": "Read", "read_image": "Read", "write": "Write", "glob": "Glob", "grep": "Grep",
@@ -97,6 +98,7 @@ class DshEvents:
         self.jobs: dict[str, dict[str, Any]] = {}          # running jobs by id
         self.results: set[str] = set()                     # tool calls that already have a result
         self.last_turn_end: dict[str, Any] | None = None
+        self.quiet: set[str] = set()                       # commands not shown
 
     def apply(self, ev: dict[str, Any], *, live: bool) -> None:
         kind = ev.get("type")
@@ -139,8 +141,13 @@ class DshEvents:
         elif kind == "permission/preset":
             self.d.mode = data.get("preset") or self.d.mode
         elif kind == "command/run":
+            if data.get("name") in QUIET_COMMANDS:
+                self.quiet.add(str(data.get("commandId")))       # how the web app sets the mode: shown by its mode picker
+                return
             items.put(command_item(f"d:cmd:{data.get('commandId')}", "/" + str(data.get("name") or ""), str(data.get("args") or "").strip()))
         elif kind == "command/done":
+            if str(data.get("commandId")) in self.quiet:
+                return
             items.put(output_item(f"d:cmd:{data.get('commandId')}:done", str(data.get("text") or ""), error=data.get("kind") != "success"))
         elif kind == "session/title":
             self.d.title = data.get("title") or self.d.title

@@ -19,6 +19,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import mimetypes
 import os
 import shlex
 import time
@@ -94,7 +95,10 @@ def map_item(item: dict[str, Any], *, model: str | None = None, ts: str | None =
     key = f"c:{item.get('id')}"
     ts = ts or (iso(item["startedAtMs"] / 1000) if item.get("startedAtMs") else None)
     if kind == "userMessage":
-        return user_item(key, _text_of_input(item.get("content") or []), ts=ts, uuid=item.get("clientId"), origin="user")
+        content = item.get("content") or []
+        images = [{"ref": f"file:{c['path']}", "mediaType": mimetypes.guess_type(c["path"])[0] or "image/png"}
+                  for c in content if isinstance(c, dict) and c.get("type") == "localImage" and c.get("path")]
+        return user_item(key, _text_of_input(content), ts=ts, uuid=item.get("clientId"), origin="user", images=images)
     if kind == "agentMessage":
         return assistant_item(key, [{"type": "text", "text": item.get("text") or ""}], ts=ts, model=model, msg_id=item.get("id"))
     if kind == "plan":
@@ -488,3 +492,19 @@ def _as_list(value: Any) -> list[str]:
 
 def _has_text(item: dict[str, Any]) -> bool:
     return any((b.get("text") or "").strip() for b in item.get("blocks") or () if b.get("type") in ("text", "thinking"))
+
+
+async def probe_models(codex: str, cwd: str, env: dict[str, str]) -> list[dict[str, Any]]:
+    """Codex's model list without a session: a short-lived app-server that starts no thread."""
+    async def ignore(_driver: Driver, _event: dict[str, Any]) -> None:
+        return None
+
+    driver = CodexDriver(cwd=cwd, sink=ignore, env=env, codex=codex)
+    driver.peer = JsonRpcPeer([codex, "app-server"], cwd=cwd, env=env, version=False)
+    await driver.peer.start()
+    try:
+        await driver.peer.request("initialize", {"clientInfo": CLIENT_INFO, "capabilities": None}, timeout=60)
+        await driver.peer.notify("initialized")
+        return await driver.models()
+    finally:
+        await driver.peer.stop()

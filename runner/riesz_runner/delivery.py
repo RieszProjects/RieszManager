@@ -71,6 +71,11 @@ class Delivery:
         """Deliver a prompt. Returns {"uuid", "held": bool}."""
         options = {"model": model, "permission_mode": permission_mode, "effort": effort}
         await self.hub.clear_interrupted(session_id)  # the user has taken it up again
+        if self.hub.harnesses.has(session_id):
+            result = await self.hub.harnesses.send(session_id, text, attachments, message_uuid,
+                                                   model=model, mode=permission_mode, effort=effort)
+            self.history.record(text, self.hub.harnesses.records[session_id].get("cwd"), session_id)
+            return result
         proc = self.hub.get_hosted(session_id)
         if proc is None:
             live = self.hub.live.get(session_id)

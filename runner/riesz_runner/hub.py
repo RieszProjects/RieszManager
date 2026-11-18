@@ -24,6 +24,7 @@ from .subagents import SubagentStore
 from .usage import UsageMonitor
 from .attention import LONG_TURN_SECONDS, describe_request, session_title
 from .store import SessionStore
+from .harnesses import Harnesses
 
 if TYPE_CHECKING:
     from .delivery import Delivery
@@ -71,6 +72,8 @@ class Hub:
         self.reload_ready = asyncio.Event()
         self._working_file = cfg.state_dir / "working.json"
         self._working_saved: set[str] | None = None
+        # Sessions of other harnesses (Codex, DeepSeek Harness): see harnesses.py.
+        self.harnesses = Harnesses(self)
 
     # ---- lifecycle ----------------------------------------------------------
 
@@ -86,6 +89,7 @@ class Hub:
             asyncio.create_task(self._index_loop()),
             asyncio.create_task(self._reap_loop()),
             asyncio.create_task(self._keep_alive_loop()),
+            asyncio.create_task(self.harnesses.loop()),
         ]
 
     # ---- graceful reload ------------------------------------------------------
@@ -99,13 +103,14 @@ class Hub:
     def _all_idle(self) -> bool:
         if self.delivery is not None and self.delivery.held:
             return False
-        return all(not p.alive or not p.working for p in self.hosted.values())
+        return all(not p.alive or not p.working for p in self.hosted.values()) and not self.harnesses.working()
 
     async def _reload_when_idle(self) -> None:
         last_note = 0.0
         while True:
             if time.time() - last_note > 300:
-                working = [sid[:8] for sid, p in self.hosted.items() if p.alive and p.working]
+                working = [sid[:8] for sid, p in self.hosted.items() if p.alive and p.working] + \
+                    [sid[:8] for sid in self.harnesses.working_ids()]
                 if working:
                     log.info("reload waiting for sessions with work in progress: %s", ", ".join(working))
                 last_note = time.time()
@@ -122,7 +127,7 @@ class Hub:
     async def close(self) -> None:
         for task in self._tasks:
             task.cancel()
-        await asyncio.gather(*(p.stop() for p in list(self.hosted.values())), return_exceptions=True)
+        await asyncio.gather(*(p.stop() for p in list(self.hosted.values())), self.harnesses.close(), return_exceptions=True)
 
     # ---- subscriptions ------------------------------------------------------
 
@@ -279,7 +284,7 @@ class Hub:
             await asyncio.sleep(WORKING_SNAPSHOT_INTERVAL)
             if self.reload_ready.is_set():
                 continue
-            self._save_working({sid for sid, p in self.hosted.items() if p.alive and p.working})
+            self._save_working({sid for sid, p in self.hosted.items() if p.alive and p.working} | set(self.harnesses.working_ids()))
 
     async def clear_interrupted(self, session_id: str) -> None:
         if self.prefs.set_interrupted(session_id, None):
@@ -356,6 +361,8 @@ class Hub:
         return out
 
     def session_summary(self, session_id: str) -> dict[str, Any]:
+        if self.harnesses.has(session_id):
+            return self.harnesses.summary(session_id)
         entry = self.store.entries.get(session_id)
         data = entry.summary() if entry else {"sessionId": session_id}
         data["project"] = self.projects.project_id_for(data.get("cwd"))
@@ -417,6 +424,8 @@ class Hub:
         return state
 
     def session_state(self, session_id: str) -> dict[str, Any]:
+        if self.harnesses.has(session_id):
+            return self.harnesses.state(session_id)
         hosted = self.hosted.get(session_id)
         if hosted is not None and hosted.alive:
             return self._with_meta(session_id, hosted.snapshot())

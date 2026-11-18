@@ -35,6 +35,8 @@ ROUTES: list[tuple[str, re.Pattern[str], str]] = [
         ("POST", r"^schedules$", "/v1/schedules"),
         ("POST", r"^schedules/(?P<id>[0-9a-f]{1,32})/(?P<action>update|run|delete)$", "/v1/schedules/{id}/{action}"),
         ("GET", r"^commands$", "/v1/commands"),
+        ("GET", r"^harnesses$", "/v1/harnesses"),
+        ("GET", r"^harnesses/(?P<harness>[a-z]{1,16})/models$", "/v1/harnesses/{harness}/models"),
         ("GET", rf"^sessions/(?P<sid>{UUID})$", "/v1/sessions/{sid}"),
         ("GET", rf"^sessions/(?P<sid>{UUID})/items$", "/v1/sessions/{sid}/items"),
         ("GET", rf"^sessions/(?P<sid>{UUID})/subagents$", "/v1/sessions/{sid}/subagents"),

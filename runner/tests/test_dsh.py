@@ -112,8 +112,8 @@ class ReplayTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any(t["description"] == "cat hello.txt" for t in self.driver.tasks.values()))
 
     async def test_permission_command(self):
-        commands = [i for i in self.items if i["kind"] == "command"]
-        self.assertEqual((commands[0]["name"], commands[0]["args"]), ("/permission", "read-only"))
+        # `/permission` is how the mode picker sets dsh's mode: the picker shows it, the conversation does not.
+        self.assertFalse([i for i in self.items if i["kind"] in ("command", "output")])
         self.assertEqual(self.driver.mode, "read-only")
 
     async def test_results_and_usage(self):
