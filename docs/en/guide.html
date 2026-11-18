@@ -29,7 +29,7 @@
     <div class="toc-title">Docs</div>
     <ul class="toc-site"><li><a href="index.html">Introduction</a></li><li><a href="quickstart.html">Quickstart</a></li><li><a href="guide.html" class="current">User Guide</a></li><li><a href="deploy.html">Deployment</a></li></ul>
     <div class="toc-title">On this page</div>
-    <ul class="toc-page"><li class="l2"><a href="#layout">Interface overview</a></li><li class="l2"><a href="#conversation">Conversation</a></li><li class="l2"><a href="#composer">Composer</a></li><li class="l2"><a href="#modes">Permission modes and models</a></li><li class="l2"><a href="#prompts">Approvals and questions</a></li><li class="l2"><a href="#context">Context usage</a></li><li class="l2"><a href="#sessions">Managing sessions</a></li><li class="l2"><a href="#terminal">Terminal sessions</a></li><li class="l2"><a href="#spawn">Starting sessions from other sessions</a></li><li class="l2"><a href="#schedules">Scheduled wake-ups</a></li><li class="l2"><a href="#files">Project files</a></li><li class="l2"><a href="#push">Push notifications</a></li><li class="l2"><a href="#doll">Riesz doll</a></li><li class="l2"><a href="#mobile">Using on mobile</a></li><li class="l2"><a href="#settings">Settings</a></li><li class="l2"><a href="#shortcuts">Keyboard shortcuts</a></li><li class="l2"><a href="#faq">FAQ</a></li></ul>
+    <ul class="toc-page"><li class="l2"><a href="#layout">Interface overview</a></li><li class="l2"><a href="#conversation">Conversation</a></li><li class="l2"><a href="#composer">Composer</a></li><li class="l2"><a href="#modes">Permission modes and models</a></li><li class="l2"><a href="#harnesses">Codex and DeepSeek Harness</a></li><li class="l2"><a href="#prompts">Approvals and questions</a></li><li class="l2"><a href="#context">Context usage</a></li><li class="l2"><a href="#sessions">Managing sessions</a></li><li class="l2"><a href="#terminal">Terminal sessions</a></li><li class="l2"><a href="#spawn">Starting sessions from other sessions</a></li><li class="l2"><a href="#schedules">Scheduled wake-ups</a></li><li class="l2"><a href="#files">Project files</a></li><li class="l2"><a href="#push">Push notifications</a></li><li class="l2"><a href="#doll">Riesz doll</a></li><li class="l2"><a href="#mobile">Using on mobile</a></li><li class="l2"><a href="#settings">Settings</a></li><li class="l2"><a href="#shortcuts">Keyboard shortcuts</a></li><li class="l2"><a href="#faq">FAQ</a></li></ul>
   </aside>
   <article>
 <h1>User Guide</h1>
@@ -96,6 +96,22 @@
 <figure><img class="shot medium" src="../assets/shots/mode.webp" alt="Permission mode menu listing Ask every time, Auto-accept edits, Plan mode, and other options" loading="lazy"><figcaption>Switch permission modes from the menu or with <kbd>Shift</kbd>+<kbd>Tab</kbd>.</figcaption></figure>
 <p>Click the model button on the right to choose any model supported by Claude Code, and pick the reasoning effort on the row below (<code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, <code>max</code>; available levels depend on the model).</p>
 <figure><img class="shot medium" src="../assets/shots/model.webp" alt="Model and reasoning effort menu with the model list on top and effort levels at the bottom" loading="lazy"><figcaption>Choose the model and reasoning effort.</figcaption></figure>
+
+<h2 id="harnesses">Codex and DeepSeek Harness</h2>
+<p>Besides Claude Code, a session can run on <a href="https://github.com/openai/codex">Codex</a> or DeepSeek Harness (<code>dsh</code>). A new session's composer has one more button for choosing the tool; tools that are not installed or not set up are greyed out, with the reason on hover (see <a href="deploy.html#harnesses">Deployment: Codex and DeepSeek Harness</a>). These sessions carry the tool's name as a tag in the session list and under the title.</p>
+<p>Conversations, permission cards, questions, attachments, interrupting and scheduled wake-ups work as in Claude Code sessions; the permission modes and models are each tool's own:</p>
+<div class="wrap"><table style="--first-col: 9em">
+<tr><th>Tool</th><th>Permission modes</th></tr>
+<tr><td>Codex</td><td>"Read only" may only read files and asks before editing or going online; "Auto" may edit files in the workspace and run commands, and asks before going outside the workspace or online; "Full access" is not sandboxed and does not ask.</td></tr>
+<tr><td>DeepSeek Harness</td><td>"Read only" asks before writing files; "Workspace write" may edit files in the workspace and run commands, and asks before going outside it; "Full access" is not sandboxed.</td></tr>
+</table></div>
+<p>How they differ from Claude Code sessions:</p>
+<ul>
+  <li>A message sent while Codex works joins the turn in progress; DeepSeek Harness takes it after the turn ends.</li>
+  <li>Codex's permission cards have one more button, "Allow for this session".</li>
+  <li>DeepSeek Harness replies appear a step at a time rather than word by word, and interrupting restarts its process on the same session. Changing its model or reasoning effort restarts it too: right away when idle, after the turn when working.</li>
+  <li>There are no slash commands, subagent lists, forking or "Keep running". "Copy terminal resume command" gives <code>codex resume</code> or <code>dsh tui --resume</code>.</li>
+</ul>
 
 <h2 id="prompts">Approvals and questions</h2>
 <p>When Claude wants to perform an action that needs permission, a confirmation card appears at the bottom of the conversation (for example, “Allow command?” (允许 命令?)) with three buttons:</p>
