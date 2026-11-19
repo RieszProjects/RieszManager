@@ -886,3 +886,6 @@ body.rz-dragging, body.rz-dragging * { cursor: grabbing !important; user-select:
 .rz-key-row > .rz-settings-row { border-bottom: none; }
 .rz-key-main { min-width: 0; }
 .rz-key-form { display: flex; flex-direction: column; gap: 10px; padding: 0 0 14px; }
+.rz-tag.harness-gemini { color: #c3b2e0; background: rgba(160, 136, 204, 0.12); border-color: rgba(160, 136, 204, 0.32); }
+.rz-chip.mode-yolo { color: #e09a8e; border-color: rgba(196, 110, 98, 0.45); }
+.rz-chip.mode-autoEdit { color: var(--sage-strong); border-color: rgba(147, 168, 140, 0.3); }

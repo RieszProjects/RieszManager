@@ -54,9 +54,10 @@ function QueueBar({ sessionId, queue }: { sessionId: string; queue: QueueEntry[]
 }
 
 /** How to continue a session in a terminal, by harness. */
-function resumeCommand(harness: string | null | undefined, sessionId: string): string {
+function resumeCommand(harness: string | null | undefined, sessionId: string): string | null {
   if (harness === "codex") return `codex resume ${sessionId}`;
   if (harness === "dsh") return `dsh tui --resume ${sessionId}`;
+  if (harness === "gemini") return null;       // its --resume takes a list position, not the session id
   return `claude --resume ${sessionId}`;
 }
 
@@ -139,12 +140,14 @@ function SessionMenu({ sessionId, state, cwd, title, keepAlive, harness }: {
         })}>
           <ListItemIcon><Copy size={16} /></ListItemIcon>复制会话 ID
         </MenuItem>
-        <MenuItem onClick={() => run(async () => {
-          const cmd = `${cwd ? `cd ${JSON.stringify(cwd)} && ` : ""}${resumeCommand(harness, sessionId)}`;
-          if (await copyText(cmd)) toast("已复制终端恢复命令", "success");
-        })}>
-          <ListItemIcon><SquareTerminal size={16} /></ListItemIcon>复制终端恢复命令
-        </MenuItem>
+        {resumeCommand(harness, sessionId) && (
+          <MenuItem onClick={() => run(async () => {
+            const cmd = `${cwd ? `cd ${JSON.stringify(cwd)} && ` : ""}${resumeCommand(harness, sessionId)}`;
+            if (await copyText(cmd)) toast("已复制终端恢复命令", "success");
+          })}>
+            <ListItemIcon><SquareTerminal size={16} /></ListItemIcon>复制终端恢复命令
+          </MenuItem>
+        )}
       </Menu>
     </>
   );

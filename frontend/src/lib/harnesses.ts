@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/api/client";
 import type { ApiRoute, HarnessInfo, ModelInfo } from "@/api/types";
 
-const SHORT: Record<string, string> = { claude: "Claude Code", codex: "Codex", dsh: "DeepSeek" };
+const SHORT: Record<string, string> = { claude: "Claude Code", codex: "Codex", dsh: "DeepSeek", gemini: "Gemini" };
 
 /** A short name for tags and placeholders. */
 export function harnessLabel(id: string | null | undefined): string {
@@ -87,6 +87,6 @@ const PROVIDER_NAMES: Record<string, string> = { anthropic: "Anthropic", openai:
 export function routeTag(route: string | null | undefined, harness?: string | null): string | null {
   if (!route || route.endsWith(":subscription")) return null;
   const provider = route.split(":")[0];
-  if (harness === "dsh" && provider === "deepseek") return null;
+  if ((harness === "dsh" && provider === "deepseek") || (harness === "gemini" && provider === "gemini")) return null;
   return `${PROVIDER_NAMES[provider] ?? provider} API`;
 }

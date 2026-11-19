@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 from .drivers.base import Driver
 from .drivers.codex import CodexDriver, probe_models
 from .drivers.dsh import EFFORTS, DshDriver
+from .drivers.gemini import GeminiDriver, settings_file
 from .drivers.jsonrpc import JsonRpcError
 from . import routes
 from .attention import LONG_TURN_SECONDS, describe_request
@@ -49,6 +50,7 @@ HARNESSES: dict[str, dict[str, Any]] = {
     # "arg": the driver's keyword for the executable's path.
     "codex": {"name": "Codex", "bin": "codex", "arg": "codex", "driver": CodexDriver},
     "dsh": {"name": "DeepSeek Harness", "bin": "dsh", "arg": "dsh", "driver": DshDriver},
+    "gemini": {"name": "Gemini CLI", "bin": "gemini", "arg": "gemini", "driver": GeminiDriver},
 }
 
 
@@ -85,7 +87,7 @@ class Harnesses:
     # ---- what is available ------------------------------------------------------------
 
     def bin(self, harness: str) -> str | None:
-        configured = {"codex": self.cfg.codex_bin, "dsh": self.cfg.dsh_bin}.get(harness)
+        configured = {"codex": self.cfg.codex_bin, "dsh": self.cfg.dsh_bin, "gemini": self.cfg.gemini_bin}.get(harness)
         return find_bin(HARNESSES[harness]["bin"], configured or None)
 
     async def available(self) -> list[dict[str, Any]]:
@@ -102,7 +104,7 @@ class Harnesses:
             if path is None:
                 reason = f"{spec['bin']} 没有安装"
             elif hid in routes.ROUTES and not any(r["available"] for r in described):
-                reason = "没有可用的订阅或 API key"
+                reason = described[0]["reason"] if len(described) == 1 else "没有可用的订阅或 API key"
             out.append({"id": hid, "name": spec["name"], "available": reason is None, "reason": reason, "routes": described,
                         "modes": [m.__dict__ for m in sample.modes()], "defaultMode": sample.mode,
                         "defaultModel": sample.model, "capabilities": driver_cls.capabilities.as_dict()})
@@ -317,6 +319,8 @@ class Harnesses:
         elif harness == "dsh":
             extra["provider"] = routes.dsh_provider(route)
             extra["patch"] = await self._patch(harness, session_id, route)
+        elif harness == "gemini":
+            extra["settings"] = settings_file(self.cfg.state_dir)
         return spec["driver"](cwd=cwd, sink=self._sink, session_id=session_id, model=model, effort=effort, mode=mode,
                               env=await self._env(harness, route), **extra)
 
@@ -329,7 +333,7 @@ class Harnesses:
         if not Path(cwd).is_dir():
             raise ControlError("directory does not exist")
         route = await self._route(harness, api)
-        session_id = None if harness == "codex" else str(uuidlib.uuid4())   # Codex names its threads itself
+        session_id = None if harness in ("codex", "gemini") else str(uuidlib.uuid4())   # these name their sessions
         driver = await self._make(harness, cwd=cwd, session_id=session_id, route=route, model=model, effort=effort, mode=mode)
         await driver.start()
         sid = str(driver.session_id)

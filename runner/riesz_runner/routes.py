@@ -15,6 +15,9 @@ session takes the first one that is available unless told otherwise.
   bundled pi-ai adapter, mounted with a `--patch` file. API keys only: dsh
   could also sign in to subscriptions, but using those outside their own apps
   is against the providers' terms.
+- Gemini CLI: a Gemini API key (GEMINI_API_KEY). Its Google sign-in is not used:
+  personal accounts moved to Antigravity CLI, and Google's terms rule out using
+  a Gemini CLI login from other software.
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ ROUTES: dict[str, list[str]] = {
     "claude": ["anthropic:subscription", "anthropic:key", "deepseek:key"],
     "codex": ["openai:subscription", "openai:key", "deepseek:key"],
     "dsh": ["deepseek:key", "openai:key", "anthropic:key", "gemini:key"],
+    "gemini": ["gemini:key"],
 }
 
 DEEPSEEK_ANTHROPIC_URL = "https://api.deepseek.com/anthropic"

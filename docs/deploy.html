@@ -29,7 +29,7 @@
     <div class="toc-title">文档</div>
     <ul class="toc-site"><li><a href="index.html">前言</a></li><li><a href="quickstart.html">快速上手</a></li><li><a href="guide.html">使用指南</a></li><li><a href="deploy.html" class="current">部署教程</a></li></ul>
     <div class="toc-title">本页</div>
-    <ul class="toc-page"><li class="l2"><a href="#overview">组件与要求</a></li><li class="l2"><a href="#get-code">获取代码</a></li><li class="l2"><a href="#configure">填写配置</a></li><li class="l2"><a href="#runner">安装runner</a></li><li class="l2"><a href="#containers">启动容器</a></li><li class="l2"><a href="#https">配置HTTPS</a></li><li class="l3"><a href="#https-cloudflare">Cloudflare Tunnel（推荐）</a></li><li class="l3"><a href="#https-caddy">Caddy</a></li><li class="l3"><a href="#https-nginx">已有的nginx</a></li><li class="l2"><a href="#account">账号与两步验证</a></li><li class="l2"><a href="#push">推送通知</a></li><li class="l2"><a href="#balances">其他服务的余额</a></li><li class="l2"><a href="#harnesses">Codex 与 DeepSeek Harness</a></li><li class="l2"><a href="#upgrade">升级</a></li><li class="l2"><a href="#backup">备份</a></li><li class="l2"><a href="#security">安全说明</a></li><li class="l2"><a href="#troubleshoot">排错</a></li><li class="l2"><a href="#uninstall">卸载</a></li><li class="l2"><a href="#env">环境变量参考</a></li><li class="l3"><a href="#env-account">账号</a></li><li class="l3"><a href="#env-secrets">密钥</a></li><li class="l3"><a href="#env-network">网络</a></li><li class="l3"><a href="#env-throttle">登录限流</a></li><li class="l3"><a href="#env-runner">宿主机用户与runner</a></li><li class="l3"><a href="#env-voice">语音输入（可选）</a></li><li class="l3"><a href="#env-misc">其他</a></li><li class="l3"><a href="#env-push">推送通知（可选）</a></li></ul>
+    <ul class="toc-page"><li class="l2"><a href="#overview">组件与要求</a></li><li class="l2"><a href="#get-code">获取代码</a></li><li class="l2"><a href="#configure">填写配置</a></li><li class="l2"><a href="#runner">安装runner</a></li><li class="l2"><a href="#containers">启动容器</a></li><li class="l2"><a href="#https">配置HTTPS</a></li><li class="l3"><a href="#https-cloudflare">Cloudflare Tunnel（推荐）</a></li><li class="l3"><a href="#https-caddy">Caddy</a></li><li class="l3"><a href="#https-nginx">已有的nginx</a></li><li class="l2"><a href="#account">账号与两步验证</a></li><li class="l2"><a href="#push">推送通知</a></li><li class="l2"><a href="#balances">其他服务的余额</a></li><li class="l2"><a href="#harnesses">其他工具：Codex、DeepSeek Harness 与 Gemini CLI</a></li><li class="l2"><a href="#upgrade">升级</a></li><li class="l2"><a href="#backup">备份</a></li><li class="l2"><a href="#security">安全说明</a></li><li class="l2"><a href="#troubleshoot">排错</a></li><li class="l2"><a href="#uninstall">卸载</a></li><li class="l2"><a href="#env">环境变量参考</a></li><li class="l3"><a href="#env-account">账号</a></li><li class="l3"><a href="#env-secrets">密钥</a></li><li class="l3"><a href="#env-network">网络</a></li><li class="l3"><a href="#env-throttle">登录限流</a></li><li class="l3"><a href="#env-runner">宿主机用户与runner</a></li><li class="l3"><a href="#env-voice">语音输入（可选）</a></li><li class="l3"><a href="#env-misc">其他</a></li><li class="l3"><a href="#env-push">推送通知（可选）</a></li></ul>
   </aside>
   <article>
 <h1>部署教程</h1>
@@ -190,13 +190,15 @@ cd RieszManager
 </ul>
 <p>这个文件里有你的key怎么取的信息，建议设成只有自己能读（<code>chmod 600</code>）。</p>
 
-<h2 id="harnesses">Codex 与 DeepSeek Harness</h2>
-<p>想在网页里开Codex或DeepSeek Harness的会话，在runner所在的机器上用runner的用户装好它们即可，不用改Docker配置。runner会在<code>PATH</code>里、以及nvm装的Node目录里找<code>codex</code>和<code>dsh</code>，也可以用<code>RUNNER_CODEX_BIN</code>、<code>RUNNER_DSH_BIN</code>指定路径。装好后刷新网页就能在新会话里选到，不用重启runner。</p>
+<h2 id="harnesses">其他工具：Codex、DeepSeek Harness 与 Gemini CLI</h2>
+<p>想在网页里开这些工具的会话，在runner所在的机器上用runner的用户装好它们即可，不用改Docker配置。runner会在<code>PATH</code>里、以及nvm装的Node目录里找<code>codex</code>、<code>dsh</code>和<code>gemini</code>，也可以用<code>RUNNER_CODEX_BIN</code>、<code>RUNNER_DSH_BIN</code>、<code>RUNNER_GEMINI_BIN</code>指定路径。装好后刷新网页就能在新会话里选到，不用重启runner。</p>
 <ul>
-  <li><b>Codex</b>：<code>npm install -g @openai/codex</code>，再运行一次<code>codex login</code>登录（ChatGPT账号或OpenAI API key）。runner通过<code>codex app-server</code>和它通信。</li>
-  <li><b>DeepSeek Harness</b>：<code>npm install -g @deepseek-ai/dsh</code>。它用DeepSeek的API key：runner每次启动<code>dsh</code>前运行<code>RUNNER_DSH_KEY_COMMAND</code>取key（没设时用<a href="#balances"><code>balances.json</code></a>里<code>deepseek</code>那一项的<code>keyCommand</code>），只通过环境变量交给<code>dsh</code>，不落盘；<code>dsh</code>运行的命令里看不到这个变量。<code>dsh</code>在用官方API时默认会把会话日志附在请求里，不想上传的话在<code>~/.dsh/cordis.patch.yml</code>里关掉<code>session-log-deepseek</code>。</li>
+  <li><b>Codex</b>：<code>npm install -g @openai/codex</code>。要用ChatGPT订阅的话运行一次<code>codex login</code>；也可以只用「设置 → 模型 API」里的OpenAI或DeepSeek key。runner通过<code>codex app-server</code>和它通信。</li>
+  <li><b>DeepSeek Harness</b>：<code>npm install -g @deepseek-ai/dsh</code>，再在「设置 → 模型 API」里设好DeepSeek（或OpenAI、Anthropic、Gemini）的key。<code>dsh</code>在用DeepSeek官方API时默认会把会话日志附在请求里，不想上传的话在<code>~/.dsh/cordis.patch.yml</code>里关掉<code>session-log-deepseek</code>。</li>
+  <li><b>Gemini CLI</b>：<code>npm install -g @google/gemini-cli</code>，再设好Gemini的key。runner通过<code>gemini --acp</code>和它通信，并给这些进程一份自己的系统设置（选API key登录、让它运行的命令看不到key变量、关掉使用统计），不改你自己的Gemini CLI设置。</li>
   <li><b>Codex的沙箱</b>：Codex在「只读」「自动」模式下用bubblewrap把命令关进沙箱。Ubuntu 23.10以后默认限制非特权用户命名空间（<code>kernel.apparmor_restrict_unprivileged_userns=1</code>），沙箱起不来，每条命令都会先问你能不能在沙箱外运行。要让沙箱正常工作，需要为bubblewrap加一个允许<code>userns</code>的AppArmor配置，或者关掉这项限制（会放宽整台机器的安全设置）。</li>
 </ul>
+<p>「设置 → 模型 API」里的key保存在runner状态目录：用命令获取的只记命令（<code>credentials.json</code>），直接粘贴的key写在<code>keys/</code>里，只有runner的用户能读。工具启动时才取key：Claude Code通过它的<code>apiKeyHelper</code>设置拿到，其他工具通过只给那个进程的环境变量拿到；Codex、DeepSeek Harness和Gemini CLI运行的命令里都看不到这些变量。</p>
 
 <h2 id="upgrade">升级</h2>
 <p>拉取新代码后，依次更新runner和容器：</p>
@@ -302,8 +304,7 @@ cd RieszManager
 <tr><td><code>RUNNER_CROSS_SESSION_INBOUND</code></td><td><code>accept</code></td><td>网页端会话如何处理来自其他会话的消息（Claude Code的<code>crossSessionInbound</code>设置）。权限模式不同的会话之间，消息默认会扣住等用户批准，但无头运行的会话没有人能批准，消息会过期作废；设为<code>accept</code>直接接收。也可以设为<code>hold</code>、<code>refuse</code>；留空则沿用你自己的Claude Code设置</td></tr>
 <tr><td><code>RUNNER_BALANCES_FILE</code></td><td>（空）</td><td>莉思玩偶显示的其他服务余额的配置文件，默认是<code>RUNNER_STATE_DIR</code>下的<code>balances.json</code>，见<a href="#balances">其他服务的余额</a>。</td></tr>
 <tr><td><code>RUNNER_PERMISSION_TIMEOUT</code></td><td><code>1800</code></td><td>确认请求或提问多少秒没人回应就自动拒绝，并告诉Claude用户暂时不在、让它换别的办法继续；<code>0</code>表示一直等。</td></tr>
-<tr><td><code>RUNNER_CODEX_BIN</code>、<code>RUNNER_DSH_BIN</code></td><td>空（自动检测）</td><td><code>codex</code>、<code>dsh</code>可执行文件的路径，见<a href="#harnesses">Codex 与 DeepSeek Harness</a></td></tr>
-<tr><td><code>RUNNER_DSH_KEY_COMMAND</code></td><td>空</td><td>输出DeepSeek API key的命令（在runner用户的登录shell里运行，取最后一个非空行）；留空时用<code>balances.json</code>里<code>deepseek</code>的<code>keyCommand</code></td></tr>
+<tr><td><code>RUNNER_CODEX_BIN</code>、<code>RUNNER_DSH_BIN</code>、<code>RUNNER_GEMINI_BIN</code></td><td>空（自动检测）</td><td><code>codex</code>、<code>dsh</code>、<code>gemini</code>可执行文件的路径，见<a href="#harnesses">其他工具</a></td></tr>
 <tr><td><code>RUNNER_AUTO_ALLOW_REMOVALS</code></td><td><code>false</code></td><td>在「跳过权限」模式下，Claude Code排除不了危险删除时仍会弹出确认。打开后这类确认自动放行，除非命令可能删到系统文件：删除的东西必须都在工作区里、<code>/tmp</code>或<code>/var/tmp</code>里，或者家目录里不带点的地方；删除目标算不出来的（比如以未知变量开头的路径、<code>xargs rm</code>）也留给你确认。</td></tr>
 <tr><td><code>RUNNER_ALLOW_EXTERNAL_FILES</code></td><td><code>false</code></td><td>是否允许浏览目录位于<code>WORKSPACE_ROOT</code>之外的会话的文件</td></tr>
 <tr><td><code>RUNNER_MAX_FILE_BYTES</code></td><td><code>2097152</code></td><td>文件查看器中允许显示的最大文件大小（字节）</td></tr>

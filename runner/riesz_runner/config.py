@@ -90,6 +90,7 @@ class Config:
     # Other harnesses (harnesses.py): their executables (empty: found on PATH or in nvm).
     codex_bin: str = ""
     dsh_bin: str = ""
+    gemini_bin: str = ""
     extra_args: list[str] = field(default_factory=list)
 
     @property
@@ -162,5 +163,6 @@ def load_config(env_file: str | None = None) -> Config:
         permission_timeout=max(0, int(env.get("RUNNER_PERMISSION_TIMEOUT") or 1800)),
         codex_bin=env.get("RUNNER_CODEX_BIN") or "",
         dsh_bin=env.get("RUNNER_DSH_BIN") or "",
+        gemini_bin=env.get("RUNNER_GEMINI_BIN") or "",
         extra_args=extra,
     )
