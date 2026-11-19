@@ -62,6 +62,18 @@ function RecentList({ query }: { query: string }) {
   );
 }
 
+/** A runner reload waiting for sessions to finish what they are doing. */
+function ReloadWait({ reload }: { reload: { since: number | null; waitingFor: string[] } }) {
+  const sessions = useApp((s) => s.sessions);
+  const names = reload.waitingFor.map((sid) => sessionTitle(sessions[sid]) || sid.slice(0, 8));
+  const title = `runner 的重启在等${names.length ? `这些会话空闲：${names.join("、")}` : "会话空闲"}${reload.since ? `，从${relativeTime(reload.since)}开始` : ""}`;
+  return (
+    <Tooltip title={title}>
+      <span className="rz-reload-wait">等待重启</span>
+    </Tooltip>
+  );
+}
+
 export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
   const [query, setQuery] = useState("");
   const tab = useUi((s) => s.sidebarTab);
@@ -73,6 +85,7 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
   const setSettingsOpen = useUi((s) => s.setSettingsOpen);
   const socketState = useApp((s) => s.socketState);
   const runnerOnline = useApp((s) => s.runnerOnline);
+  const reload = useApp((s) => s.reload);
   const sessionsCount = useApp((s) => Object.keys(s.sessions).length);
   const lastActivity = useApp((s) => Math.max(0, ...Object.values(s.sessions).map((x) => x.mtime)));
 
@@ -113,6 +126,7 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
         <Tooltip title={online ? `已连接 · ${sessionsCount} 个会话 · 最近活动 ${relativeTime(lastActivity)}` : runnerOnline ? "正在重新连接…" : "宿主机运行器未连接"}>
           <span className={`rz-conn${online ? " on" : ""}`}>{online ? <Wifi size={14} /> : <WifiOff size={14} />}{online ? "已连接" : "未连接"}</span>
         </Tooltip>
+        {online && reload && <ReloadWait reload={reload} />}
         <div className="rz-spacer" />
         <Tooltip title="设置">
           <IconButton size="small" onClick={() => setSettingsOpen(true)}><Settings size={17} /></IconButton>

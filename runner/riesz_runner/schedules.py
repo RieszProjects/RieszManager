@@ -244,7 +244,9 @@ class Scheduler:
             await asyncio.sleep(CHECK_INTERVAL)
 
     async def _tick(self) -> None:
-        if self.hub.reload_pending or self.hub.reload_ready.is_set():
+        # Only while the runner is actually restarting. A reload waiting for busy sessions can wait
+        # for days on a busy machine; schedules must not stop with it.
+        if self.hub.reload_ready.is_set():
             return
         now = time.time()
         changed = False

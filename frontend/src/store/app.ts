@@ -12,6 +12,8 @@ interface AppStore {
   live: Record<string, LiveInfo>;
   socketState: "connecting" | "open" | "closed";
   runnerOnline: boolean;
+  /** A runner reload waiting for busy sessions to be idle. */
+  reload: { since: number | null; waitingFor: string[] } | null;
 
   loadConfig: () => Promise<void>;
   loadProjects: () => Promise<void>;
@@ -53,6 +55,7 @@ export const useApp = create<AppStore>((set, get) => ({
   live: {},
   socketState: "connecting",
   runnerOnline: true,
+  reload: null,
 
   loadConfig: async () => {
     const config = await api<AppConfig>("config");
@@ -110,6 +113,9 @@ export const useApp = create<AppStore>((set, get) => ({
         break;
       case "runner_unavailable":
         set({ runnerOnline: false });
+        break;
+      case "reload":
+        set({ reload: event.pending ? { since: event.since ?? null, waitingFor: event.waitingFor ?? [] } : null });
         break;
       default:
         break;

@@ -403,6 +403,8 @@ export interface AuthState {
 /** Events pushed over the WebSocket. */
 export type ServerEvent =
   | { ev: "live"; live: LiveProcess[] }
+  /** A runner reload waiting until the sessions it lists are idle (pending false: none). */
+  | { ev: "reload"; pending: boolean; since?: number | null; waitingFor?: string[] }
   | { ev: "sessions"; sessions: SessionSummary[]; removed: string[] }
   | { ev: "session_live"; sessionId: string; live: LiveInfo | null }
   | {

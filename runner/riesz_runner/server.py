@@ -843,6 +843,7 @@ async def websocket(request: web.Request) -> web.WebSocketResponse:
                 hub.subscribe_global(sub)
                 global_subscribed = True
                 queue.put_nowait({"ev": "live", "live": hub.live_list()})
+                queue.put_nowait(hub.reload_info())
             elif op == "sub":
                 sid = str(data.get("sessionId") or "")
                 if not _UUID_RE.match(sid):

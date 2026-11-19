@@ -71,6 +71,7 @@ class Hub:
         # Sessions to keep running: (last start attempt, consecutive quick deaths).
         self._revive_state: dict[str, tuple[float, int]] = {}
         self.reload_pending = False
+        self.reload_since: float | None = None
         self.reload_ready = asyncio.Event()
         self._working_file = cfg.state_dir / "working.json"
         self._working_saved: set[str] | None = None
@@ -103,7 +104,17 @@ class Hub:
         if not self.reload_pending:
             log.info("reload requested; waiting until all hosted sessions are idle")
             self.reload_pending = True
+            self.reload_since = time.time()
             self._tasks.append(asyncio.create_task(self._reload_when_idle()))
+
+    def _reload_waiting_for(self) -> list[str]:
+        return [sid for sid, p in self.hosted.items() if p.alive and p.working] + self.harnesses.working_ids()
+
+    def reload_info(self) -> dict[str, Any]:
+        """A reload waiting for sessions to be idle (shown in the web app): since when, and for which."""
+        if not self.reload_pending:
+            return {"ev": "reload", "pending": False}
+        return {"ev": "reload", "pending": True, "since": self.reload_since, "waitingFor": self._reload_waiting_for()}
 
     def _all_idle(self) -> bool:
         if self.delivery is not None and self.delivery.held:
@@ -112,12 +123,15 @@ class Hub:
 
     async def _reload_when_idle(self) -> None:
         last_note = 0.0
+        last_waiting: list[str] | None = None
         while True:
+            waiting = self._reload_waiting_for()
+            if waiting != last_waiting:
+                last_waiting = waiting
+                await self.broadcast_global(self.reload_info())
             if time.time() - last_note > 300:
-                working = [sid[:8] for sid, p in self.hosted.items() if p.alive and p.working] + \
-                    [sid[:8] for sid in self.harnesses.working_ids()]
-                if working:
-                    log.info("reload waiting for sessions with work in progress: %s", ", ".join(working))
+                if waiting:
+                    log.info("reload waiting for sessions with work in progress: %s", ", ".join(s[:8] for s in waiting))
                 last_note = time.time()
             if self._all_idle():
                 # Two consecutive idle observations, so a turn that is just starting is not cut off.
