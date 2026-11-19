@@ -1,8 +1,8 @@
 /** Harness, model and permission-mode pickers shown in the composer toolbar. */
-import { ListItemText, Menu, MenuItem } from "@mui/material";
+import { ListItemText, ListSubheader, Menu, MenuItem } from "@mui/material";
 import { Bot, Check, ChevronDown, Cpu, Shield } from "lucide-react";
 import { useState } from "react";
-import type { HarnessInfo, HarnessMode, ModelInfo } from "@/api/types";
+import type { ApiRoute, HarnessInfo, HarnessMode, ModelInfo } from "@/api/types";
 import { modelLabel, PERMISSION_MODES, permissionLabel } from "@/lib/format";
 import { harnessLabel } from "@/lib/harnesses";
 
@@ -65,7 +65,9 @@ interface HarnessProps {
 /** Which harness a new session runs on: Claude Code, or one of the others the runner offers. */
 export function HarnessPicker({ value, harnesses, onChange }: HarnessProps) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
-  const options = [{ id: "claude", name: "Claude Code", available: true, reason: null as string | null }, ...harnesses];
+  const options = harnesses.some((h) => h.id === "claude")
+    ? harnesses
+    : [{ id: "claude", name: "Claude Code", available: true, reason: null as string | null }, ...harnesses];
   return (
     <>
       <button type="button" className={`rz-chip harness-${value}`} onClick={(e) => setAnchor(e.currentTarget)} title="用哪个工具运行这个会话">
@@ -114,31 +116,62 @@ interface ModelProps {
   value: string | null | undefined;
   effort: string | null | undefined;
   models: ModelInfo[];
-  onChange: (model: string) => void;
+  /** `route`: set when the model belongs to another model API than the current one. */
+  onChange: (model: string, route?: string) => void;
   onEffort: (effort: string) => void;
   disabled?: boolean;
+  /** The model APIs the harness can run on, each with its models; the menu then lists them by API. */
+  routes?: ApiRoute[] | null;
+  route?: string | null;
+  /** Only the current API can be used (a Codex session stays on the API it started with). */
+  routeLocked?: boolean;
 }
 
-export function ModelPicker({ value, effort, models, onChange, onEffort, disabled }: ModelProps) {
+export function ModelPicker({ value, effort, models, onChange, onEffort, disabled, routes, route, routeLocked }: ModelProps) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
-  const current = resolveModel(models, value);
+  const grouped = Boolean(routes && routes.length > 1);
+  const currentRoute = routes?.find((r) => r.id === route) ?? routes?.find((r) => r.available);
+  const shown = currentRoute?.models?.length ? currentRoute.models : models;
+  const current = resolveModel(shown, value);
   const levels = current?.supportedEffortLevels?.length ? current.supportedEffortLevels : EFFORT_LEVELS;
-  const name = modelName(models, value);
+  const name = modelName(shown, value);
+  const item = (m: ModelInfo, r?: ApiRoute) => {
+    const here = !r || r.id === currentRoute?.id;
+    const on = here && m.value === current?.value;
+    return (
+      <MenuItem key={`${r?.id ?? ""}|${m.value}`} selected={on} disabled={!here && routeLocked}
+        onClick={() => { setAnchor(null); onChange(m.value, here ? undefined : r?.id); }}>
+        <ListItemText primary={m.displayName} secondary={m.description} slotProps={{ secondary: { sx: { fontSize: 12 } } }} />
+        {on && <Check size={15} />}
+      </MenuItem>
+    );
+  };
   return (
     <>
-      <button type="button" className="rz-chip" disabled={disabled || !models.length} onClick={(e) => setAnchor(e.currentTarget)} title="模型与推理强度">
+      <button type="button" className="rz-chip" disabled={disabled || (!shown.length && !grouped)} onClick={(e) => setAnchor(e.currentTarget)} title="模型与推理强度">
         <Cpu size={13} />
         <span>{effort ? `${name} · ${effort}` : name}</span>
         <ChevronDown size={12} />
       </button>
       <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => setAnchor(null)}
-        anchorOrigin={{ vertical: "top", horizontal: "left" }} transformOrigin={{ vertical: "bottom", horizontal: "left" }}>
-        {models.map((m) => (
-          <MenuItem key={m.value} selected={m.value === current?.value} onClick={() => { setAnchor(null); onChange(m.value); }}>
-            <ListItemText primary={m.displayName} secondary={m.description} slotProps={{ secondary: { sx: { fontSize: 12 } } }} />
-            {m.value === current?.value && <Check size={15} />}
-          </MenuItem>
-        ))}
+        anchorOrigin={{ vertical: "top", horizontal: "left" }} transformOrigin={{ vertical: "bottom", horizontal: "left" }}
+        slotProps={{ paper: { sx: { maxHeight: "min(70vh, 560px)" } } }}>
+        {grouped
+          ? routes!.filter((r) => r.available).flatMap((r) => [
+              <ListSubheader key={`h|${r.id}`} className="rz-route-head">
+                {r.label}{r.plan ? ` · ${r.plan}` : ""}
+                {routeLocked && r.id !== currentRoute?.id && <span className="dim">（这个会话不能换过去）</span>}
+              </ListSubheader>,
+              ...(r.models?.length
+                ? r.models.map((m) => item(m, r))
+                : [<MenuItem key={`e|${r.id}`} disabled><ListItemText primary={r.error ?? "加载中…"} /></MenuItem>]),
+            ])
+          : shown.map((m) => item(m))}
+        {grouped && routes!.some((r) => !r.available) && (
+          <div className="rz-route-off">
+            {routes!.filter((r) => !r.available).map((r) => <div key={r.id}>{r.label}：{r.reason}</div>)}
+          </div>
+        )}
         <div className="rz-effort-row" onClick={(e) => e.stopPropagation()}>
           <span className="rz-effort-label">推理强度</span>
           {levels.map((level) => (

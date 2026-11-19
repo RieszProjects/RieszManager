@@ -33,6 +33,8 @@ export interface SessionSummary {
   sessionId: string;
   /** Sessions of other harnesses ("codex", "dsh"); absent for Claude Code. */
   harness?: string;
+  /** The model API it runs on (an ApiRoute id such as "deepseek:key"); absent: the harness's own login. */
+  api?: string | null;
   cwd: string | null;
   gitBranch: string | null;
   title: string | null;
@@ -240,6 +242,22 @@ export interface HarnessCapabilities {
   backgroundTasks: boolean;
   rateLimits: boolean;
   history: boolean;
+  /** A session can move to another model API and keep its history. */
+  apiSwitch?: boolean;
+}
+
+/** A model API a harness can run on: a subscription it is logged in to, or an API key set in the settings. */
+export interface ApiRoute {
+  id: string;
+  provider: string;
+  auth: "subscription" | "key";
+  label: string;
+  available: boolean;
+  reason: string | null;
+  plan?: string | null;
+  /** The models it offers (in session and command listings). */
+  models?: ModelInfo[];
+  error?: string;
 }
 
 export interface HarnessMode {
@@ -253,10 +271,28 @@ export interface HarnessInfo {
   name: string;
   available: boolean;
   reason: string | null;
-  modes: HarnessMode[];
-  defaultMode: string | null;
-  defaultModel: string | null;
-  capabilities: HarnessCapabilities;
+  /** Claude Code's entry has none of these: the composer knows its modes and models. */
+  modes?: HarnessMode[];
+  defaultMode?: string | null;
+  defaultModel?: string | null;
+  capabilities?: HarnessCapabilities;
+  routes: ApiRoute[];
+}
+
+export interface ProviderKey {
+  id: string;
+  name: string;
+  configured: boolean;
+  source: "command" | "key" | null;
+  command: string | null;
+  updatedAt?: number | null;
+}
+
+export interface SubscriptionLogin {
+  provider: string;
+  label: string;
+  loggedIn: boolean;
+  plan: string | null;
 }
 
 export interface SessionState {
@@ -264,6 +300,7 @@ export interface SessionState {
   harness?: string;
   modes?: HarnessMode[];
   capabilities?: HarnessCapabilities;
+  api?: string | null;
   context?: { used: number; window: number | null } | null;
   keepAlive?: boolean;
   hosted: boolean;

@@ -9,14 +9,14 @@ import { api } from "@/api/client";
 import type { SessionState } from "@/api/types";
 import { composerBus } from "@/lib/composerBus";
 import { fileSize } from "@/lib/format";
-import { harnessLabel, useHarnesses, useHarnessModels } from "@/lib/harnesses";
+import { defaultRoute, harnessLabel, useHarnesses, useRouteModels } from "@/lib/harnesses";
 import { storage } from "@/lib/storage";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { uuid4 } from "@/lib/uuid";
 import { useApp } from "@/store/app";
 import { toast } from "@/store/ui";
 import { ContextMeter } from "./ContextMeter";
-import { useCommands } from "./useCommands";
+import { invalidateCommands, useCommands } from "./useCommands";
 import { cycleMode, HarnessPicker, ModelPicker, ModePicker } from "./SessionControls";
 import { SuggestMenu, type Suggestion } from "./SuggestMenu";
 import { useAttachments } from "./useAttachments";
@@ -34,8 +34,9 @@ interface Props {
   placeholder?: string;
   /** Files dropped onto the surrounding view are forwarded here. */
   dropRef?: React.MutableRefObject<((files: File[]) => void) | null>;
-  /** The session's harness as the session list knows it, until its state arrives. */
+  /** The session's harness and model API as the session list knows them, until its state arrives. */
   harness?: string | null;
+  api?: string | null;
 }
 
 const isCoarse = () => window.matchMedia?.("(pointer: coarse)").matches ?? false;
@@ -54,7 +55,7 @@ function mentionToken(text: string, caret: number): { query: string; start: numb
   return { query: m[2], start: caret - m[2].length - 1 };
 }
 
-export function Composer({ sessionId, projectId, state, defaultModel, defaultMode, onCreated, autoFocus, placeholder, dropRef, harness: knownHarness }: Props) {
+export function Composer({ sessionId, projectId, state, defaultModel, defaultMode, onCreated, autoFocus, placeholder, dropRef, harness: knownHarness, api: knownApi }: Props) {
   const config = useApp((s) => s.config);
   const isMobile = useIsMobile();
   const draftKey = `draft:${sessionId ?? `new:${projectId ?? ""}`}`;
@@ -67,10 +68,11 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
   const [localModel, setLocalModel] = useState<string | null>(null);
   const [localMode, setLocalMode] = useState<string | null>(null);
   const [localEffort, setLocalEffort] = useState<string | null>(null);
+  const [localRoute, setLocalRoute] = useState<string | null>(null);
   const ta = useRef<HTMLTextAreaElement>(null);
   const attachments = useAttachments();
   const history = usePromptHistory(projectId);
-  const { commands, models: sessionModels, defaults } = useCommands(sessionId, projectId);
+  const { commands, models: sessionModels, defaults, routes: sessionRoutes } = useCommands(sessionId, projectId);
 
   // Which harness runs the session: Claude Code, or another one (Codex, DeepSeek Harness), picked for a new session.
   const harnesses = useHarnesses();
@@ -81,15 +83,22 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
   const other = harness !== "claude";
   const info = harnesses.find((h) => h.id === harness);
   const harnessModes = other ? state?.modes ?? info?.modes ?? [] : null;
-  const newSessionModels = useHarnessModels(!sessionId && other ? harness : null);
-  const models = !sessionId && other ? newSessionModels : sessionModels;
+  // The model API (route) it runs on, and the models of each: a subscription first, then API keys.
+  const newSessionRoutes = useRouteModels(!sessionId && other ? harness : null, info?.routes);
+  const routes = !sessionId && other ? newSessionRoutes : sessionRoutes;
+  const route = (sessionId ? state?.api ?? knownApi : localRoute) ?? defaultRoute(routes);
+  const currentRoute = routes.find((r) => r.id === route);
+  const nativeProvider = harness === "codex" ? "openai" : harness === "dsh" ? "deepseek" : "anthropic";
+  const nativeRoute = !currentRoute || currentRoute.provider === nativeProvider;
+  const models = currentRoute?.models?.length ? currentRoute.models : !sessionId && other ? [] : sessionModels;
+  const routeLocked = Boolean(sessionId) && state?.capabilities?.apiSwitch === false;
 
   const hosted = Boolean(state?.hosted && state.alive);
   const external = Boolean(state?.external && state.alive && !hosted);
   const busy = Boolean(state?.busy);
   const model = (hosted ? state?.model : localModel ?? state?.model ?? defaultModel)
-    ?? (other ? info?.defaultModel ?? models.find((m) => m.isDefault)?.value : defaults?.model) ?? null;
-  const effort = (hosted ? state?.effort : localEffort ?? state?.effort) ?? (other ? null : defaults?.effort) ?? null;
+    ?? (!nativeRoute ? null : other ? info?.defaultModel ?? models.find((m) => m.isDefault)?.value : defaults?.model) ?? null;
+  const effort = (hosted ? state?.effort : localEffort ?? state?.effort) ?? (other || !nativeRoute ? null : defaults?.effort) ?? null;
   const mode = (hosted ? state?.permissionMode : localMode ?? state?.permissionMode ?? defaultMode)
     ?? (other ? info?.defaultMode ?? harnessModes?.[0]?.id : config?.defaultPermissionMode) ?? "default";
 
@@ -99,6 +108,7 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
     setLocalModel(null);
     setLocalMode(null);
     setLocalEffort(null);
+    setLocalRoute(null);
   };
 
   // Restore the draft when switching sessions.
@@ -107,6 +117,7 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
     setLocalModel(null);
     setLocalMode(null);
     setLocalEffort(null);
+    setLocalRoute(null);
     attachments.clear();
     history.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -257,7 +268,23 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
     }
   };
 
-  const changeModel = async (next: string) => {
+  const changeModel = async (next: string, nextRoute?: string) => {
+    if (nextRoute && nextRoute !== route) {
+      if (!sessionId) {
+        setLocalRoute(nextRoute);
+        setLocalModel(next);
+        return;
+      }
+      try {
+        // The session moves to that API; a running process restarts on it and keeps the conversation.
+        await api(`sessions/${sessionId}/api`, { body: { api: nextRoute, model: next } });
+        invalidateCommands(sessionId);
+        setLocalModel(null);
+      } catch (err) {
+        toast((err as Error).message, "error");
+      }
+      return;
+    }
     if (hosted && sessionId) {
       try {
         await api(`sessions/${sessionId}/model`, { body: { model: next } });
@@ -307,6 +334,7 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
             ...body, project: projectId, model: localModel ?? defaultModel ?? undefined,
             permissionMode: localMode ?? defaultMode ?? undefined, effort: localEffort ?? undefined,
             ...(other ? { harness } : {}),
+            ...(localRoute ? { api: localRoute } : {}),
           },
         });
         storage.remove(draftKey);
@@ -442,9 +470,10 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
 
   const chips = (
     <>
-      {!sessionId && harnesses.length > 0 && <HarnessPicker value={harness} harnesses={harnesses} onChange={pickHarness} />}
+      {!sessionId && harnesses.length > 1 && <HarnessPicker value={harness} harnesses={harnesses} onChange={pickHarness} />}
       <ModePicker value={mode} allowBypass={Boolean(config?.allowBypass)} onChange={changeMode} options={harnessModes} />
-      <ModelPicker value={model} effort={effort} models={models} onChange={changeModel} onEffort={changeEffort} />
+      <ModelPicker value={model} effort={effort} models={models} onChange={changeModel} onEffort={changeEffort}
+        routes={routes} route={route} routeLocked={routeLocked} />
     </>
   );
 

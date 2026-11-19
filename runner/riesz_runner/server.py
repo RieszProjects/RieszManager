@@ -21,6 +21,8 @@ from .claude_settings import user_defaults
 from .config import Config
 from .context_limits import ContextLimits, limits_from_usage
 from .delivery import Delivery
+from . import routes
+from .credentials import PROVIDERS, SUBSCRIPTIONS, CredentialError
 from .harnesses import HARNESSES
 from .history import PromptHistory
 from .hub import Hub
@@ -302,10 +304,11 @@ async def session_commands(request: web.Request) -> web.Response:
     probe = request.app[PROBE]
     sid = request.match_info.get("sid")
     proc = hub.get_hosted(sid) if sid else None
-    if proc is not None and proc.init_info:
+    if proc is not None and proc.init_info and (proc.api is None or proc.api.route.startswith("anthropic:")):
         models = proc.models()
         return _json({"commands": proc.commands(), "models": models, "source": "session",
-                      "defaults": user_defaults(hub.cfg.claude_home, models)})
+                      "defaults": user_defaults(hub.cfg.claude_home, models),
+                      "routes": await _routes_with_models(hub, "claude", models)})
     cwd = None
     if sid:
         entry = hub.store.get(sid)
@@ -317,8 +320,36 @@ async def session_commands(request: web.Request) -> web.Response:
     if not Path(cwd).is_dir():
         cwd = str(hub.cfg.workspace_root)
     info = await probe.get(cwd)
-    return _json({"commands": info["commands"], "models": info["models"], "source": "probe",
-                  "defaults": user_defaults(hub.cfg.claude_home, info["models"])})
+    found = await _routes_with_models(hub, "claude", info["models"])
+    route = (hub.prefs.get(sid) or {}).get("api") if sid else None
+    current = next((r for r in found if r["id"] == route), None)
+    models = current["models"] if current is not None and current["provider"] != "anthropic" else info["models"]
+    commands = proc.commands() if proc is not None and proc.init_info else info["commands"]
+    return _json({"commands": commands, "models": models, "source": "probe",
+                  "defaults": user_defaults(hub.cfg.claude_home, info["models"]), "routes": found})
+
+
+async def _routes_with_models(hub: Hub, harness: str, claude_models: list[dict[str, Any]] | None = None,
+                              session_id: str | None = None) -> list[dict[str, Any]]:
+    """A harness's routes, each with the models it offers (fetched together; a failing one lists none)."""
+    described = await routes.describe(harness, hub.credentials, hub.bins())
+
+    async def models_for(route: dict[str, Any]) -> list[dict[str, Any]]:
+        if not route["available"]:
+            return []
+        if harness == "claude":
+            if route["provider"] == "anthropic":
+                return claude_models or []
+            return await hub.credentials.models(route["provider"])
+        return await hub.harnesses.models(session_id, harness=harness, route=route["id"])
+
+    found = await asyncio.gather(*(models_for(r) for r in described), return_exceptions=True)
+    for route, models in zip(described, found):
+        if isinstance(models, BaseException):
+            route["models"], route["error"] = [], str(models) or type(models).__name__
+        else:
+            route["models"] = models
+    return described
 
 
 async def context_usage(request: web.Request) -> web.Response:
@@ -423,8 +454,11 @@ async def create_session(request: web.Request) -> web.Response:
     if harness and harness != "claude":
         return await _create_harness_session(request, str(path), str(harness), body)
     mode = _validate_mode(hub.cfg, body.get("permissionMode"))
+    api = body.get("api") or None
+    if api is not None and not routes.valid("claude", api):
+        return _err(400, "invalid api")
     proc = await hub.create_session(str(path), model=body.get("model") or None, permission_mode=mode,
-                                    effort=_validate_effort(body.get("effort")))
+                                    effort=_validate_effort(body.get("effort")), api=api)
     request.app[PROBE].remember(proc.cwd, _probe_info(proc))
     if started_by:
         hub.prefs.remember(proc.session_id, startedBy=started_by)
@@ -446,7 +480,10 @@ async def _create_harness_session(request: web.Request, cwd: str, harness: str, 
     mode = body.get("permissionMode") or None
     if mode is not None and mode not in {m.id for m in HARNESSES[harness]["driver"](cwd="/", sink=None).modes()}:
         return _err(400, "invalid permission mode")
-    driver = await hub.harnesses.create(harness, cwd, model=model, effort=_harness_effort(body.get("effort")), mode=mode)
+    api = body.get("api") or None
+    if api is not None and not routes.valid(harness, api):
+        return _err(400, "invalid api")
+    driver = await hub.harnesses.create(harness, cwd, model=model, effort=_harness_effort(body.get("effort")), mode=mode, api=api)
     sid = str(driver.session_id)
     message_uuid = None
     if body.get("text") or body.get("attachments"):
@@ -619,6 +656,23 @@ async def set_model(request: web.Request) -> web.Response:
     proc = await hub.ensure_process(_session_id(request))
     await proc.set_model(body.get("model") or None)
     return _json({"state": proc.snapshot()})
+
+
+async def set_api(request: web.Request) -> web.Response:
+    """Move a session to another model API (body: api, a route id; model: one it offers, or none for its default)."""
+    hub = request.app[HUB]
+    sid = _session_id(request)
+    body = await _body(request)
+    model = body.get("model") or None
+    if model is not None and not (isinstance(model, str) and re.fullmatch(r"[A-Za-z0-9._:/\[\]-]{1,100}", model)):
+        return _err(400, "invalid model")
+    if not isinstance(body.get("api"), str):
+        return _err(400, "api is required")
+    if hub.harnesses.has(sid):
+        await hub.harnesses.set_api(sid, body["api"], model)
+    else:
+        await hub.set_api(sid, body["api"], model)
+    return _json({"state": hub.session_state(sid)})
 
 
 async def rename_session(request: web.Request) -> web.Response:
@@ -882,11 +936,18 @@ async def h_image(request: web.Request, hub: Hub, sid: str) -> web.StreamRespons
 
 
 async def h_commands(request: web.Request, hub: Hub, sid: str) -> web.Response:
-    try:
-        models = await hub.harnesses.models(sid)
-    except ControlError:
-        models = []
-    return _json({"commands": [], "models": models, "source": "session", "defaults": {}})
+    harness = hub.harnesses.harness_of(sid) or ""
+    found = await _routes_with_models(hub, harness, session_id=sid) if harness in routes.ROUTES else []
+    route = hub.harnesses.records[sid].get("api")
+    current = next((r for r in found if r["id"] == route), None)
+    if current is not None:
+        models = current["models"]
+    else:
+        try:
+            models = await hub.harnesses.models(sid)
+        except ControlError:
+            models = []
+    return _json({"commands": [], "models": models, "source": "session", "defaults": {}, "routes": found})
 
 
 async def h_context_limits(request: web.Request, hub: Hub, sid: str) -> web.Response:
@@ -973,6 +1034,10 @@ async def h_rename(request: web.Request, hub: Hub, sid: str) -> web.Response:
     return _json({"session": hub.harnesses.summary(sid)})
 
 
+async def h_set_api(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    return await set_api(request)
+
+
 async def h_subagents(request: web.Request, hub: Hub, sid: str) -> web.Response:
     return _json({"subagents": []})
 
@@ -1000,16 +1065,54 @@ async def harness_middleware(request: web.Request, handler: Any) -> web.StreamRe
     return await handler(request)
 
 
+async def credentials(request: web.Request) -> web.Response:
+    """API keys (whether each is set and how, never the key) and the harnesses' subscription logins."""
+    hub = request.app[HUB]
+    subs = []
+    for provider, name in SUBSCRIPTIONS.items():
+        login = await hub.credentials.subscription(provider, hub.bins())
+        subs.append({"provider": provider, "label": name, "loggedIn": login is not None, "plan": (login or {}).get("plan")})
+    return _json({"providers": hub.credentials.status(), "subscriptions": subs})
+
+
+async def credential_action(request: web.Request) -> web.Response:
+    """set (body: key or command), test or clear one provider's API key."""
+    hub = request.app[HUB]
+    provider = request.match_info["provider"]
+    action = request.match_info["action"]
+    if provider not in PROVIDERS:
+        return _err(404, "unknown provider")
+    try:
+        if action == "set":
+            body = await _body(request)
+            if isinstance(body.get("key"), str) and body["key"].strip():
+                hub.credentials.set_key(provider, body["key"])
+            elif isinstance(body.get("command"), str) and body["command"].strip():
+                hub.credentials.set_command(provider, body["command"])
+            else:
+                return _err(400, "key or command is required")
+            result: dict[str, Any] = await hub.credentials.test(provider)
+        elif action == "test":
+            result = await hub.credentials.test(provider)
+        else:
+            hub.credentials.clear(provider)
+            result = {"ok": True}
+    except CredentialError as exc:
+        return _err(400, str(exc))
+    return _json({**result, "providers": hub.credentials.status()})
+
+
 async def harnesses(request: web.Request) -> web.Response:
     """The other harnesses this runner can start sessions of, and whether each is ready."""
-    return _json({"harnesses": await asyncio.to_thread(request.app[HUB].harnesses.available)})
+    return _json({"harnesses": await request.app[HUB].harnesses.available()})
 
 
 async def harness_models(request: web.Request) -> web.Response:
     harness = request.match_info["harness"]
     if harness not in HARNESSES:
         return _err(404, "unknown harness")
-    return _json({"models": await request.app[HUB].harnesses.models(harness=harness)})
+    route = request.query.get("route") or None
+    return _json({"models": await request.app[HUB].harnesses.models(harness=harness, route=route)})
 
 
 # ---- app ---------------------------------------------------------------------
@@ -1084,12 +1187,15 @@ def build_app(cfg: Config) -> web.Application:
     r.add_get("/v1/uploads/{uid}", upload_raw)
     r.add_get("/v1/ws", websocket)
     r.add_get("/v1/harnesses", harnesses)
+    r.add_get("/v1/credentials", credentials)
+    r.add_post(r"/v1/credentials/{provider:[a-z]{1,16}}/{action:set|test|clear}", credential_action)
+    r.add_post("/v1/sessions/{sid}/api", set_api)
     r.add_get(r"/v1/harnesses/{harness:[a-z]{1,16}}/models", harness_models)
     HARNESS_HANDLERS.update({
         session_detail: h_detail, session_items: h_items, session_image: h_image, session_commands: h_commands,
         context_limits: h_context_limits, send_message: h_send, resume_session: h_resume, start_session: h_start,
         stop_session: h_stop, interrupt: h_interrupt, cancel_message: h_cancel, answer_permission: h_permission,
-        set_model: h_model, set_mode: h_mode, set_effort: h_effort, rename_session: h_rename,
+        set_model: h_model, set_mode: h_mode, set_effort: h_effort, rename_session: h_rename, set_api: h_set_api,
         session_subagents: h_subagents, dismiss_interrupted: h_dismiss,
     })
     return app

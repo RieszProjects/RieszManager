@@ -25,6 +25,8 @@ from .usage import UsageMonitor
 from .attention import LONG_TURN_SECONDS, describe_request, session_title
 from .store import SessionStore
 from .harnesses import Harnesses
+from .credentials import CredentialError, Credentials
+from . import routes
 
 if TYPE_CHECKING:
     from .delivery import Delivery
@@ -72,6 +74,9 @@ class Hub:
         self.reload_ready = asyncio.Event()
         self._working_file = cfg.state_dir / "working.json"
         self._working_saved: set[str] | None = None
+        # API keys for every harness, and which harnesses are logged in to a subscription.
+        self.credentials = Credentials(cfg)
+        self.balances.credentials = self.credentials
         # Sessions of other harnesses (Codex, DeepSeek Harness): see harnesses.py.
         self.harnesses = Harnesses(self)
 
@@ -371,6 +376,7 @@ class Hub:
         data["startedBy"] = (self.prefs.get(session_id) or {}).get("startedBy")
         data["interrupted"] = self.prefs.interrupted(session_id)
         data["subagents"], data["subagentsActive"] = self.subagents.activity(session_id)
+        data["api"] = (self.prefs.get(session_id) or {}).get("api")
         return data
 
     def _live_info(self, session_id: str) -> dict[str, Any] | None:
@@ -421,6 +427,8 @@ class Hub:
                 if not state.get(key):
                     state[key] = value
         state["keepAlive"] = self.prefs.keep_alive(session_id)
+        if not state.get("api"):
+            state["api"] = (self.prefs.get(session_id) or {}).get("api")
         return state
 
     def session_state(self, session_id: str) -> dict[str, Any]:
@@ -552,6 +560,8 @@ class Hub:
             last_effort, last_mode = self.resume_settings(session_id)
             if last_mode == "bypassPermissions" and not self.cfg.allow_bypass:
                 last_mode = None
+            # Sessions from before routes existed, and terminal sessions, use the subscription.
+            route = (self.prefs.get(session_id) or {}).get("api") or "anthropic:subscription"
             proc = ClaudeProcess(
                 self.cfg,
                 session_id=session_id,
@@ -561,6 +571,7 @@ class Hub:
                 permission_mode=permission_mode or last_mode or self.cfg.default_permission_mode,
                 effort=effort or last_effort,
                 sink=self._sink,
+                api=await self.claude_setup(route),
             )
             self.hosted[session_id] = proc
             try:
@@ -578,12 +589,15 @@ class Hub:
         model: str | None = None,
         permission_mode: str | None = None,
         effort: str | None = None,
+        api: str | None = None,
     ) -> ClaudeProcess:
         if self.reload_ready.is_set():
             raise ControlError("the runner is restarting; try again in a few seconds")
         if not Path(cwd).is_dir():
             raise ControlError("directory does not exist")
+        setup = await self.claude_setup(api)
         session_id = str(uuidlib.uuid4())
+        self.prefs.remember(session_id, api=setup.route)
         proc = ClaudeProcess(
             self.cfg,
             session_id=session_id,
@@ -592,6 +606,7 @@ class Hub:
             permission_mode=permission_mode,
             effort=effort,
             sink=self._sink,
+            api=setup,
         )
         self.hosted[session_id] = proc
         try:
@@ -610,6 +625,9 @@ class Hub:
         if entry is None or not entry.scanner.meta.cwd:
             raise ControlError("unknown session")
         new_id = str(uuidlib.uuid4())
+        route = (self.prefs.get(session_id) or {}).get("api") or "anthropic:subscription"
+        setup = await self.claude_setup(route)
+        self.prefs.remember(new_id, api=route)
         proc = ClaudeProcess(
             self.cfg,
             session_id=new_id,
@@ -620,6 +638,7 @@ class Hub:
             permission_mode=permission_mode or self.resume_settings(session_id)[1],
             effort=self.resume_effort(session_id),
             sink=self._sink,
+            api=setup,
         )
         self.hosted[new_id] = proc
         try:
@@ -628,6 +647,39 @@ class Hub:
             self.hosted.pop(new_id, None)
             raise
         return proc
+
+    # ---- model APIs (routes.py) ---------------------------------------------------
+
+    def bins(self) -> dict[str, str | None]:
+        return {"claude": self.cfg.claude_bin, "codex": self.harnesses.bin("codex"), "dsh": self.harnesses.bin("dsh")}
+
+    async def claude_setup(self, route: str | None) -> routes.ClaudeSetup:
+        """How to start Claude Code for a route (None: the first available, the subscription before keys)."""
+        # Nothing available: try the login anyway (a failed check is not proof of no login; claude says if it is).
+        route = route or await routes.default("claude", self.credentials, self.bins()) or "anthropic:subscription"
+        try:
+            return routes.claude_setup(route, self.credentials)
+        except CredentialError as exc:
+            raise ControlError(str(exc)) from None
+
+    async def set_api(self, session_id: str, route: str, model: str | None = None) -> None:
+        """Move a Claude Code session to another route; a running process is restarted on it (when idle)."""
+        if not routes.valid("claude", route):
+            raise ControlError("Claude Code cannot use that API")
+        await self.claude_setup(route)
+        proc = self.get_hosted(session_id)
+        if proc is not None and proc.working:
+            raise ControlError("the session is working; switch when this turn is over")
+        self.prefs.remember(session_id, api=route)
+        if proc is not None:
+            old_pid = proc.pid
+            await proc.stop()
+            live = self.live.get(session_id)
+            if live is not None and live.pid == old_pid:      # not rescanned yet: it was ours
+                self.live.pop(session_id, None)
+            await self.ensure_process(session_id, model=model)
+        await self.broadcast_global({"ev": "sessions", "sessions": [self.session_summary(session_id)], "removed": []})
+        await self.broadcast_session(session_id, {"ev": "state", "state": self.session_state(session_id)})
 
     async def rename(self, session_id: str, title: str) -> None:
         """Set a session's custom title, through its claude process when we host it."""

@@ -195,6 +195,28 @@ class HarnessRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn(sid, [s["sessionId"] for s in sessions])
         self.assertIn("echo: hi", await self.texts(sid))
 
+    async def test_credentials_never_come_back(self):
+        from riesz_runner.server import HUB
+
+        async def no_login(provider, bins):
+            return None
+        async def offline_test(provider):
+            return {"ok": True, "detail": "not checked"}
+        self.client.server.app[HUB].credentials.subscription = no_login
+        self.client.server.app[HUB].credentials.test = offline_test
+        res = await self.call("POST", "credentials/openai/set", {"key": "sk-secret-value"})
+        self.assertNotIn("sk-secret-value", json.dumps(res))
+        listed = await self.call("GET", "credentials")
+        self.assertNotIn("sk-secret-value", json.dumps(listed))
+        openai = next(p for p in listed["providers"] if p["id"] == "openai")
+        self.assertEqual((openai["configured"], openai["source"]), (True, "key"))
+        self.assertEqual([s["loggedIn"] for s in listed["subscriptions"]], [False, False])
+        await self.call("POST", "credentials/openai/clear", {})
+        openai = next(p for p in (await self.call("GET", "credentials"))["providers"] if p["id"] == "openai")
+        self.assertFalse(openai["configured"])
+        await self.call("POST", "credentials/nobody/set", {"key": "x"}, status=404)
+        await self.call("POST", "credentials/openai/set", {}, status=400)
+
     async def _has_text(self, sid: str, text: str) -> bool:
         return text in await self.texts(sid)
 

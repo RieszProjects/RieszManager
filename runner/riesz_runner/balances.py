@@ -89,6 +89,7 @@ class BalanceMonitor:
         self._view: dict[str, Any] | None = None
         self._fetched = 0.0
         self._lock = asyncio.Lock()
+        self.credentials: Any = None        # the hub's Credentials: keys for entries without a keyCommand
 
     @property
     def path(self):
@@ -104,7 +105,8 @@ class BalanceMonitor:
             log.warning("cannot read %s: %s", self.path, exc)
             return []
         items = data.get("providers") if isinstance(data, dict) else None
-        return [p for p in items or [] if isinstance(p, dict) and p.get("type") in FETCHERS and p.get("keyCommand")]
+        return [p for p in items or [] if isinstance(p, dict) and p.get("type") in FETCHERS
+                and (p.get("keyCommand") or (self.credentials is not None and self.credentials.configured(p["type"])))]
 
     async def get(self, force: bool = False) -> dict[str, Any]:
         providers = self.providers()
@@ -125,7 +127,8 @@ class BalanceMonitor:
         name, fetch = FETCHERS[kind]
         out: dict[str, Any] = {"id": p.get("id") or kind, "label": p.get("label") or name, "balances": [], "error": None}
         try:
-            key = await self._key(p["keyCommand"])
+            # The entry's own command, else the key set in the web app's settings (credentials.py).
+            key = await self._key(p["keyCommand"]) if p.get("keyCommand") else await self.credentials.key(kind)
             out["balances"] = await fetch(session, key)
         except Exception as exc:  # one failing service must not hide the others
             out["error"] = str(exc) or type(exc).__name__

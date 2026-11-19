@@ -39,6 +39,7 @@ from .base import (
     user_item,
 )
 from .jsonrpc import JsonRpcError, JsonRpcPeer, PeerClosed
+from ..routes import codex_provider
 
 log = logging.getLogger(__name__)
 
@@ -166,9 +167,11 @@ class CodexDriver(Driver):
     harness = "codex"
     capabilities = Capabilities(steer=True, approve_for_session=True, user_questions=True, rate_limits=True)
 
-    def __init__(self, *, codex: str = "codex", **kwargs: Any) -> None:
+    def __init__(self, *, codex: str = "codex", api: str | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.codex = codex
+        # The model API (routes.py): None or "openai:subscription" is Codex's own login.
+        self.api = api
         self.mode = self.mode or DEFAULT_MODE
         self.peer: JsonRpcPeer | None = None
         self.turn_id: str | None = None
@@ -187,7 +190,8 @@ class CodexDriver(Driver):
     async def start(self) -> None:
         env = dict(self.env if self.env is not None else os.environ)
         env.pop("RUNNER_TOKEN", None)
-        self.peer = JsonRpcPeer([self.codex, "app-server"], cwd=self.cwd, env=env, version=False,
+        provider, extra = codex_provider(self.api)
+        self.peer = JsonRpcPeer([self.codex, "app-server", *extra], cwd=self.cwd, env=env, version=False,
                                 on_notification=self._notification, on_request=self._request, on_exit=self._exited)
         await self.peer.start()
         self.alive = True
@@ -197,6 +201,7 @@ class CodexDriver(Driver):
             await self.peer.notify("initialized")
             approval, sandbox, _ = _POLICY[self.mode]
             params: dict[str, Any] = {"cwd": self.cwd, "approvalPolicy": approval, "sandbox": sandbox}
+            params["modelProvider"] = provider
             if self.model:
                 params["model"] = self.model
             if self.session_id:

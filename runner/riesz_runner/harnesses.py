@@ -28,8 +28,11 @@ from typing import TYPE_CHECKING, Any
 
 from .drivers.base import Driver
 from .drivers.codex import CodexDriver, probe_models
-from .drivers.dsh import DshDriver
+from .drivers.dsh import EFFORTS, DshDriver
+from .drivers.jsonrpc import JsonRpcError
+from . import routes
 from .attention import LONG_TURN_SECONDS, describe_request
+from .credentials import PROVIDERS, CredentialError
 from .process import ClaudeProcess, ControlError
 
 if TYPE_CHECKING:
@@ -39,7 +42,6 @@ log = logging.getLogger(__name__)
 
 SAVE_DELAY = 2.0
 REAP_INTERVAL = 60.0
-KEY_TIMEOUT = 20.0
 
 MODELS_TTL = 600.0
 
@@ -82,61 +84,98 @@ class Harnesses:
 
     # ---- what is available ------------------------------------------------------------
 
-    def _bin(self, harness: str) -> str | None:
+    def bin(self, harness: str) -> str | None:
         configured = {"codex": self.cfg.codex_bin, "dsh": self.cfg.dsh_bin}.get(harness)
         return find_bin(HARNESSES[harness]["bin"], configured or None)
 
-    def _key_command(self) -> str | None:
-        """How to get the DeepSeek API key: RUNNER_DSH_KEY_COMMAND, else the balance checker's command."""
-        if self.cfg.dsh_key_command:
-            return self.cfg.dsh_key_command
-        with contextlib.suppress(Exception):
-            for p in json.loads(self.cfg.balances_file.read_text(encoding="utf-8")).get("providers", []):
-                if p.get("type") == "deepseek" and p.get("keyCommand"):
-                    return str(p["keyCommand"])
-        return None
-
-    def available(self) -> list[dict[str, Any]]:
-        out = []
+    async def available(self) -> list[dict[str, Any]]:
+        """Every harness (Claude Code first) with its routes, and whether a session of it can be started."""
+        bins = self.hub.bins()
+        out: list[dict[str, Any]] = [{"id": "claude", "name": "Claude Code", "available": True, "reason": None,
+                                      "routes": await routes.describe("claude", self.hub.credentials, bins)}]
         for hid, spec in HARNESSES.items():
-            path = self._bin(hid)
-            reason = None if path else f"{spec['bin']} 没有安装"
-            if path and hid == "dsh" and not self._key_command():
-                reason = "没有配置 DeepSeek API key 的获取方式"
+            path = self.bin(hid)
             driver_cls = spec["driver"]
             sample = driver_cls(cwd="/", sink=_nowhere)
-            out.append({"id": hid, "name": spec["name"], "available": reason is None, "reason": reason,
+            described = await routes.describe(hid, self.hub.credentials, bins) if path and hid in routes.ROUTES else []
+            reason = None
+            if path is None:
+                reason = f"{spec['bin']} 没有安装"
+            elif hid in routes.ROUTES and not any(r["available"] for r in described):
+                reason = "没有可用的订阅或 API key"
+            out.append({"id": hid, "name": spec["name"], "available": reason is None, "reason": reason, "routes": described,
                         "modes": [m.__dict__ for m in sample.modes()], "defaultMode": sample.mode,
                         "defaultModel": sample.model, "capabilities": driver_cls.capabilities.as_dict()})
+        if not any(r["available"] for r in out[0]["routes"]):
+            out[0]["available"] = False
+            out[0]["reason"] = "没有登录 claude.ai，也没有设置 API key"
         return out
 
-    async def _env(self, harness: str) -> dict[str, str]:
+    async def _route(self, harness: str, route: str | None) -> str:
+        """The route a session uses: the one asked for, else the first available (subscription first)."""
+        if harness not in routes.ROUTES:
+            return route or ""
+        if route:
+            if not routes.valid(harness, route):
+                raise ControlError(f"{HARNESSES[harness]['name']} cannot use {route}")
+            return route
+        found = await routes.default(harness, self.hub.credentials, self.hub.bins())
+        if found is None:
+            raise ControlError(f"no subscription or API key is set up for {HARNESSES[harness]['name']}")
+        return found
+
+    async def _env(self, harness: str, route: str) -> dict[str, str]:
         env = ClaudeProcess._child_env()
-        path = self._bin(harness)
+        path = self.bin(harness)
         if path is None:
             raise ControlError(f"{HARNESSES[harness]['bin']} is not installed")
         env["PATH"] = os.path.dirname(path) + os.pathsep + env.get("PATH", "")   # node lives next to it
-        if harness == "dsh":
-            command = self._key_command()
-            if not command:
-                raise ControlError("no command is configured to get the DeepSeek API key (RUNNER_DSH_KEY_COMMAND)")
-            env["DEEPSEEK_API_KEY"] = await self._run_key(command, env)
+        for name in (p.env for p in PROVIDERS.values()):
+            env.pop(name, None)                       # only the key the route needs
+        if not route:
+            return env
+        provider, auth = routes.split(route)
+        if auth == "key":
+            try:
+                env[PROVIDERS[provider].env] = await self.hub.credentials.key(provider)
+            except CredentialError as exc:
+                raise ControlError(str(exc)) from None
+        if harness == "dsh" and provider != "deepseek" and self.hub.credentials.configured("deepseek"):
+            with contextlib.suppress(CredentialError):   # dsh's web search goes through DeepSeek
+                env["DEEPSEEK_API_KEY"] = await self.hub.credentials.key("deepseek")
         return env
 
-    async def _run_key(self, command: str, env: dict[str, str]) -> str:
-        shell = os.environ.get("SHELL") or "/bin/bash"
-        args = [shell, "-lc", command] if self.cfg.login_shell else ["/bin/sh", "-c", command]
-        proc = await asyncio.create_subprocess_exec(*args, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
-                                                    stderr=asyncio.subprocess.DEVNULL, env=env)
+    async def _default_model(self, harness: str, route: str) -> str | None:
+        """A model for a route whose harness would otherwise pick one of another provider's."""
+        provider = routes.split(route)[0] if route else None
+        if not ((harness == "codex" and provider == "deepseek") or (harness == "dsh" and provider not in (None, "deepseek"))):
+            return None
         try:
-            out, _ = await asyncio.wait_for(proc.communicate(), KEY_TIMEOUT)
-        except asyncio.TimeoutError:
-            proc.kill()
-            raise ControlError("the API key command timed out") from None
-        lines = [line.strip() for line in out.decode(errors="replace").splitlines() if line.strip()]
-        if proc.returncode != 0 or not lines:
-            raise ControlError(f"the API key command failed (exit {proc.returncode})")
-        return lines[-1]
+            models = [m["value"] for m in await self.hub.credentials.models(str(provider))]
+        except CredentialError as exc:
+            raise ControlError(str(exc)) from None
+        if harness == "codex":                 # DeepSeek's Responses API serves its Flash model
+            return next((m for m in models if "flash" in m), "deepseek-flash")
+        return models[0] if models else None
+
+    async def _patch(self, harness: str, session_id: str | None, route: str) -> str | None:
+        """dsh: the overlay that mounts the route's provider, written next to the session's cached items."""
+        if harness != "dsh" or session_id is None or not route:
+            return None
+        provider = routes.split(route)[0]
+        if provider == "deepseek":
+            return None
+        try:
+            models = await self.hub.credentials.models(provider)
+        except CredentialError as exc:
+            raise ControlError(str(exc)) from None
+        text = routes.dsh_patch(route, models)
+        if text is None:
+            return None
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        path = self.cache_dir / f"{session_id}.dsh-patch.yml"
+        path.write_text(text, encoding="utf-8")
+        return str(path)
 
     # ---- records -------------------------------------------------------------------------
 
@@ -201,6 +240,7 @@ class Harnesses:
             "permissionMode": rec.get("mode"), "project": self.hub.projects.project_id_for(rec.get("cwd")),
             "live": self.live_info(session_id), "mtime": rec.get("updatedAt") or 0, "size": 0, "keepAlive": False,
             "startedBy": None, "interrupted": self.hub.prefs.interrupted(session_id), "subagents": 0,
+            "api": rec.get("api"),
         }
 
     def summaries(self, project: str | None = None) -> list[dict[str, Any]]:
@@ -220,6 +260,7 @@ class Harnesses:
                      "lastResult": driver.last_result if driver else None}
         sample = driver or cls(cwd="/", sink=_nowhere)
         state["modes"] = [m.__dict__ for m in sample.modes()]
+        state["api"] = rec.get("api")
         return state
 
     def items(self, session_id: str) -> list[dict[str, Any]]:
@@ -228,49 +269,73 @@ class Harnesses:
             return driver.items.items
         return self._cached_items(session_id)
 
-    async def models(self, session_id: str | None = None, harness: str | None = None) -> list[dict[str, Any]]:
-        """The models a harness offers (Codex asks its app-server, dsh asks DeepSeek's API); kept a few minutes."""
-        harness = harness or (self.harness_of(session_id) if session_id else None)
+    async def models(self, session_id: str | None = None, harness: str | None = None,
+                     route: str | None = None) -> list[dict[str, Any]]:
+        """The models a harness offers on a route: Codex's own list for OpenAI, the provider's list otherwise."""
+        rec = self.records.get(session_id or "")
+        harness = harness or (rec["harness"] if rec else None)
         if harness not in HARNESSES:
             return []
-        cached = self._models.get(harness)
-        if cached and time.time() - cached[0] < MODELS_TTL:
-            return cached[1]
-        driver = self.drivers.get(session_id or "")
-        if driver is not None and driver.alive:
-            models = await driver.models()
-        elif harness == "codex":
-            models = await probe_models(self._bin("codex") or "codex", str(self.cfg.workspace_root), await self._env("codex"))
-        else:
-            models = await DshDriver(cwd=str(self.cfg.workspace_root), sink=_nowhere, env=await self._env("dsh")).models()
-        if models:
-            self._models[harness] = (time.time(), models)
+        if harness not in routes.ROUTES:       # a harness without routes: whatever its driver offers
+            driver = self.drivers.get(session_id or "")
+            return await driver.models() if driver is not None and driver.alive else []
+        route = route or (rec.get("api") if rec else None) or await routes.default(harness, self.hub.credentials, self.hub.bins())
+        if route is None or not routes.valid(harness, route):
+            return []
+        provider = routes.split(route)[0]
+        try:
+            if harness == "codex" and provider == "openai":
+                cached = self._models.get(f"codex:{route}")
+                if cached and time.time() - cached[0] < MODELS_TTL:
+                    return cached[1]
+                driver = self.drivers.get(session_id or "")
+                if driver is not None and driver.alive and rec and rec.get("api") == route:
+                    models = await driver.models()
+                else:
+                    models = await probe_models(self.bin("codex") or "codex", str(self.cfg.workspace_root),
+                                                await self._env("codex", route))
+                if models:
+                    self._models[f"codex:{route}"] = (time.time(), models)
+                return models
+            models = await self.hub.credentials.models(provider)
+        except CredentialError as exc:
+            raise ControlError(str(exc)) from None
+        if harness == "dsh" and provider == "deepseek":
+            # dsh adds "off" to DeepSeek's effort levels.
+            models = [{**m, "supportedEffortLevels": ["off", *(m.get("supportedEffortLevels") or EFFORTS[1:])]} for m in models]
         return models
 
     # ---- sessions --------------------------------------------------------------------------
 
-    def _make(self, harness: str, *, cwd: str, env: dict[str, str], session_id: str | None, model: str | None,
-              effort: str | None, mode: str | None) -> Driver:
+    async def _make(self, harness: str, *, cwd: str, session_id: str | None, route: str, model: str | None,
+                    effort: str | None, mode: str | None) -> Driver:
         spec = HARNESSES[harness]
-        extra = {spec["arg"]: self._bin(harness)} if spec.get("arg") else {}
-        return spec["driver"](cwd=cwd, sink=self._sink, session_id=session_id, model=model, effort=effort, mode=mode, env=env, **extra)
+        extra: dict[str, Any] = {spec["arg"]: self.bin(harness)} if spec.get("arg") else {}
+        model = model or await self._default_model(harness, route)
+        if harness == "codex":
+            extra["api"] = route
+        elif harness == "dsh":
+            extra["provider"] = routes.dsh_provider(route)
+            extra["patch"] = await self._patch(harness, session_id, route)
+        return spec["driver"](cwd=cwd, sink=self._sink, session_id=session_id, model=model, effort=effort, mode=mode,
+                              env=await self._env(harness, route), **extra)
 
     async def create(self, harness: str, cwd: str, *, model: str | None = None, effort: str | None = None,
-                     mode: str | None = None) -> Driver:
+                     mode: str | None = None, api: str | None = None) -> Driver:
         if harness not in HARNESSES:
             raise ControlError(f"unknown harness {harness}")
         if self.hub.reload_ready.is_set():
             raise ControlError("the runner is restarting; try again in a few seconds")
         if not Path(cwd).is_dir():
             raise ControlError("directory does not exist")
+        route = await self._route(harness, api)
         session_id = None if harness == "codex" else str(uuidlib.uuid4())   # Codex names its threads itself
-        driver = self._make(harness, cwd=cwd, env=await self._env(harness), session_id=session_id,
-                            model=model, effort=effort, mode=mode)
+        driver = await self._make(harness, cwd=cwd, session_id=session_id, route=route, model=model, effort=effort, mode=mode)
         await driver.start()
         sid = str(driver.session_id)
         now = time.time()
         self.records[sid] = {"id": sid, "harness": harness, "cwd": cwd, "createdAt": now, "updatedAt": now, "promptCount": 0,
-                             "model": driver.model, "effort": driver.effort, "mode": driver.mode}
+                             "model": driver.model, "effort": driver.effort, "mode": driver.mode, "api": route}
         self.drivers[sid] = driver
         self._active[sid] = now
         self._save()
@@ -290,11 +355,16 @@ class Harnesses:
                 raise ControlError("unknown session")
             if not Path(rec.get("cwd") or "").is_dir():
                 raise ControlError("the session's working directory no longer exists")
-            driver = self._make(rec["harness"], cwd=rec["cwd"], env=await self._env(rec["harness"]), session_id=session_id,
-                                model=rec.get("model"), effort=rec.get("effort"), mode=rec.get("mode"))
+            route = rec.get("api") or await self._route(rec["harness"], None)
+            rec["api"] = route
+            driver = await self._make(rec["harness"], cwd=rec["cwd"], session_id=session_id, route=route,
+                                      model=rec.get("model"), effort=rec.get("effort"), mode=rec.get("mode"))
             self.drivers[session_id] = driver
             try:
                 await driver.start()
+            except JsonRpcError as exc:             # the harness refused: say why
+                self.drivers.pop(session_id, None)
+                raise ControlError(f"{HARNESSES[rec['harness']]['name']}: {exc.message}") from None
             except Exception:
                 self.drivers.pop(session_id, None)
                 raise
@@ -355,6 +425,27 @@ class Harnesses:
                 answers[qid] = [v.strip() for v in str(value).split(", ") if v.strip()]
         self._active[session_id] = time.time()
         return driver.answer_permission(request_id, allow=allow, scope=scope, message=body.get("message"), answers=answers)
+
+    async def set_api(self, session_id: str, route: str, model: str | None = None) -> None:
+        """Move a session to another route: its process restarts on it (when idle) and picks the history up."""
+        rec = self.records[session_id]
+        route = await self._route(rec["harness"], route)
+        if route != rec.get("api") and not HARNESSES[rec["harness"]]["driver"].capabilities.api_switch:
+            # Codex keeps each thread on the provider it started with.
+            raise ControlError(f"a {HARNESSES[rec['harness']]['name']} session stays on the API it started with; start a new session")
+        driver = self.drivers.get(session_id)
+        if driver is not None and driver.alive and (driver.busy or driver.permissions or driver.tasks):
+            raise ControlError("the session is working; switch when this turn is over")
+        running = driver is not None and driver.alive
+        if running:
+            await self.stop(session_id)        # first: its last state report would bring the old model back
+        rec["api"] = route
+        rec["model"] = model                   # None: the route's default model
+        self._save()
+        if running:
+            await self.ensure(session_id)
+        await self.hub.broadcast_global({"ev": "sessions", "sessions": [self.summary(session_id)], "removed": []})
+        await self.hub.broadcast_session(session_id, {"ev": "state", "state": self.state(session_id)})
 
     async def set(self, session_id: str, what: str, value: Any) -> Driver:
         driver = await self.ensure(session_id)

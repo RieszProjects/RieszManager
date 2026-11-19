@@ -51,6 +51,7 @@ class Capabilities:
     background_tasks: bool = False
     rate_limits: bool = False
     history: bool = True
+    api_switch: bool = False           # a session can move to another model API (routes.py) and keep its history
 
     def as_dict(self) -> dict[str, Any]:
         return {_camel(k): v for k, v in self.__dict__.items()}

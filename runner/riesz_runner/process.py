@@ -11,12 +11,15 @@ import signal
 import time
 import uuid as uuidlib
 from collections import deque
-from typing import Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from .autoapprove import auto_approvable
 from .claude_settings import chrome_enabled_by_default
 from .config import Config
 from .procs import running_commands
+
+if TYPE_CHECKING:
+    from .routes import ClaudeSetup
 
 log = logging.getLogger(__name__)
 
@@ -52,8 +55,11 @@ class ClaudeProcess:
         permission_mode: str | None = None,
         effort: str | None = None,
         sink: EventSink,
+        api: ClaudeSetup | None = None,
     ) -> None:
         self.cfg = cfg
+        # Which model API the process uses (routes.py); None: whatever Claude Code is logged in to.
+        self.api = api
         self.session_id = session_id
         self.cwd = cwd
         self.resume_from = resume_from
@@ -150,7 +156,7 @@ class ClaudeProcess:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=self._child_env(),
+            env=self.api.apply(self._child_env()) if self.api else self._child_env(),
             limit=256 * 1024 * 1024,
             start_new_session=True,
         )
@@ -202,7 +208,7 @@ class ClaudeProcess:
 
     def flag_settings(self) -> dict[str, Any]:
         """Settings the runner imposes on hosted sessions (on top of the user's own)."""
-        flags: dict[str, Any] = {}
+        flags: dict[str, Any] = dict(self.api.settings) if self.api else {}
         if self.cfg.cross_session_inbound:
             # Headless sessions cannot ask anyone to approve a held cross-session message,
             # so "hold" would drop messages between sessions in different permission modes.
@@ -231,6 +237,7 @@ class ClaudeProcess:
             "busy": self.turn_active,
             "status": self.status,
             "model": self.model,
+            "api": self.api.route if self.api else None,
             "permissionMode": self.permission_mode,
             "effort": self.effort,
             "queue": list(self.queue.values()),

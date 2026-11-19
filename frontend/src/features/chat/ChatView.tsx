@@ -13,7 +13,7 @@ import { Mascot } from "@/components/Mascot";
 import { StatusDot } from "@/components/StatusDot";
 import { copyText } from "@/lib/clipboard";
 import { clockTime } from "@/lib/format";
-import { harnessLabel } from "@/lib/harnesses";
+import { harnessLabel, routeTag } from "@/lib/harnesses";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { sessionTitle, useApp } from "@/store/app";
 import { useOrganize } from "@/store/organize";
@@ -187,6 +187,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
 
   const state = data?.state ?? null;
   const harness = state?.harness ?? summary?.harness;
+  const apiTag = routeTag(state?.api ?? summary?.api, harness);
   const keepAlive = Boolean(state?.keepAlive ?? summary?.keepAlive);
   const items = data?.items ?? [];
   const project = projects.find((p) => p.id === projectId);
@@ -276,6 +277,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
             <div className="rz-chat-sub">
               <StatusDot live={live} size={7} />
               {harness && <span className={`rz-tag harness harness-${harness}`}>{harnessLabel(harness)}</span>}
+              {apiTag && <span className="rz-tag harness">{apiTag}</span>}
               {project && <span className="clamp-1">{project.name}</span>}
               {summary?.gitBranch && <span className="dim mono clamp-1">⎇ {summary.gitBranch}</span>}
               {keepAlive && <span className="rz-tag keep" title="保持运行：空闲时不会被关闭"><Pin size={10} />常驻</span>}
@@ -326,6 +328,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
             defaultModel={summary?.model}
             defaultMode={summary?.permissionMode}
             harness={harness}
+            api={state?.api ?? summary?.api}
             autoFocus
             dropRef={dropRef}
           />

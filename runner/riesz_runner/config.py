@@ -87,11 +87,9 @@ class Config:
     auto_allow_removals: bool = False
     # Answer a permission request or question nobody responded to after this many seconds (0: wait forever).
     permission_timeout: int = 1800
-    # Other harnesses (harnesses.py): their executables (empty: found on PATH or in nvm), and how to
-    # get the DeepSeek API key for DeepSeek Harness (empty: the balance checker's deepseek keyCommand).
+    # Other harnesses (harnesses.py): their executables (empty: found on PATH or in nvm).
     codex_bin: str = ""
     dsh_bin: str = ""
-    dsh_key_command: str = ""
     extra_args: list[str] = field(default_factory=list)
 
     @property
@@ -164,6 +162,5 @@ def load_config(env_file: str | None = None) -> Config:
         permission_timeout=max(0, int(env.get("RUNNER_PERMISSION_TIMEOUT") or 1800)),
         codex_bin=env.get("RUNNER_CODEX_BIN") or "",
         dsh_bin=env.get("RUNNER_DSH_BIN") or "",
-        dsh_key_command=env.get("RUNNER_DSH_KEY_COMMAND") or "",
         extra_args=extra,
     )

@@ -879,3 +879,10 @@ body.rz-dragging, body.rz-dragging * { cursor: grabbing !important; user-select:
 .rz-chip.mode-full-access, .rz-chip.mode-danger-full-access { color: #e09a8e; border-color: rgba(196, 110, 98, 0.45); }
 .rz-patch-file { margin: 6px 0 2px; font-size: 12px; display: flex; gap: 6px; align-items: center; }
 .rz-patch-file .kind { color: var(--text3); }
+.rz-route-head { line-height: 30px !important; font-size: 12px !important; color: var(--amber-strong) !important; background: var(--bg2) !important; }
+.rz-route-head .dim { margin-left: 4px; font-size: 11px; }
+.rz-route-off { padding: 6px 16px 2px; font-size: 11.5px; color: var(--text3); line-height: 1.6; max-width: 320px; }
+.rz-key-row { border-bottom: 1px solid var(--line-soft); }
+.rz-key-row > .rz-settings-row { border-bottom: none; }
+.rz-key-main { min-width: 0; }
+.rz-key-form { display: flex; flex-direction: column; gap: 10px; padding: 0 0 14px; }

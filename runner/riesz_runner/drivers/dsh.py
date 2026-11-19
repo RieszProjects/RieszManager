@@ -215,12 +215,15 @@ class DshEvents:
 class DshDriver(Driver):
     harness = "dsh"
     capabilities = Capabilities(queue=True, interrupt_restarts=True, user_questions=True, model_switch="restart",
-                                effort_switch="restart", streaming_text=False, background_tasks=True)
+                                effort_switch="restart", streaming_text=False, background_tasks=True,
+                                api_switch=True)
 
-    def __init__(self, *, dsh: str = "dsh", provider: str = PROVIDER, **kwargs: Any) -> None:
+    def __init__(self, *, dsh: str = "dsh", provider: str = PROVIDER, patch: str | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.dsh = dsh
         self.provider = provider
+        # An overlay (`--patch`) for providers dsh does not mount by default (routes.dsh_patch).
+        self.patch = patch
         self.model = self.model or DEFAULT_MODEL
         self.mode = self.mode or DEFAULT_MODE
         self.peer: JsonRpcPeer | None = None
@@ -257,7 +260,8 @@ class DshDriver(Driver):
         await self.emit_state()
 
     async def _spawn(self, *, resume: bool) -> None:
-        self.peer = JsonRpcPeer([self.dsh, "--profile", "sdk"], cwd=self.cwd, env=self._env(), version=True,
+        argv = [self.dsh, "--profile", "sdk", *(["--patch", self.patch] if self.patch else [])]
+        self.peer = JsonRpcPeer(argv, cwd=self.cwd, env=self._env(), version=True,
                                 on_notification=self._notification, on_request=self._request, on_exit=self._exited)
         await self.peer.start()
         self.alive = True

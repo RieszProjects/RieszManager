@@ -1,7 +1,7 @@
-/** Other harnesses (Codex, DeepSeek Harness) the runner can start sessions of. */
+/** Harnesses (Claude Code, Codex, DeepSeek Harness), the model APIs each can run on, and their models. */
 import { useEffect, useState } from "react";
 import { api } from "@/api/client";
-import type { HarnessInfo, ModelInfo } from "@/api/types";
+import type { ApiRoute, HarnessInfo, ModelInfo } from "@/api/types";
 
 const SHORT: Record<string, string> = { claude: "Claude Code", codex: "Codex", dsh: "DeepSeek" };
 
@@ -10,56 +10,83 @@ export function harnessLabel(id: string | null | undefined): string {
   return SHORT[id ?? "claude"] ?? id ?? "Claude Code";
 }
 
+const TTL = 5 * 60 * 1000;
 let listed: Promise<HarnessInfo[]> | null = null;
 let listedAt = 0;
-const TTL = 5 * 60 * 1000;
+const listeners = new Set<(list: HarnessInfo[]) => void>();
 
-function fetchHarnesses(): Promise<HarnessInfo[]> {
-  if (!listed || Date.now() - listedAt > TTL) {
+function fetchHarnesses(force = false): Promise<HarnessInfo[]> {
+  if (force || !listed || Date.now() - listedAt > TTL) {
     listedAt = Date.now();
     listed = api<{ harnesses: HarnessInfo[] }>("harnesses").then((r) => r.harnesses ?? []).catch(() => {
       listed = null;
       return [];
     });
+    void listed.then((l) => listeners.forEach((fn) => fn(l)));
   }
   return listed;
 }
 
+/** Ask again (after API keys changed in the settings). */
+export function refreshHarnesses(): void {
+  routeModels.clear();
+  void fetchHarnesses(true);
+}
+
+/** Every harness the runner offers, Claude Code first (empty until the runner answers, or with an older runner). */
 export function useHarnesses(): HarnessInfo[] {
   const [list, setList] = useState<HarnessInfo[]>([]);
   useEffect(() => {
     let cancelled = false;
-    void fetchHarnesses().then((l) => !cancelled && setList(l));
+    const update = (l: HarnessInfo[]) => !cancelled && setList(l);
+    listeners.add(update);
+    void fetchHarnesses().then(update);
     return () => {
       cancelled = true;
+      listeners.delete(update);
     };
   }, []);
   return list;
 }
 
-const models = new Map<string, { at: number; list: ModelInfo[] }>();
+const routeModels = new Map<string, { at: number; list: ModelInfo[] }>();
 
-/** The models a harness offers, before a session of it exists. */
-export function useHarnessModels(harness: string | null): ModelInfo[] {
-  const [list, setList] = useState<ModelInfo[]>(() => (harness && models.get(harness)?.list) || []);
+/** Each available route of a harness with its models, before a session of it exists. */
+export function useRouteModels(harness: string | null, routes: ApiRoute[] | undefined): ApiRoute[] {
+  const [, setTick] = useState(0);
+  const key = (routes ?? []).filter((r) => r.available).map((r) => r.id).join(",");
   useEffect(() => {
-    if (!harness) {
-      setList([]);
-      return;
-    }
-    const hit = models.get(harness);
-    setList(hit?.list ?? []);
-    if (hit && Date.now() - hit.at < TTL) return;
+    if (!harness || !key) return;
     let cancelled = false;
-    api<{ models: ModelInfo[] }>(`harnesses/${harness}/models`)
-      .then((r) => {
-        models.set(harness, { at: Date.now(), list: r.models ?? [] });
-        if (!cancelled) setList(r.models ?? []);
-      })
-      .catch(() => undefined);
+    for (const id of key.split(",")) {
+      const k = `${harness}|${id}`;
+      const hit = routeModels.get(k);
+      if (hit && Date.now() - hit.at < TTL) continue;
+      api<{ models: ModelInfo[] }>(`harnesses/${harness}/models`, { query: { route: id } })
+        .then((r) => {
+          routeModels.set(k, { at: Date.now(), list: r.models ?? [] });
+          if (!cancelled) setTick((t) => t + 1);
+        })
+        .catch(() => undefined);
+    }
     return () => {
       cancelled = true;
     };
-  }, [harness]);
-  return list;
+  }, [harness, key]);
+  return (routes ?? []).map((r) => ({ ...r, models: r.available ? routeModels.get(`${harness}|${r.id}`)?.list ?? [] : [] }));
+}
+
+/** The route a new session takes: the first available one (a subscription before keys). */
+export function defaultRoute(routes: ApiRoute[] | undefined): string | null {
+  return routes?.find((r) => r.available)?.id ?? null;
+}
+
+const PROVIDER_NAMES: Record<string, string> = { anthropic: "Anthropic", openai: "OpenAI", gemini: "Gemini", deepseek: "DeepSeek" };
+
+/** A tag for a session on an API key ("DeepSeek API"); null on its harness's own login or provider. */
+export function routeTag(route: string | null | undefined, harness?: string | null): string | null {
+  if (!route || route.endsWith(":subscription")) return null;
+  const provider = route.split(":")[0];
+  if (harness === "dsh" && provider === "deepseek") return null;
+  return `${PROVIDER_NAMES[provider] ?? provider} API`;
 }

@@ -8,6 +8,7 @@ import { copyText } from "@/lib/clipboard";
 import { clockTime } from "@/lib/format";
 import { getMicChoice, listMicrophones, setMicChoice } from "@/lib/microphone";
 import { DollSettings } from "@/features/doll/DollSettings";
+import { ApiKeysSection } from "./ApiKeys";
 import { PushSetting } from "./PushSetting";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { useApp } from "@/store/app";
@@ -303,7 +304,7 @@ export function SettingsDialog() {
   }, [open, forced, reload]);
 
   const visible = open || forced;
-  const activeTab = forced ? 1 : tab;
+  const activeTab = forced ? 2 : tab;
   return (
     <Dialog open={visible} onClose={() => !forced && setOpen(false)} fullScreen={isMobile} fullWidth maxWidth="sm">
       <div className="rz-settings-head">
@@ -313,14 +314,16 @@ export function SettingsDialog() {
       {!forced && (
         <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ px: 2, borderBottom: "1px solid var(--line)" }}>
           <Tab label="通用" />
+          <Tab label="模型 API" />
           <Tab label="安全" />
           <Tab label="设备" />
         </Tabs>
       )}
       <DialogContent sx={{ pt: 2.5 }}>
         {activeTab === 0 && <GeneralSection />}
-        {activeTab === 1 && data && <TotpSection data={data} reload={reload} />}
-        {activeTab === 2 && data && <DevicesSection data={data} reload={reload} />}
+        {activeTab === 1 && <ApiKeysSection />}
+        {activeTab === 2 && data && <TotpSection data={data} reload={reload} />}
+        {activeTab === 3 && data && <DevicesSection data={data} reload={reload} />}
       </DialogContent>
     </Dialog>
   );
