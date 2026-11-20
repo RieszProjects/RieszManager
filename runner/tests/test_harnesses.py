@@ -224,6 +224,9 @@ class HarnessRoutesTest(unittest.IsolatedAsyncioTestCase):
                                        handoff.preface("codex", None))
         shown = handoff.display_items(hub.harnesses.items(sid), sid, "fake")
         await hub.harnesses.set_imported(other, shown, sid, "原标题", pending=history)
+        await self.call("POST", f"sessions/{other}/messages", {"text": "/plan"})       # a command first: no history on it
+        await self.until(lambda: self._has_text(other, "echo: /plan"), "the command's reply")
+        self.assertTrue(hub.harnesses.records[other].get("pendingHandoff"))
         await self.call("POST", f"sessions/{other}/messages", {"text": "接着做"})
         await self.until(lambda: self._has_text(other, "接着做"), "the reply")
         texts = await self.texts(other)

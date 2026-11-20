@@ -565,8 +565,9 @@ class Harnesses:
         rec["promptCount"] = (rec.get("promptCount") or 0) + 1
         rec["firstPrompt"] = rec.get("firstPrompt") or text[:200]
         rec["lastPrompt"] = text[:200]
-        if rec.get("pendingHandoff"):
-            # The conversation moved here from another harness, put in front of the first message.
+        if rec.get("pendingHandoff") and not stripped.startswith("/"):
+            # The conversation moved here from another harness, put in front of the first message
+            # (not of a slash command, which the harness would no longer take as one).
             text = rec.pop("pendingHandoff") + "\n\n" + text
         rec["updatedAt"] = time.time()
         self._active[session_id] = time.time()

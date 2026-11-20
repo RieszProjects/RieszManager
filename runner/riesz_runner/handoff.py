@@ -148,7 +148,7 @@ def history_text(msgs: list[dict[str, str]], head: str) -> str:
 
 def strip_history(text: str) -> str:
     """What the user wrote, without history put in front of it (empty: the message was only history)."""
-    if not text.startswith(PREFACE_START):
+    if not text.lstrip().startswith(PREFACE_START):      # a harness may hand it back with leading space
         return text
     end = text.find(HISTORY_END)
     return "" if end < 0 else text[end + len(HISTORY_END):].strip()
