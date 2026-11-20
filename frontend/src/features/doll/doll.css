@@ -213,7 +213,7 @@
 /* The panel opened by tapping her: quick phrases, Claude plan usage, other balances. */
 .rz-doll.desktop .rz-doll-bubble.status { width: 300px; max-width: calc(100vw - 32px); }
 .rz-doll.mobile .rz-doll-bubble.status { width: min(300px, calc(100vw - var(--doll-w) - 22px)); max-width: none; }
-.rz-doll-panel { max-height: min(560px, calc(100dvh - 120px)); overflow-y: auto; overscroll-behavior: contain; }
+.rz-doll-panel { max-height: min(680px, calc(100dvh - 120px)); overflow-y: auto; overscroll-behavior: contain; }
 .rz-doll-sec + .rz-doll-sec { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
 .rz-doll-sec-head {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -221,6 +221,12 @@
 }
 .rz-doll-sec .rz-doll-usage { margin-top: 6px; padding-top: 0; border-top: 0; }
 .rz-doll-balances { display: grid; gap: 5px; }
+.rz-doll-quotas { display: grid; gap: 9px; }
+.rz-doll-quota .rz-doll-usage { margin-top: 5px; gap: 6px; }
+.rz-doll-tag {
+  margin-left: 6px; padding: 0 5px; border: 1px solid var(--sage); border-radius: 6px;
+  color: var(--sage-strong); font-size: 10.5px; line-height: 15px; vertical-align: 1px;
+}
 .rz-doll-balance { display: flex; justify-content: space-between; gap: 12px; font-size: 12.5px; color: var(--text2); }
 .rz-doll-balance .mono { color: var(--text); font-size: 12px; white-space: nowrap; }
 .rz-doll-link {

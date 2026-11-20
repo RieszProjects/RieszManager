@@ -1,13 +1,13 @@
 /**
  * The doll widget: Riesz, the mascot, peeking into the window, which can be squeezed
- * and tells you how much of the Claude plan has been used.
+ * and tells you how much of each subscription and API balance is left.
  *
  * - Desktop: she leans in from a bottom corner. Drag her to the other corner.
  *   When the composer reaches into her corner she stands on top of it instead.
  * - Phone: only half of her head peeks in from a screen edge. Tap to bring her
  *   out (and see the usage), drag to move her along the edge or to the other side.
- * - Tapping her opens a panel: quick phrases, the Claude plan usage and the balances
- *   of other AI services (when the runner is configured to check them), then what she says.
+ * - Tapping her opens a panel: quick phrases, the quotas (subscription limits and API balances,
+ *   the current session's route first; see quota.ts), then what she says.
  * - Press and hold to squeeze. Right-click (desktop) or long-press (phone) for options.
  *
  * Everything lives in a fixed overlay that ignores pointer events except on her
@@ -21,16 +21,18 @@ import { composerBus } from "@/lib/composerBus";
 import { storage } from "@/lib/storage";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { sessionTitle, useApp } from "@/store/app";
+import { useSessions } from "@/store/sessions";
 import { toast, useUi } from "@/store/ui";
 import { ART, EXPRESSIONS, type Expression } from "./art";
 import { SIZE_LABELS } from "./DollSettings";
 import * as say from "./lines";
-import { formatBalance, useBalances, type Balances } from "./balances";
+import { formatBalance, useBalances } from "./balances";
 import { phraseLabel, usePhrases } from "./phrases";
 import { PhrasesDialog } from "./PhrasesDialog";
 import { useDollPrefs, type DollSize } from "./prefs";
 import { squeak } from "./sound";
-import { peakWindow, resetLabel, useUsage, windowName, type Usage } from "./usage";
+import { CLAUDE_ROUTE, ordered, peakOf, quotas, sessionRoute, useLimits, type Quota } from "./quota";
+import { resetLabel, useUsage, windowName, type UsageWindow } from "./usage";
 import "./doll.css";
 
 const HEIGHTS = { corner: { s: 150, m: 200, l: 260 }, side: { s: 100, m: 124, l: 156 } } as const;
@@ -48,6 +50,8 @@ interface Bubble {
   kind: BubbleKind;
   text: string;
   usage?: boolean;
+  /** A warning about this quota's windows (Quota.id): they are shown under the line. */
+  quota?: string;
   /** Opened before the usage had loaded: say the line again once it has. */
   awaitUsage?: boolean;
   action?: { label: string; run: () => void };
@@ -86,13 +90,10 @@ function randomReaction(): Expression {
   return lastReaction;
 }
 
-function UsageRows({ usage }: { usage: Usage | null }) {
-  if (!usage) return <div className="rz-doll-usage dim">正在看用量……</div>;
-  if (usage.plan === "api") return <div className="rz-doll-usage dim">这台机器用的是 API 计费，没有套餐额度。</div>;
-  if (!usage.windows.length) return <div className="rz-doll-usage dim">没有拿到用量数据。</div>;
+function WindowRows({ windows }: { windows: UsageWindow[] }) {
   return (
     <div className="rz-doll-usage">
-      {usage.windows.map((w) => {
+      {windows.map((w) => {
         const level = w.percent >= 90 ? "high" : w.percent >= 80 ? "mid" : "";
         const reset = resetLabel(w.resetsAt, w.resetText);
         return (
@@ -110,17 +111,27 @@ function UsageRows({ usage }: { usage: Usage | null }) {
   );
 }
 
-function BalanceRows({ balances }: { balances: Balances }) {
+/** Every quota alike; the current session's one is marked. */
+function QuotaRows({ list, current }: { list: Quota[]; current: string | null }) {
+  if (!list.length) return <div className="rz-doll-usage dim">没有可查的额度。</div>;
   return (
-    <div className="rz-doll-balances">
-      {balances.providers.map((p) => (
-        <div key={p.id} className="rz-doll-balance">
-          <span>{p.label}</span>
-          {p.error ? (
-            <span className="dim" title={p.error}>查询失败</span>
-          ) : (
-            <span className="mono">{p.balances.map(formatBalance).join(" · ") || "—"}</span>
-          )}
+    <div className="rz-doll-quotas">
+      {list.map((q) => (
+        <div key={q.id} className="rz-doll-quota">
+          <div className="rz-doll-balance">
+            <span>
+              {q.label}
+              {current !== null && q.route === current && <span className="rz-doll-tag">当前</span>}
+            </span>
+            {q.error ? (
+              <span className="dim" title={q.error}>查询失败</span>
+            ) : q.windows === null ? (
+              <span className="dim">正在看……</span>
+            ) : q.balances ? (
+              <span className="mono">{q.balances.map(formatBalance).join(" · ") || "—"}</span>
+            ) : null}
+          </div>
+          {!q.error && q.windows && q.windows.length > 0 && <WindowRows windows={q.windows} />}
         </div>
       ))}
     </div>
@@ -227,6 +238,15 @@ export default function Doll() {
   const navigate = useUi((s) => s.navigate);
   const { usage, reload } = useUsage();
   const { balances, reload: reloadBalances } = useBalances();
+  const { limits, reload: reloadLimits } = useLimits();
+  // The session being looked at, and the route (subscription or API) it runs on.
+  const viewing = route.view === "session" ? route.sessionId : null;
+  const viewedState = useSessions((s) => (viewing ? s.data[viewing]?.state : undefined));
+  const viewedSummary = viewing ? sessions[viewing] : undefined;
+  const current = viewing
+    ? sessionRoute(viewedState?.api ?? viewedSummary?.api, viewedState?.harness ?? viewedSummary?.harness)
+    : null;
+  const list = useMemo(() => ordered(quotas(usage, limits, balances), current), [usage, limits, balances, current]);
 
   const [pressed, setPressed] = useState(false);
   const [boing, setBoing] = useState(false);
@@ -269,8 +289,11 @@ export default function Doll() {
     return () => window.clearInterval(t);
   }, []);
 
-  const peak = peakWindow(usage);
-  const limited = Boolean(usage?.limited);
+  // What she worries about: the current session's quota; elsewhere, all subscriptions.
+  const focus = current ? list.find((q) => q.route === current) : undefined;
+  const peak = current ? peakOf(focus?.windows) : peakOf(list.flatMap((q) => q.windows ?? []));
+  const limited = current ? Boolean(focus?.limited) : list.some((q) => q.limited);
+  const unmetered = current && !peak && focus?.windows !== null ? (focus?.balances ? "balance" : "none") : undefined;
   const sleeping = !busy && waiting.length === 0 && now - lastActive > SLEEP_AFTER_MS;
 
   let expression: Expression = "normal";
@@ -308,7 +331,7 @@ export default function Doll() {
   useEffect(() => () => window.clearTimeout(bubbleTimer.current), []);
 
   // ---- quick phrases -----------------------------------------------------------
-  const statusText = say.statusLine({ peak, limited, sleeping, busy });
+  const statusText = say.statusLine({ peak, limited, sleeping, busy, unmetered });
   const usageRef = useRef(usage);
   usageRef.current = usage;
   useEffect(() => {
@@ -321,7 +344,8 @@ export default function Doll() {
     showBubble({ kind: "status", text, usage: true, awaitUsage: !usageRef.current });
     if (!usePhrases.getState().loaded) usePhrases.getState().load().catch(() => toast("快捷短语加载失败", "error"));
     void reloadBalances();
-  }, [showBubble, reloadBalances]);
+    void reloadLimits(true);
+  }, [showBubble, reloadBalances, reloadLimits]);
 
   const pickPhrase = (text: string) => {
     if (composerBus.insert(text)) {
@@ -358,24 +382,25 @@ export default function Doll() {
     });
   }, [waiting, route, sessions, navigate, showBubble]);
 
-  // Usage crosses 80% / 95%: say so once per window and reset period.
+  // A subscription's usage crosses 80% / 95%: say so once per window and reset period.
   useEffect(() => {
-    if (!usage) return;
     const warned = storage.get<Record<string, number>>("doll.warned", {});
-    for (const w of usage.windows) {
-      const level = w.percent >= 95 ? 95 : w.percent >= 80 ? 80 : 0;
-      if (!level) continue;
-      const key = `${w.label}|${w.resetsAt ?? w.resetText}|${level}`;
-      if (warned[key]) continue;
-      warned[key] = Date.now();
-      // Forget keys older than two weeks.
-      for (const [k, t] of Object.entries(warned)) if (Date.now() - t > 14 * 86400000) delete warned[k];
-      storage.set("doll.warned", warned);
-      setOut(true);
-      showBubble({ kind: "warn", text: say.warnLine(w, windowName(w)), usage: true });
-      break;
+    for (const q of list) {
+      for (const w of q.windows ?? []) {
+        const level = w.percent >= 95 ? 95 : w.percent >= 80 ? 80 : 0;
+        if (!level) continue;
+        const key = `${q.id === CLAUDE_ROUTE ? "" : `${q.id}|`}${w.label}|${w.resetsAt ?? w.resetText}|${level}`;
+        if (warned[key]) continue;
+        warned[key] = Date.now();
+        // Forget keys older than two weeks.
+        for (const [k, t] of Object.entries(warned)) if (Date.now() - t > 14 * 86400000) delete warned[k];
+        storage.set("doll.warned", warned);
+        setOut(true);
+        showBubble({ kind: "warn", text: say.warnLine(w, `${q.label} ${windowName(w)}`), quota: q.id });
+        return;
+      }
     }
-  }, [usage, showBubble]);
+  }, [list, showBubble]);
 
   // ---- pointer handling ------------------------------------------------------
   const endPress = useCallback(() => {
@@ -578,15 +603,9 @@ export default function Doll() {
                 )}
               </section>
               <section className="rz-doll-sec">
-                <div className="rz-doll-sec-head"><span>Claude 额度</span></div>
-                <UsageRows usage={usage} />
+                <div className="rz-doll-sec-head"><span>额度</span></div>
+                <QuotaRows list={list} current={current} />
               </section>
-              {balances && balances.providers.length > 0 && (
-                <section className="rz-doll-sec">
-                  <div className="rz-doll-sec-head"><span>余额</span></div>
-                  <BalanceRows balances={balances} />
-                </section>
-              )}
               <section className="rz-doll-sec">
                 <div className="rz-doll-line">{bubble.text}</div>
               </section>
@@ -594,7 +613,10 @@ export default function Doll() {
           ) : (
             <>
               <div className="rz-doll-line">{bubble.text}</div>
-              {bubble.usage && <UsageRows usage={usage} />}
+              {(() => {
+                const q = bubble.quota ? list.find((x) => x.id === bubble.quota) : undefined;
+                return q?.windows?.length ? <WindowRows windows={q.windows} /> : null;
+              })()}
               {bubble.action && (
                 <button type="button" className="rz-doll-action" onClick={() => { bubble.action?.run(); closeBubble(); }}>
                   {bubble.action.label} →

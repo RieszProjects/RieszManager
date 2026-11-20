@@ -31,6 +31,7 @@ ROUTES: list[tuple[str, re.Pattern[str], str]] = [
         ("GET", r"^live$", "/v1/live"),
         ("GET", r"^usage$", "/v1/usage"),
         ("GET", r"^balances$", "/v1/balances"),
+        ("GET", r"^limits$", "/v1/limits"),
         ("GET", r"^schedules$", "/v1/schedules"),
         ("POST", r"^schedules$", "/v1/schedules"),
         ("POST", r"^schedules/(?P<id>[0-9a-f]{1,32})/(?P<action>update|run|delete)$", "/v1/schedules/{id}/{action}"),

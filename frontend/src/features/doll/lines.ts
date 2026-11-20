@@ -13,10 +13,19 @@ export function squishLine(): string {
   return pick(SQUISH);
 }
 
-/** The line shown above the usage numbers when she is tapped. */
-export function statusLine(opts: { peak: UsageWindow | null; limited: boolean; sleeping: boolean; busy: boolean }): string {
-  const { peak, limited, sleeping, busy } = opts;
+/** The line shown with the quotas when she is tapped. `unmetered`: the current session pays by
+ * balance ("balance") or runs on a route whose quota cannot be checked ("none"). */
+export function statusLine(opts: {
+  peak: UsageWindow | null;
+  limited: boolean;
+  sleeping: boolean;
+  busy: boolean;
+  unmetered?: "balance" | "none";
+}): string {
+  const { peak, limited, sleeping, busy, unmetered } = opts;
   if (limited) return "额度用完了。等重置之后再叫我。";
+  if (!peak && unmetered === "balance") return sleeping ? pick(SLEEPY) : "这个会话按量计费，余额在下面。";
+  if (!peak && unmetered === "none") return sleeping ? pick(SLEEPY) : "这个会话的线路查不到额度。";
   if (!peak) return sleeping ? pick(SLEEPY) : busy ? pick(BUSY) : "……今天的用量我看不到。";
   const p = peak.percent;
   if (p >= 95) return "快没了……省着点用。";

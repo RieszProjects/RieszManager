@@ -747,6 +747,8 @@ class Harnesses:
             if rec is not None and rec.get("handoffFrom"):
                 shown = _shown(list(event.get("items") or []))
                 event = {**event, "items": self._imported(sid) + shown if ev == "reset" else shown}
+        if ev == "rate_limit" and driver.harness == "codex" and getattr(driver, "api", None) in (None, "openai:subscription"):
+            self.hub.limits.codex_update(event.get("info"))          # the ChatGPT plan's limits, for the doll
         if ev == "state":
             event = {"ev": "state", "state": self.state(sid) if rec else driver.snapshot()}
             if rec is not None:

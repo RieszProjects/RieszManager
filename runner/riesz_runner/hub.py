@@ -20,6 +20,7 @@ from .tools import server as tools_server
 from .projects import ProjectResolver
 from .session_prefs import SessionPrefs
 from .balances import BalanceMonitor
+from .limits import Limits
 from .schedules import Scheduler
 from .subagents import SubagentStore
 from .usage import UsageMonitor
@@ -83,6 +84,7 @@ class Hub:
         # Sessions of other harnesses (Codex, DeepSeek Harness): see harnesses.py.
         self.tool_server = tools_server(cfg)       # Riesz Manager's own tools, for every harness (tools.py)
         self.harnesses = Harnesses(self)
+        self.limits = Limits(self)               # other subscriptions' usage limits (limits.py)
 
     # ---- lifecycle ----------------------------------------------------------
 
