@@ -91,6 +91,7 @@ class Config:
     codex_bin: str = ""
     dsh_bin: str = ""
     gemini_bin: str = ""
+    agy_bin: str = ""
     extra_args: list[str] = field(default_factory=list)
 
     @property
@@ -164,5 +165,6 @@ def load_config(env_file: str | None = None) -> Config:
         codex_bin=env.get("RUNNER_CODEX_BIN") or "",
         dsh_bin=env.get("RUNNER_DSH_BIN") or "",
         gemini_bin=env.get("RUNNER_GEMINI_BIN") or "",
+        agy_bin=env.get("RUNNER_AGY_BIN") or "",
         extra_args=extra,
     )

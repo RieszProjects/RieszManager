@@ -29,7 +29,7 @@
     <div class="toc-title">文档</div>
     <ul class="toc-site"><li><a href="index.html">前言</a></li><li><a href="quickstart.html">快速上手</a></li><li><a href="guide.html" class="current">使用指南</a></li><li><a href="deploy.html">部署教程</a></li></ul>
     <div class="toc-title">本页</div>
-    <ul class="toc-page"><li class="l2"><a href="#layout">界面总览</a></li><li class="l2"><a href="#conversation">对话</a></li><li class="l2"><a href="#composer">输入框</a></li><li class="l2"><a href="#modes">权限模式和模型</a></li><li class="l2"><a href="#harnesses">Codex、DeepSeek Harness 与 Gemini CLI</a></li><li class="l2"><a href="#apis">模型API与订阅</a></li><li class="l2"><a href="#prompts">确认和提问</a></li><li class="l2"><a href="#context">上下文用量</a></li><li class="l2"><a href="#sessions">会话管理</a></li><li class="l2"><a href="#terminal">终端里的会话</a></li><li class="l2"><a href="#spawn">让会话开新会话</a></li><li class="l2"><a href="#schedules">定时唤醒</a></li><li class="l2"><a href="#files">项目文件</a></li><li class="l2"><a href="#push">推送通知</a></li><li class="l2"><a href="#doll">莉思玩偶</a></li><li class="l2"><a href="#mobile">在手机上用</a></li><li class="l2"><a href="#settings">设置页</a></li><li class="l2"><a href="#shortcuts">快捷键</a></li><li class="l2"><a href="#faq">常见问题</a></li></ul>
+    <ul class="toc-page"><li class="l2"><a href="#layout">界面总览</a></li><li class="l2"><a href="#conversation">对话</a></li><li class="l2"><a href="#composer">输入框</a></li><li class="l2"><a href="#modes">权限模式和模型</a></li><li class="l2"><a href="#harnesses">Codex、DeepSeek Harness、Gemini CLI 与 Antigravity</a></li><li class="l2"><a href="#apis">模型API与订阅</a></li><li class="l2"><a href="#prompts">确认和提问</a></li><li class="l2"><a href="#context">上下文用量</a></li><li class="l2"><a href="#sessions">会话管理</a></li><li class="l2"><a href="#terminal">终端里的会话</a></li><li class="l2"><a href="#spawn">让会话开新会话</a></li><li class="l2"><a href="#schedules">定时唤醒</a></li><li class="l2"><a href="#files">项目文件</a></li><li class="l2"><a href="#push">推送通知</a></li><li class="l2"><a href="#doll">莉思玩偶</a></li><li class="l2"><a href="#mobile">在手机上用</a></li><li class="l2"><a href="#settings">设置页</a></li><li class="l2"><a href="#shortcuts">快捷键</a></li><li class="l2"><a href="#faq">常见问题</a></li></ul>
   </aside>
   <article>
 <h1>使用指南</h1>
@@ -96,34 +96,37 @@
 <p>点右边的模型按钮，可以选择Claude Code支持的模型，并在下面一排切换推理强度（<code>low</code>、<code>medium</code>、<code>high</code>、<code>xhigh</code>、<code>max</code>，具体可选档位取决于模型）。</p>
 <figure><img class="shot medium" src="assets/shots/model.webp" alt="模型与推理强度选择菜单，上方是模型列表，下方是推理强度档位" loading="lazy"><figcaption>选择模型与推理强度。</figcaption></figure>
 
-<h2 id="harnesses">Codex、DeepSeek Harness 与 Gemini CLI</h2>
-<p>除了Claude Code，会话也可以用<a href="https://github.com/openai/codex">Codex</a>、DeepSeek Harness（<code>dsh</code>）或<a href="https://github.com/google-gemini/gemini-cli">Gemini CLI</a>运行。新会话的输入框下方会多一个按钮，用来选择工具；没有安装或没有可用API的工具是灰色的，鼠标移上去能看到原因（部署方法见<a href="deploy.html#harnesses">部署：其他工具</a>）。这类会话在会话列表和标题下方带有工具名的标签。</p>
+<h2 id="harnesses">Codex、DeepSeek Harness、Gemini CLI 与 Antigravity</h2>
+<p>除了Claude Code，会话也可以用<a href="https://github.com/openai/codex">Codex</a>、DeepSeek Harness（<code>dsh</code>）、<a href="https://github.com/google-gemini/gemini-cli">Gemini CLI</a>或<a href="https://antigravity.google/">Antigravity CLI</a>（<code>agy</code>）运行。新会话的输入框下方会多一个按钮，用来选择工具；没有安装或没有可用API的工具是灰色的，鼠标移上去能看到原因（部署方法见<a href="deploy.html#harnesses">部署：其他工具</a>）。这类会话在会话列表和标题下方带有工具名的标签。</p>
 <p>对话、确认卡片、附件、中断和定时唤醒的用法都和Claude Code会话一样，权限模式和模型则是各工具自己的：</p>
 <div class="wrap"><table style="--first-col: 9em">
 <tr><th>工具</th><th>权限模式</th></tr>
 <tr><td>Codex</td><td>「只读」只能读文件，改文件或联网要先问你；「自动」可以改工作区里的文件、运行命令，越出工作区或要联网时先问你；「完全访问」不受沙箱限制，也不再询问。</td></tr>
 <tr><td>DeepSeek Harness</td><td>「只读」要写文件时先问你；「工作区可写」可以改工作区里的文件、运行命令，超出工作区时先问你；「完全访问」不受沙箱限制。</td></tr>
 <tr><td>Gemini CLI</td><td>「逐项确认」编辑文件和运行命令前都先问你；「自动接受编辑」编辑文件自动通过，命令仍需确认；「全部自动」不再询问；「计划模式」只读，先给出计划。</td></tr>
+<tr><td>Antigravity</td><td>Antigravity自己提供的模式（逐项确认、自动接受编辑、自动、计划等）。</td></tr>
 </table></div>
 <p>和Claude Code会话的不同之处：</p>
 <ul>
-  <li>Codex工作时发出的消息会并入正在进行的这一轮；DeepSeek Harness和Gemini CLI则排到这一轮结束之后。</li>
+  <li>Codex工作时发出的消息会并入正在进行的这一轮；DeepSeek Harness、Gemini CLI和Antigravity则排到这一轮结束之后。</li>
+  <li>Antigravity的会话只接受你在网页里输入的消息：不能设定时唤醒，其他会话也不能用<code>rieszctl</code>给它发消息（Google的条款只允许自己交互使用，见<a href="deploy.html#harnesses">部署</a>）。</li>
   <li>Codex和Gemini CLI的确认卡片多一个「允许，本会话不再询问」。</li>
   <li>DeepSeek Harness的回复是一步一整段出现的，不会逐字显示；中断时它会重启进程再接着这个会话。换模型或推理强度也要重启：空闲时马上换，正在工作时等这一轮结束。</li>
-  <li>没有斜杠命令、子代理列表、分叉和「保持运行」。「复制终端恢复命令」给出的是<code>codex resume</code>或<code>dsh tui --resume</code>（Gemini CLI没有按会话ID恢复的命令）。</li>
+  <li>没有斜杠命令、子代理列表、分叉和「保持运行」。「复制终端恢复命令」给出的是<code>codex resume</code>、<code>dsh tui --resume</code>或<code>agy --conversation</code>（Gemini CLI没有按会话ID恢复的命令）。</li>
 </ul>
 
 <h2 id="apis">模型API与订阅</h2>
-<p>每个会话运行在一条「线路」上：某个工具自己登录的订阅，或者某家服务商的API key。在「设置 → 模型 API」里可以看到Claude和ChatGPT订阅是否已登录，并为Anthropic、OpenAI、Google Gemini和DeepSeek各设一个API key（直接粘贴，或者填一条输出key的命令）；所有工具共用这些key，key只保存在运行runner的机器上，不会再传回浏览器。</p>
+<p>每个会话运行在一条「线路」上：某个工具自己登录的订阅，或者某家服务商的API key。在「设置 → 模型 API」里可以看到Claude、ChatGPT和Google AI订阅是否已登录，并为Anthropic、OpenAI、Google Gemini和DeepSeek各设一个API key（直接粘贴，或者填一条输出key的命令）；所有工具共用这些key，key只保存在运行runner的机器上，不会再传回浏览器。</p>
 <div class="wrap"><table style="--first-col: 9em">
 <tr><th>工具</th><th>能用的线路（靠前的优先）</th></tr>
 <tr><td>Claude Code</td><td>Claude订阅、Anthropic API、DeepSeek API</td></tr>
 <tr><td>Codex</td><td>ChatGPT订阅、OpenAI API、DeepSeek API</td></tr>
 <tr><td>DeepSeek Harness</td><td>DeepSeek API、OpenAI API、Anthropic API、Gemini API</td></tr>
 <tr><td>Gemini CLI</td><td>Gemini API</td></tr>
+<tr><td>Antigravity</td><td>Google AI订阅、Gemini API</td></tr>
 </table></div>
 <p>新会话默认用第一条可用的线路，也就是有订阅就用订阅。模型菜单按线路分组列出模型，选另一组里的模型就换到那条线路；不是默认线路的会话，标题下方会有「DeepSeek API」这样的标签。已有会话也可以换：Claude Code和DeepSeek Harness的会话会在空闲时重启到新线路，对话接着进行；Codex的会话固定在创建时的线路上（Codex不允许把已有对话换到别的服务商），要换就新开一个会话。</p>
-<p>订阅只在各工具自己的程序里使用：DeepSeek Harness虽然也能登录别家的订阅，但在别的软件里用这些订阅违反服务商的条款，所以它只走API key。Gemini CLI的Google账号登录同理不用（个人账号已于2026年6月转到Antigravity CLI）。</p>
+<p>订阅只在各工具自己的程序里使用：Claude订阅给Claude Code，ChatGPT订阅给Codex，Google AI订阅给Antigravity。DeepSeek Harness虽然也能登录别家的订阅，但在别的软件里用这些订阅违反服务商的条款，所以它只走API key。Gemini CLI的Google账号登录也不用（个人账号已于2026年6月转到Antigravity CLI）。</p>
 
 <h2 id="prompts">确认和提问</h2>
 <p>当Claude要执行需要许可的操作时，对话底部会出现确认卡片（例如「允许 命令?」），上面有三个按钮：</p>

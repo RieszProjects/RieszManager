@@ -37,6 +37,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 CHECK_INTERVAL = 15.0
+UNATTENDED_REFUSED = {"antigravity"}
 GRACE_SECONDS = 600          # a run later than this counts as missed
 MIN_EVERY_MINUTES = 5
 MAX_JITTER_MINUTES = 720
@@ -203,6 +204,10 @@ class Scheduler:
 
     async def create(self, data: dict[str, Any], created_by: str | None = None) -> dict[str, Any]:
         s = validate({"enabled": True, **data})
+        harnesses = getattr(self.hub, "harnesses", None)
+        if harnesses is not None and harnesses.harness_of(s["sessionId"]) in UNATTENDED_REFUSED:
+            # Antigravity on a consumer plan is for the user's own interactive use, not unattended runs.
+            raise ScheduleError("Antigravity sessions cannot have scheduled wake-ups")
         s.update(id=secrets.token_hex(6), createdAt=time.time(), createdBy=created_by, last=None,
                  lastBase=None, lastResult=None, lastUuid=None)
         plan(s, time.time())

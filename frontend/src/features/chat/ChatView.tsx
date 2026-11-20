@@ -13,7 +13,7 @@ import { Mascot } from "@/components/Mascot";
 import { StatusDot } from "@/components/StatusDot";
 import { copyText } from "@/lib/clipboard";
 import { clockTime } from "@/lib/format";
-import { harnessLabel, routeTag } from "@/lib/harnesses";
+import { harnessLabel, INTERACTIVE_ONLY, routeTag } from "@/lib/harnesses";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { sessionTitle, useApp } from "@/store/app";
 import { useOrganize } from "@/store/organize";
@@ -58,6 +58,7 @@ function resumeCommand(harness: string | null | undefined, sessionId: string): s
   if (harness === "codex") return `codex resume ${sessionId}`;
   if (harness === "dsh") return `dsh tui --resume ${sessionId}`;
   if (harness === "gemini") return null;       // its --resume takes a list position, not the session id
+  if (harness === "antigravity") return `agy --conversation ${sessionId}`;
   return `claude --resume ${sessionId}`;
 }
 
@@ -100,11 +101,13 @@ function SessionMenu({ sessionId, state, cwd, title, keepAlive, harness }: {
             <ListItemIcon><GitFork size={16} /></ListItemIcon>分叉为新会话
           </MenuItem>
         )}
-        <MenuItem onClick={() => { close(); setScheduleSession(sessionId); }}>
-          <ListItemIcon><AlarmClock size={16} /></ListItemIcon>
-          <span className="rz-menu-grow">定时唤醒</span>
-          {scheduleCount > 0 && <span className="dim">{scheduleCount}</span>}
-        </MenuItem>
+        {!INTERACTIVE_ONLY.has(harness ?? "") && (
+          <MenuItem onClick={() => { close(); setScheduleSession(sessionId); }}>
+            <ListItemIcon><AlarmClock size={16} /></ListItemIcon>
+            <span className="rz-menu-grow">定时唤醒</span>
+            {scheduleCount > 0 && <span className="dim">{scheduleCount}</span>}
+          </MenuItem>
+        )}
         {!harness && (
           <MenuItem onClick={() => run(() => setKeepAlive(sessionId, !keepAlive))}>
             <ListItemIcon><Pin size={16} /></ListItemIcon>

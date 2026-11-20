@@ -890,3 +890,4 @@ body.rz-dragging, body.rz-dragging * { cursor: grabbing !important; user-select:
 .rz-chip.mode-yolo { color: #e09a8e; border-color: rgba(196, 110, 98, 0.45); }
 .rz-chip.mode-autoEdit { color: var(--sage-strong); border-color: rgba(147, 168, 140, 0.3); }
 .rz-reload-wait { margin-left: 8px; font-size: 11.5px; color: var(--amber-strong); white-space: nowrap; cursor: default; }
+.rz-tag.harness-antigravity { color: #9fc4e8; background: rgba(110, 160, 214, 0.12); border-color: rgba(110, 160, 214, 0.32); }

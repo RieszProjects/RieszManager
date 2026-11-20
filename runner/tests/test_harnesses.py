@@ -195,6 +195,16 @@ class HarnessRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn(sid, [s["sessionId"] for s in sessions])
         self.assertIn("echo: hi", await self.texts(sid))
 
+    async def test_interactive_only_sessions_refuse_rieszctl(self):
+        from riesz_runner import server
+        server.INTERACTIVE_ONLY.add("fake")
+        self.addCleanup(server.INTERACTIVE_ONLY.discard, "fake")
+        sid = await self.new_session()
+        resp = await self.client.post(f"/v1/sessions/{sid}/messages", json={"text": "from another session"},
+                                      headers={"Authorization": f"Bearer {TOKEN}", "X-Riesz-Client": "rieszctl"})
+        self.assertEqual(resp.status, 409)
+        await self.call("POST", f"sessions/{sid}/messages", {"text": "typed in the web app"})
+
     async def test_credentials_never_come_back(self):
         from riesz_runner.server import HUB
 
@@ -210,7 +220,7 @@ class HarnessRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("sk-secret-value", json.dumps(listed))
         openai = next(p for p in listed["providers"] if p["id"] == "openai")
         self.assertEqual((openai["configured"], openai["source"]), (True, "key"))
-        self.assertEqual([s["loggedIn"] for s in listed["subscriptions"]], [False, False])
+        self.assertFalse(any(s["loggedIn"] for s in listed["subscriptions"]))
         await self.call("POST", "credentials/openai/clear", {})
         openai = next(p for p in (await self.call("GET", "credentials"))["providers"] if p["id"] == "openai")
         self.assertFalse(openai["configured"])

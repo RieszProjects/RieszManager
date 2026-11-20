@@ -52,7 +52,7 @@ PROVIDERS: dict[str, Provider] = {p.id: p for p in (
     Provider("deepseek", "DeepSeek", "DEEPSEEK_API_KEY"),
 )}
 
-SUBSCRIPTIONS = {"anthropic": "Claude 订阅", "openai": "ChatGPT 订阅"}
+SUBSCRIPTIONS = {"anthropic": "Claude 订阅", "openai": "ChatGPT 订阅", "gemini": "Google AI 订阅"}
 
 
 class CredentialError(Exception):
@@ -252,6 +252,11 @@ class Credentials:
                 out = await _output([bins["codex"], "login", "status"])
                 if "chatgpt" in out.lower():
                     found = {"plan": None}
+            elif provider == "gemini" and bins.get("agy"):
+                # Antigravity's Google sign-in: `agy models` lists models when signed in, else asks to sign in.
+                models = agy_models(await _output([bins["agy"], "models"]))
+                if models:
+                    found = {"plan": None, "models": models}
         except Exception as exc:  # noqa: BLE001 - no login found
             log.debug("subscription check for %s failed: %s", provider, exc)
         self._logins[provider] = (time.time(), found)
@@ -270,6 +275,22 @@ async def _output(argv: list[str]) -> str:
         await proc.wait()
         raise
     return out.decode(errors="replace")
+
+
+def agy_models(out: str) -> list[dict[str, Any]]:
+    """Models in the output of `agy models` (none when it is not signed in)."""
+    if "sign in" in out.lower() or "error" in out.lower():
+        return []
+    models = []
+    for line in out.splitlines():
+        line = line.strip().lstrip("-*• ").strip()
+        if not line or line.lower().startswith(("fetching", "available")) or line.endswith(":"):
+            continue
+        model_id = line.split()[0]
+        if re.fullmatch(r"[A-Za-z0-9._:/-]{2,100}", model_id):
+            rest = line[len(model_id):].strip(" -–—()")
+            models.append({"value": model_id, "displayName": rest or model_id})
+    return models
 
 
 # ---- model lists -----------------------------------------------------------------------------

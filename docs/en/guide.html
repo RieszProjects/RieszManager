@@ -29,7 +29,7 @@
     <div class="toc-title">Docs</div>
     <ul class="toc-site"><li><a href="index.html">Introduction</a></li><li><a href="quickstart.html">Quickstart</a></li><li><a href="guide.html" class="current">User Guide</a></li><li><a href="deploy.html">Deployment</a></li></ul>
     <div class="toc-title">On this page</div>
-    <ul class="toc-page"><li class="l2"><a href="#layout">Interface overview</a></li><li class="l2"><a href="#conversation">Conversation</a></li><li class="l2"><a href="#composer">Composer</a></li><li class="l2"><a href="#modes">Permission modes and models</a></li><li class="l2"><a href="#harnesses">Codex, DeepSeek Harness and Gemini CLI</a></li><li class="l2"><a href="#apis">Model APIs and subscriptions</a></li><li class="l2"><a href="#prompts">Approvals and questions</a></li><li class="l2"><a href="#context">Context usage</a></li><li class="l2"><a href="#sessions">Managing sessions</a></li><li class="l2"><a href="#terminal">Terminal sessions</a></li><li class="l2"><a href="#spawn">Starting sessions from other sessions</a></li><li class="l2"><a href="#schedules">Scheduled wake-ups</a></li><li class="l2"><a href="#files">Project files</a></li><li class="l2"><a href="#push">Push notifications</a></li><li class="l2"><a href="#doll">Riesz doll</a></li><li class="l2"><a href="#mobile">Using on mobile</a></li><li class="l2"><a href="#settings">Settings</a></li><li class="l2"><a href="#shortcuts">Keyboard shortcuts</a></li><li class="l2"><a href="#faq">FAQ</a></li></ul>
+    <ul class="toc-page"><li class="l2"><a href="#layout">Interface overview</a></li><li class="l2"><a href="#conversation">Conversation</a></li><li class="l2"><a href="#composer">Composer</a></li><li class="l2"><a href="#modes">Permission modes and models</a></li><li class="l2"><a href="#harnesses">Codex, DeepSeek Harness, Gemini CLI and Antigravity</a></li><li class="l2"><a href="#apis">Model APIs and subscriptions</a></li><li class="l2"><a href="#prompts">Approvals and questions</a></li><li class="l2"><a href="#context">Context usage</a></li><li class="l2"><a href="#sessions">Managing sessions</a></li><li class="l2"><a href="#terminal">Terminal sessions</a></li><li class="l2"><a href="#spawn">Starting sessions from other sessions</a></li><li class="l2"><a href="#schedules">Scheduled wake-ups</a></li><li class="l2"><a href="#files">Project files</a></li><li class="l2"><a href="#push">Push notifications</a></li><li class="l2"><a href="#doll">Riesz doll</a></li><li class="l2"><a href="#mobile">Using on mobile</a></li><li class="l2"><a href="#settings">Settings</a></li><li class="l2"><a href="#shortcuts">Keyboard shortcuts</a></li><li class="l2"><a href="#faq">FAQ</a></li></ul>
   </aside>
   <article>
 <h1>User Guide</h1>
@@ -97,34 +97,37 @@
 <p>Click the model button on the right to choose any model supported by Claude Code, and pick the reasoning effort on the row below (<code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, <code>max</code>; available levels depend on the model).</p>
 <figure><img class="shot medium" src="../assets/shots/model.webp" alt="Model and reasoning effort menu with the model list on top and effort levels at the bottom" loading="lazy"><figcaption>Choose the model and reasoning effort.</figcaption></figure>
 
-<h2 id="harnesses">Codex, DeepSeek Harness and Gemini CLI</h2>
-<p>Besides Claude Code, a session can run on <a href="https://github.com/openai/codex">Codex</a>, DeepSeek Harness (<code>dsh</code>) or <a href="https://github.com/google-gemini/gemini-cli">Gemini CLI</a>. A new session's composer has one more button for choosing the tool; tools that are not installed or have no usable API are greyed out, with the reason on hover (see <a href="deploy.html#harnesses">Deployment: other tools</a>). These sessions carry the tool's name as a tag in the session list and under the title.</p>
+<h2 id="harnesses">Codex, DeepSeek Harness, Gemini CLI and Antigravity</h2>
+<p>Besides Claude Code, a session can run on <a href="https://github.com/openai/codex">Codex</a>, DeepSeek Harness (<code>dsh</code>), <a href="https://github.com/google-gemini/gemini-cli">Gemini CLI</a> or <a href="https://antigravity.google/">Antigravity CLI</a> (<code>agy</code>). A new session's composer has one more button for choosing the tool; tools that are not installed or have no usable API are greyed out, with the reason on hover (see <a href="deploy.html#harnesses">Deployment: other tools</a>). These sessions carry the tool's name as a tag in the session list and under the title.</p>
 <p>Conversations, permission cards, attachments, interrupting and scheduled wake-ups work as in Claude Code sessions; the permission modes and models are each tool's own:</p>
 <div class="wrap"><table style="--first-col: 9em">
 <tr><th>Tool</th><th>Permission modes</th></tr>
 <tr><td>Codex</td><td>"Read only" may only read files and asks before editing or going online; "Auto" may edit files in the workspace and run commands, and asks before going outside the workspace or online; "Full access" is not sandboxed and does not ask.</td></tr>
 <tr><td>DeepSeek Harness</td><td>"Read only" asks before writing files; "Workspace write" may edit files in the workspace and run commands, and asks before going outside it; "Full access" is not sandboxed.</td></tr>
 <tr><td>Gemini CLI</td><td>"Ask each time" asks before editing files and running commands; "Accept edits" approves edits and still asks for commands; "Fully automatic" does not ask; "Plan mode" is read-only and plans first.</td></tr>
+<tr><td>Antigravity</td><td>Antigravity's own modes (ask each time, accept edits, auto, plan, ...).</td></tr>
 </table></div>
 <p>How they differ from Claude Code sessions:</p>
 <ul>
-  <li>A message sent while Codex works joins the turn in progress; DeepSeek Harness and Gemini CLI take it after the turn ends.</li>
+  <li>A message sent while Codex works joins the turn in progress; DeepSeek Harness, Gemini CLI and Antigravity take it after the turn ends.</li>
+  <li>Antigravity sessions only take messages typed in the web app: no scheduled wake-ups, and other sessions cannot message them with <code>rieszctl</code> (Google's terms allow only your own interactive use; see <a href="deploy.html#harnesses">Deployment</a>).</li>
   <li>Codex's and Gemini CLI's permission cards have one more button, "Allow for this session".</li>
   <li>DeepSeek Harness replies appear a step at a time rather than word by word, and interrupting restarts its process on the same session. Changing its model or reasoning effort restarts it too: right away when idle, after the turn when working.</li>
-  <li>There are no slash commands, subagent lists, forking or "Keep running". "Copy terminal resume command" gives <code>codex resume</code> or <code>dsh tui --resume</code> (Gemini CLI has no command to resume by session id).</li>
+  <li>There are no slash commands, subagent lists, forking or "Keep running". "Copy terminal resume command" gives <code>codex resume</code>, <code>dsh tui --resume</code> or <code>agy --conversation</code> (Gemini CLI has no command to resume by session id).</li>
 </ul>
 
 <h2 id="apis">Model APIs and subscriptions</h2>
-<p>Each session runs on a route: a subscription its tool is logged in to, or a provider's API key. Settings → Model APIs shows whether the Claude and ChatGPT subscriptions are logged in, and keeps one API key each for Anthropic, OpenAI, Google Gemini and DeepSeek (pasted, or a command that prints it). All tools share these keys; they stay on the machine the runner runs on and are never sent back to the browser.</p>
+<p>Each session runs on a route: a subscription its tool is logged in to, or a provider's API key. Settings → Model APIs shows whether the Claude, ChatGPT and Google AI subscriptions are logged in, and keeps one API key each for Anthropic, OpenAI, Google Gemini and DeepSeek (pasted, or a command that prints it). All tools share these keys; they stay on the machine the runner runs on and are never sent back to the browser.</p>
 <div class="wrap"><table style="--first-col: 9em">
 <tr><th>Tool</th><th>Routes it can use (earlier ones first)</th></tr>
 <tr><td>Claude Code</td><td>Claude subscription, Anthropic API, DeepSeek API</td></tr>
 <tr><td>Codex</td><td>ChatGPT subscription, OpenAI API, DeepSeek API</td></tr>
 <tr><td>DeepSeek Harness</td><td>DeepSeek API, OpenAI API, Anthropic API, Gemini API</td></tr>
 <tr><td>Gemini CLI</td><td>Gemini API</td></tr>
+<tr><td>Antigravity</td><td>Google AI subscription, Gemini API</td></tr>
 </table></div>
 <p>A new session takes the first route that is available, so a subscription when there is one. The model menu lists models by route; picking one from another group moves to that route, and sessions not on their default route carry a tag such as "DeepSeek API" under the title. Existing sessions can move too: Claude Code and DeepSeek Harness sessions restart on the new route when idle and the conversation carries on; Codex sessions stay on the route they started with (Codex does not move a conversation to another provider), so start a new session instead.</p>
-<p>Subscriptions are only used in their own tools: DeepSeek Harness could sign in to other providers' subscriptions, but using them from other software is against those providers' terms, so it uses API keys only. For the same reason Gemini CLI's Google sign-in is not used (personal accounts moved to Antigravity CLI in June 2026).</p>
+<p>Subscriptions are only used in their own tools: the Claude subscription in Claude Code, ChatGPT in Codex, Google AI in Antigravity. DeepSeek Harness could sign in to other providers' subscriptions, but using them from other software is against those providers' terms, so it uses API keys only. Gemini CLI's Google sign-in is not used either (personal accounts moved to Antigravity CLI in June 2026).</p>
 
 <h2 id="prompts">Approvals and questions</h2>
 <p>When Claude wants to perform an action that needs permission, a confirmation card appears at the bottom of the conversation (for example, “Allow command?” (允许 命令?)) with three buttons:</p>

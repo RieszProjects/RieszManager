@@ -15,6 +15,10 @@ session takes the first one that is available unless told otherwise.
   bundled pi-ai adapter, mounted with a `--patch` file. API keys only: dsh
   could also sign in to subscriptions, but using those outside their own apps
   is against the providers' terms.
+- Antigravity CLI: the Google sign-in of `agy` itself (the user's Google AI
+  subscription, `agy acp --login`), or a Gemini API key. The official agy runs
+  unmodified and keeps its own sign-in; its sessions take messages typed in the
+  web app only (no scheduled wake-ups, no messages from other sessions).
 - Gemini CLI: a Gemini API key (GEMINI_API_KEY). Its Google sign-in is not used:
   personal accounts moved to Antigravity CLI, and Google's terms rule out using
   a Gemini CLI login from other software.
@@ -33,6 +37,7 @@ ROUTES: dict[str, list[str]] = {
     "codex": ["openai:subscription", "openai:key", "deepseek:key"],
     "dsh": ["deepseek:key", "openai:key", "anthropic:key", "gemini:key"],
     "gemini": ["gemini:key"],
+    "antigravity": ["gemini:subscription", "gemini:key"],
 }
 
 DEEPSEEK_ANTHROPIC_URL = "https://api.deepseek.com/anthropic"
@@ -65,7 +70,8 @@ async def describe(harness: str, credentials: Credentials, bins: dict[str, str |
         if auth == "subscription":
             login = await credentials.subscription(provider, bins)
             if login is None:
-                reason = "没有登录" + ("（claude auth login）" if provider == "anthropic" else "（codex login）")
+                reason = "没有登录（" + {"anthropic": "claude auth login", "openai": "codex login",
+                                          "gemini": "agy acp --login"}.get(provider, "") + "）"
             else:
                 plan = login.get("plan")
         elif not credentials.configured(provider):

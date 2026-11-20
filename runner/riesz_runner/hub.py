@@ -665,7 +665,8 @@ class Hub:
     # ---- model APIs (routes.py) ---------------------------------------------------
 
     def bins(self) -> dict[str, str | None]:
-        return {"claude": self.cfg.claude_bin, "codex": self.harnesses.bin("codex"), "dsh": self.harnesses.bin("dsh")}
+        return {"claude": self.cfg.claude_bin, "codex": self.harnesses.bin("codex"), "dsh": self.harnesses.bin("dsh"),
+                "agy": self.harnesses.bin("antigravity")}
 
     async def claude_setup(self, route: str | None) -> routes.ClaudeSetup:
         """How to start Claude Code for a route (None: the first available, the subscription before keys)."""

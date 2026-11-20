@@ -88,7 +88,7 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
   const routes = !sessionId && other ? newSessionRoutes : sessionRoutes;
   const route = (sessionId ? state?.api ?? knownApi : localRoute) ?? defaultRoute(routes);
   const currentRoute = routes.find((r) => r.id === route);
-  const nativeProvider = ({ codex: "openai", dsh: "deepseek", gemini: "gemini" } as Record<string, string>)[harness] ?? "anthropic";
+  const nativeProvider = ({ codex: "openai", dsh: "deepseek", gemini: "gemini", antigravity: "gemini" } as Record<string, string>)[harness] ?? "anthropic";
   const nativeRoute = !currentRoute || currentRoute.provider === nativeProvider;
   const models = currentRoute?.models?.length ? currentRoute.models : !sessionId && other ? [] : sessionModels;
   const routeLocked = Boolean(sessionId) && state?.capabilities?.apiSwitch === false;

@@ -3,7 +3,10 @@ import { useEffect, useState } from "react";
 import { api } from "@/api/client";
 import type { ApiRoute, HarnessInfo, ModelInfo } from "@/api/types";
 
-const SHORT: Record<string, string> = { claude: "Claude Code", codex: "Codex", dsh: "DeepSeek", gemini: "Gemini" };
+const SHORT: Record<string, string> = { claude: "Claude Code", codex: "Codex", dsh: "DeepSeek", gemini: "Gemini", antigravity: "Antigravity" };
+
+/** Harnesses whose sessions take only what is typed here: no scheduled wake-ups. */
+export const INTERACTIVE_ONLY = new Set(["antigravity"]);
 
 /** A short name for tags and placeholders. */
 export function harnessLabel(id: string | null | undefined): string {

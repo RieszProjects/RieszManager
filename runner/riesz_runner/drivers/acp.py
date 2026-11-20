@@ -138,7 +138,12 @@ class AcpDriver(Driver):
                 self._close_current()
                 await self.reset()
             else:
-                res = await self.peer.request("session/new", {"cwd": self.cwd, "mcpServers": []}, timeout=180)
+                try:
+                    res = await self.peer.request("session/new", {"cwd": self.cwd, "mcpServers": []}, timeout=180)
+                except JsonRpcError as exc:
+                    if not await self.authenticate(exc):
+                        raise
+                    res = await self.peer.request("session/new", {"cwd": self.cwd, "mcpServers": []}, timeout=180)
                 self.session_id = res.get("sessionId") or self.session_id
             await self._adopt(res or {})
         except Exception:
@@ -170,6 +175,10 @@ class AcpDriver(Driver):
 
     def mode_name(self, mode: dict[str, Any]) -> str:
         return str(mode.get("name") or mode.get("id"))
+
+    async def authenticate(self, error: JsonRpcError) -> bool:
+        """session/new was refused: sign in (`authenticate`) if this agent knows how, then it is tried once more."""
+        return False
 
     async def stop(self) -> None:
         self.cancel_permissions()

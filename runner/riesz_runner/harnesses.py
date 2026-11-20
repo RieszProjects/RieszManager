@@ -26,6 +26,7 @@ import uuid as uuidlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .drivers.antigravity import AntigravityDriver
 from .drivers.base import Driver
 from .drivers.codex import CodexDriver, probe_models
 from .drivers.dsh import EFFORTS, DshDriver
@@ -51,6 +52,7 @@ HARNESSES: dict[str, dict[str, Any]] = {
     "codex": {"name": "Codex", "bin": "codex", "arg": "codex", "driver": CodexDriver},
     "dsh": {"name": "DeepSeek Harness", "bin": "dsh", "arg": "dsh", "driver": DshDriver},
     "gemini": {"name": "Gemini CLI", "bin": "gemini", "arg": "gemini", "driver": GeminiDriver},
+    "antigravity": {"name": "Antigravity", "bin": "agy", "arg": "agy", "driver": AntigravityDriver},
 }
 
 
@@ -58,7 +60,7 @@ def find_bin(name: str, configured: str | None) -> str | None:
     """The harness's executable: as configured, on PATH, or in an nvm Node installation (newest first)."""
     if configured:
         return configured if os.access(configured, os.X_OK) else None
-    found = shutil.which(name)
+    found = shutil.which(name) or (os.path.expanduser(f"~/.local/bin/{name}") if os.access(os.path.expanduser(f"~/.local/bin/{name}"), os.X_OK) else None)
     if found:
         return found
     candidates = sorted(glob.glob(os.path.expanduser(f"~/.nvm/versions/node/*/bin/{name}")), key=os.path.getmtime, reverse=True)
@@ -87,7 +89,8 @@ class Harnesses:
     # ---- what is available ------------------------------------------------------------
 
     def bin(self, harness: str) -> str | None:
-        configured = {"codex": self.cfg.codex_bin, "dsh": self.cfg.dsh_bin, "gemini": self.cfg.gemini_bin}.get(harness)
+        configured = {"codex": self.cfg.codex_bin, "dsh": self.cfg.dsh_bin, "gemini": self.cfg.gemini_bin,
+                      "antigravity": self.cfg.agy_bin}.get(harness)
         return find_bin(HARNESSES[harness]["bin"], configured or None)
 
     async def available(self) -> list[dict[str, Any]]:
@@ -284,8 +287,14 @@ class Harnesses:
         route = route or (rec.get("api") if rec else None) or await routes.default(harness, self.hub.credentials, self.hub.bins())
         if route is None or not routes.valid(harness, route):
             return []
-        provider = routes.split(route)[0]
+        provider, auth = routes.split(route)
         try:
+            if auth == "subscription" and harness == "antigravity":
+                driver = self.drivers.get(session_id or "")
+                if driver is not None and driver.alive and rec and rec.get("api") == route and await driver.models():
+                    return await driver.models()
+                login = await self.hub.credentials.subscription(provider, self.hub.bins())
+                return list((login or {}).get("models") or [])
             if harness == "codex" and provider == "openai":
                 cached = self._models.get(f"codex:{route}")
                 if cached and time.time() - cached[0] < MODELS_TTL:
@@ -314,7 +323,7 @@ class Harnesses:
         spec = HARNESSES[harness]
         extra: dict[str, Any] = {spec["arg"]: self.bin(harness)} if spec.get("arg") else {}
         model = model or await self._default_model(harness, route)
-        if harness == "codex":
+        if harness in ("codex", "antigravity"):
             extra["api"] = route
         elif harness == "dsh":
             extra["provider"] = routes.dsh_provider(route)
@@ -333,9 +342,12 @@ class Harnesses:
         if not Path(cwd).is_dir():
             raise ControlError("directory does not exist")
         route = await self._route(harness, api)
-        session_id = None if harness in ("codex", "gemini") else str(uuidlib.uuid4())   # these name their sessions
+        session_id = None if harness in ("codex", "gemini", "antigravity") else str(uuidlib.uuid4())   # these name their sessions
         driver = await self._make(harness, cwd=cwd, session_id=session_id, route=route, model=model, effort=effort, mode=mode)
-        await driver.start()
+        try:
+            await driver.start()
+        except JsonRpcError as exc:                 # the harness refused (not signed in, ...): say why
+            raise ControlError(f"{HARNESSES[harness]['name']}: {exc.message}") from None
         sid = str(driver.session_id)
         now = time.time()
         self.records[sid] = {"id": sid, "harness": harness, "cwd": cwd, "createdAt": now, "updatedAt": now, "promptCount": 0,

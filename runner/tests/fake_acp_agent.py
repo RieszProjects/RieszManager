@@ -6,8 +6,14 @@ session/prompt text decides what happens: "edit" asks permission for an edit and
 """
 
 import json
+import os
 import sys
 import threading
+
+# FAKE_ACP_AUTH=signed-in: session/new needs `authenticate` first, which succeeds;
+# FAKE_ACP_AUTH=signed-out: it needs it and `authenticate` fails (no cached sign-in).
+AUTH = os.environ.get("FAKE_ACP_AUTH")
+authenticated = [AUTH is None]
 
 lock = threading.Lock()
 pending = {}
@@ -83,7 +89,16 @@ for line in sys.stdin:
     method, rid, p = msg["method"], msg.get("id"), msg.get("params") or {}
     if method == "initialize":
         send({"id": rid, "result": {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}, "authMethods": []}})
+    elif method == "authenticate":
+        if AUTH == "signed-in":
+            authenticated[0] = True
+            send({"id": rid, "result": {}})
+        else:
+            send({"id": rid, "error": {"code": -32000, "message": "browser sign-in needed"}})
     elif method == "session/new":
+        if not authenticated[0]:
+            send({"id": rid, "error": {"code": -32000, "message": "Authentication required"}})
+            continue
         send({"id": rid, "result": {"sessionId": "11111111-2222-4333-8444-555555555555", **SESSION}})
     elif method == "session/load":
         sid = p["sessionId"]

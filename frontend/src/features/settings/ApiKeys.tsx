@@ -19,7 +19,7 @@ interface Result {
   providers: ProviderKey[];
 }
 
-const LOGIN_COMMAND: Record<string, string> = { anthropic: "claude auth login", openai: "codex login" };
+const LOGIN_COMMAND: Record<string, string> = { anthropic: "claude auth login", openai: "codex login", gemini: "agy acp --login" };
 
 function KeyRow({ p, onChanged }: { p: ProviderKey; onChanged: (list: ProviderKey[]) => void }) {
   const [editing, setEditing] = useState(false);

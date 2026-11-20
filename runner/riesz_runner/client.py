@@ -72,7 +72,7 @@ class Runner:
 
     def call(self, method: str, path: str, body: dict[str, Any] | None = None, timeout: float = 120) -> Any:
         conn = _UnixConnection(self.socket, timeout)
-        headers = {"Authorization": f"Bearer {self.token}"}
+        headers = {"Authorization": f"Bearer {self.token}", "X-Riesz-Client": "rieszctl"}
         data = None
         if body is not None:
             data = json.dumps(body).encode()
