@@ -12,10 +12,13 @@ Adding a tool: one `Tool(...)` in TOOLS. Every harness gets it.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import os
 import re
 import socket
 import struct
+import uuid as uuidlib
 import sys
 import time
 from collections.abc import Awaitable, Callable
@@ -26,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 import aiohttp
 
 from .drivers.base import ToolServer
+from .harnesses import HARNESSES
 from .shares import ShareError
 
 if TYPE_CHECKING:
@@ -344,9 +348,91 @@ def _size(n: int) -> str:
     return f"{n} B"
 
 
+# ---- browser tasks -----------------------------------------------------------------------------------
+
+BROWSER_WAIT = 8 * 60          # answered within the call up to this long (the harnesses' MCP timeouts allow ~10 min)
+BROWSER_PREFACE = ("[浏览器任务，来自 {name} 会话 {caller}；这条消息是另一个 agent 发的，不是用户本人]\n"
+                   "用 Claude in Chrome 在用户的浏览器里完成下面的任务。需要用户本人决定的操作（提交表单、发消息或邮件、"
+                   "付款、删除、修改账号设置、输入密码等）不要做，在回复里写清需要用户确认什么。"
+                   "做完后在最后一条回复里写清结果，要的数据原样给出。\n\n任务：{task}")
+_background: set[asyncio.Task[Any]] = set()
+
+
+def _announce(hub: Hub, sid: str) -> None:
+    """Tell the web app a session's summary changed (its subagent list)."""
+    summary = hub.harnesses.summary(sid) if hub.harnesses.has(sid) else hub.session_summary(sid)
+    task = asyncio.get_running_loop().create_task(
+        hub.broadcast_global({"ev": "sessions", "sessions": [summary], "removed": []}))
+    _background.add(task)
+    task.add_done_callback(_background.discard)
+
+
+async def _until_done(hub: Hub, sid: str, seconds: float) -> bool:
+    """Wait for the session's turn to end (True), or give up after `seconds` (False)."""
+    start = time.time()
+    seen_work = False
+    while time.time() - start < seconds:
+        proc = hub.get_hosted(sid)
+        if proc is None or not proc.alive:
+            return True
+        working = bool(proc.busy or proc.queue or proc.permissions)
+        if working:
+            seen_work = True
+        elif seen_work or time.time() - start > 30:
+            return True
+        await asyncio.sleep(1.5)
+    return False
+
+
+async def _finish(call: Call, child: str) -> str:
+    reply = await _last_reply(call, child)
+    with contextlib.suppress(ToolError):
+        await call.api("POST", f"/v1/sessions/{child}/stop", {})
+    _announce(call.hub, call.session_id)
+    return reply or "（它没有给出回复）"
+
+
+async def browser_task(call: Call, a: dict[str, Any]) -> str:
+    hub = call.hub
+    task = str(a.get("task") or "").strip()
+    if not task:
+        raise ToolError("task 不能为空")
+    if (hub.prefs.get(call.session_id) or {}).get("subagentOf"):
+        raise ToolError("浏览器任务里不能再开浏览器任务")
+    harness = hub.harnesses.harness_of(call.session_id) or "claude"
+    name = {"claude": "Claude Code"}.get(harness) or HARNESSES[harness].name
+    proc = await hub.create_session(call.cwd() or str(hub.cfg.workspace_root), permission_mode="default", browser=True)
+    child = proc.session_id
+    hub.prefs.remember(child, startedBy=call.session_id, subagentOf=call.session_id, subagentTask=task[:200])
+    with contextlib.suppress(ToolError):
+        await call.api("POST", f"/v1/sessions/{child}/rename", {"title": "浏览器任务：" + task[:40]})
+    text = BROWSER_PREFACE.format(name=name, caller=call.session_id[:8], task=task)
+    await hub.delivery.send_new(proc, text, [], str(uuidlib.uuid4()))
+    _announce(hub, call.session_id)
+    if await _until_done(hub, child, BROWSER_WAIT):
+        return await _finish(call, child)
+
+    async def later() -> None:
+        await _until_done(hub, child, 6 * 3600)
+        reply = await _finish(call, child)
+        await hub.delivery.send(call.session_id, f"[浏览器任务 {child[:8]} 做完了，结果如下]\n\n{reply}", [], str(uuidlib.uuid4()))
+    job = asyncio.get_running_loop().create_task(later())
+    _background.add(job)
+    job.add_done_callback(_background.discard)
+    return (f"浏览器任务还在进行（可能在等用户批准），代办会话 {child[:8]}。"
+            "做完后结果会作为一条消息发给你，不用反复查。")
+
+
 _SESSION_ID = {"type": "string", "description": "会话 ID（可以只写前 8 位）"}
 
 TOOLS: list[Tool] = [
+    Tool("browser_task",
+         "让一个开着 Claude in Chrome 的 Claude Code 会话，在用户自己的浏览器里（带用户的登录状态）替你完成任务，"
+         "并把结果返回给你：查网页、读需要登录的页面、抄数据、截图等。它会出现在你的子代理列表里；"
+         "提交、发送、付款、删除这类要用户本人决定的操作它不会做，会在结果里说明。"
+         "最多等 8 分钟，超过的话先返回，做完后结果会作为一条消息发给你。",
+         {"task": {"type": "string", "description": "要在浏览器里做的事，写清楚网址、要找什么、结果要什么格式"}},
+         browser_task, required=("task",)),
     Tool("send_file",
          "把文件发给用户：图片、PDF、文档、表格、任何文件都行，会显示在用户的对话里（图片直接显示，其他文件可以点开查看或下载）。"
          "想让用户看一个文件时用它，不要只在回复里写路径或 file:// 链接。",

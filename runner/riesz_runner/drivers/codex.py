@@ -190,7 +190,8 @@ class CodexDriver(Driver):
         """`-c` overrides adding the server to Codex's mcp_servers (its config.toml table, TOML values)."""
         key = f"mcp_servers.{server.name}"
         return ["-c", f"{key}.command={json.dumps(server.command)}",
-                "-c", f"{key}.args={json.dumps(list(server.args))}"]
+                "-c", f"{key}.args={json.dumps(list(server.args))}",
+                "-c", f"{key}.tool_timeout_sec=900"]            # browser tasks wait up to 8 minutes (default 60)
 
     # ---- lifecycle --------------------------------------------------------------------
 

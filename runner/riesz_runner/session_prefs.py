@@ -46,6 +46,11 @@ class SessionPrefs:
         self._prune()
         self._save()
 
+    def children(self, parent: str) -> list[str]:
+        """Sessions started for `parent` as its subagents (browser tasks), oldest first."""
+        found = [(v.get("time") or 0, k) for k, v in self._data.items() if v.get("subagentOf") == parent]
+        return [k for _, k in sorted(found)]
+
     def keep_alive(self, session_id: str) -> bool:
         return bool(self._data.get(session_id, {}).get("keepAlive"))
 

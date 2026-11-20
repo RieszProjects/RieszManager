@@ -20,6 +20,9 @@ export interface SubagentEntry {
   background: boolean;
   finished: boolean;
   mtime: number;
+  /** A session started as this one's subagent (a browser task): opened as a session. */
+  sessionId?: string;
+  running?: boolean;
 }
 
 /** A finished subagent stays in the list this long (seconds). */
@@ -46,7 +49,8 @@ export const useSubagentLists = create<ListsStore>((set) => ({
   },
 }));
 
-const isRunning = (a: SubagentEntry, live: LiveInfo | undefined) => Boolean(a.toolUseId && live?.agents?.includes(a.toolUseId));
+const isRunning = (a: SubagentEntry, live: LiveInfo | undefined) =>
+  a.running ?? Boolean(a.toolUseId && live?.agents?.includes(a.toolUseId));
 
 /** Newest first: running, finished in the last 10 minutes, older. */
 function split(list: SubagentEntry[], live: LiveInfo | undefined, now: number) {
@@ -113,6 +117,7 @@ export function SessionSubagents({ session, live }: { session: SessionSummary; l
   const sessionId = session.sessionId;
   const list = useSubagentLists((s) => s.lists[sessionId]);
   const openSubagent = useUi((s) => s.openSubagent);
+  const navigate = useUi((s) => s.navigate);
   const current = useUi((s) => (s.subagent?.sessionId === sessionId ? s.subagent : null));
   const now = useNowSeconds();
   const [olderShown, setOlderShown] = useState(false);
@@ -129,8 +134,10 @@ export function SessionSubagents({ session, live }: { session: SessionSummary; l
         type="button"
         className={`rz-subagent-row${active ? " running" : ""}${selected ? " selected" : ""}`}
         title={[a.description, a.agentType].filter(Boolean).join(" · ")}
-        onClick={() => openSubagent({ sessionId, toolUseId: a.toolUseId, agentId: a.agentId, title: a.description,
-          cwd: session.cwd, projectId: session.project })}
+        onClick={() => a.sessionId
+          ? navigate({ view: "session", sessionId: a.sessionId })
+          : openSubagent({ sessionId, toolUseId: a.toolUseId, agentId: a.agentId, title: a.description,
+            cwd: session.cwd, projectId: session.project })}
       >
         {active ? <LoaderCircle size={12} className="spin" /> : <Bot size={12} />}
         <span className="rz-subagent-row-title clamp-1">{a.description || a.agentType || "子代理"}</span>

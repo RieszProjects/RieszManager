@@ -39,6 +39,8 @@ export interface SessionSummary {
   handoffFrom?: string | null;
   /** This session's conversation goes on in that session (another harness): it is not listed and leads there. */
   handedOffTo?: string | null;
+  /** Started by that session for a task (browser_task): listed among its subagents, not on its own. */
+  subagentOf?: string | null;
   cwd: string | null;
   gitBranch: string | null;
   title: string | null;

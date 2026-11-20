@@ -91,7 +91,8 @@ class Relay:
                 raise RuntimeError(RUNNER_DOWN) from exc
         if method == "tools/call":
             try:
-                return self.runner("POST", "/v1/tools/call", {"name": params.get("name"), "arguments": params.get("arguments") or {}})
+                return self.runner("POST", "/v1/tools/call", {"name": params.get("name"), "arguments": params.get("arguments") or {}},
+                                   timeout=900)
             except (OSError, ValueError):
                 return {"content": [{"type": "text", "text": RUNNER_DOWN}], "isError": True}
             except RuntimeError as exc:

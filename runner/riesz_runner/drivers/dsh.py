@@ -255,7 +255,8 @@ class DshDriver(Driver):
         """A patch list adding an entry of dsh's MCP client plugin (dsh-mcp-client) for the server.
         (A patch without `insert` only changes an entry the profile already has.)"""
         entry = {"id": f"mcp-{server.name}", "name": "@deepseek-ai/dsh-mcp-client",
-                 "config": {"serverName": server.name, "transport": "stdio", **server.stdio()}}
+                 "config": {"serverName": server.name, "transport": "stdio", **server.stdio(),
+                            "toolCallTimeoutMs": 900_000}}             # browser tasks wait up to 8 minutes (default 60 s)
         return "- insert: " + json.dumps([entry], ensure_ascii=False) + "\n"        # JSON is YAML
 
     def _tools_patch(self, server: ToolServer) -> str:

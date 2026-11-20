@@ -393,7 +393,9 @@ class Harnesses:
             "promptCount": rec.get("promptCount") or 0, "model": rec.get("model"), "effort": rec.get("effort"),
             "permissionMode": rec.get("mode"), "project": self.hub.projects.project_id_for(rec.get("cwd")),
             "live": self.live_info(session_id), "mtime": rec.get("updatedAt") or 0, "size": 0, "keepAlive": bool(rec.get("keepAlive")),
-            "startedBy": (self.hub.prefs.get(session_id) or {}).get("startedBy"), "interrupted": self.hub.prefs.interrupted(session_id), "subagents": 0,
+            "startedBy": (self.hub.prefs.get(session_id) or {}).get("startedBy"), "interrupted": self.hub.prefs.interrupted(session_id),
+            "subagents": len(children := self.hub.child_entries(session_id)),
+            "subagentsActive": sum(1 for c in children if c["running"]),
             "api": rec.get("api"), "handoffFrom": rec.get("handoffFrom"), "handedOffTo": rec.get("handedOffTo"),
         }
 

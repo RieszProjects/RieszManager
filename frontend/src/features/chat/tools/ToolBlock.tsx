@@ -311,6 +311,14 @@ function SubagentBar({ tool }: { tool: ToolBlockType }) {
   );
 }
 
+/** Riesz Manager's own tools under any harness's naming (mcp__riesz__x, "Run mcp_riesz_x", "x(...)"). */
+const RIESZ_LABELS: Record<string, string> = { send_file: "发送文件", browser_task: "浏览器任务" };
+function rieszLabel(name: string): string | null {
+  const n = name.replace(/^Run /, "");
+  const m = /^mcp_+riesz_+([a-z_]+)$/i.exec(n) ?? /^([a-z_]+)\b/.exec(n);
+  return (m && RIESZ_LABELS[m[1]]) ?? null;
+}
+
 function ToolBlockImpl({ tool }: { tool: ToolBlockType }) {
   const { cwd, pendingTools } = useSessionContext();
   const meta = toolMeta(tool.name, tool.input ?? {}, cwd);
@@ -326,8 +334,8 @@ function ToolBlockImpl({ tool }: { tool: ToolBlockType }) {
         <span className="rz-tool-icon">
           {pending ? <LoaderCircle size={15} className="spin" /> : terminated ? <CircleSlash size={15} /> : error ? <TriangleAlert size={15} /> : <Icon size={15} />}
         </span>
-        <span className="rz-tool-label">{isSendFile(tool.name) ? "发送文件" : meta.label}</span>
-        {mcp && !isSendFile(tool.name) && <span className="rz-tool-server">{mcp.server}</span>}
+        <span className="rz-tool-label">{rieszLabel(tool.name) ?? meta.label}</span>
+        {mcp && !rieszLabel(tool.name) && <span className="rz-tool-server">{mcp.server}</span>}
         <span className="rz-tool-summary mono">{meta.summary}</span>
         {terminated ? <span className="rz-tool-terminated">已终止</span> : headExtra(tool)}
         <ChevronRight size={14} className="rz-chevron" />

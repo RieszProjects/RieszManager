@@ -63,9 +63,13 @@ class ClaudeProcess:
         sink: EventSink,
         api: ClaudeSetup | None = None,
         tools: ToolServer | None = None,
+        browser: bool = False,
     ) -> None:
         self.cfg = cfg
         self.tools = tools              # Riesz Manager's own tools (tools.py), as an MCP server
+        # A browser task (tools.py: browser_task): Claude in Chrome on, its tools allowed without asking (the
+        # extension still asks per site); everything else asks as in the session's mode.
+        self.browser = browser
         # Which model API the process uses (routes.py); None: whatever Claude Code is logged in to.
         self.api = api
         self.session_id = session_id
@@ -121,7 +125,9 @@ class ClaudeProcess:
         if self.cfg.allow_bypass:
             args.append("--allow-dangerously-skip-permissions")
         chrome = self.cfg.chrome
-        if chrome == "on" or (chrome == "auto" and chrome_enabled_by_default(self.cfg.claude_home)):
+        if self.browser:
+            args += ["--chrome", "--allowedTools", "mcp__claude-in-chrome"]
+        elif chrome == "on" or (chrome == "auto" and chrome_enabled_by_default(self.cfg.claude_home)):
             args.append("--chrome")
         elif chrome == "off":
             args.append("--no-chrome")

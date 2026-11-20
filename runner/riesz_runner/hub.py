@@ -397,6 +397,10 @@ class Hub:
         data["startedBy"] = (self.prefs.get(session_id) or {}).get("startedBy")
         data["interrupted"] = self.prefs.interrupted(session_id)
         data["subagents"], data["subagentsActive"] = self.subagents.activity(session_id)
+        children = self.child_entries(session_id)
+        data["subagents"] += len(children)
+        data["subagentsActive"] = (data["subagentsActive"] or 0) + sum(1 for c in children if c["running"])
+        data["subagentOf"] = (self.prefs.get(session_id) or {}).get("subagentOf")
         data["api"] = (self.prefs.get(session_id) or {}).get("api")
         data["handoffFrom"] = (self.prefs.get(session_id) or {}).get("handoffFrom")
         data["handedOffTo"] = (self.prefs.get(session_id) or {}).get("handedOffTo")
@@ -596,6 +600,7 @@ class Hub:
                 sink=self._sink,
                 tools=self.tool_server,
                 api=await self.claude_setup(route),
+                browser=bool((self.prefs.get(session_id) or {}).get("browser")),
             )
             self.hosted[session_id] = proc
             try:
@@ -614,6 +619,7 @@ class Hub:
         permission_mode: str | None = None,
         effort: str | None = None,
         api: str | None = None,
+        browser: bool = False,
     ) -> ClaudeProcess:
         if self.reload_ready.is_set():
             raise ControlError("the runner is restarting; try again in a few seconds")
@@ -621,7 +627,7 @@ class Hub:
             raise ControlError("directory does not exist")
         setup = await self.claude_setup(api)
         session_id = str(uuidlib.uuid4())
-        self.prefs.remember(session_id, api=setup.route)
+        self.prefs.remember(session_id, api=setup.route, browser="1" if browser else None)
         proc = ClaudeProcess(
             self.cfg,
             session_id=session_id,
@@ -632,6 +638,7 @@ class Hub:
             sink=self._sink,
             tools=self.tool_server,
             api=setup,
+            browser=browser,
         )
         self.hosted[session_id] = proc
         try:
@@ -675,6 +682,19 @@ class Hub:
         return proc
 
     # ---- model APIs (routes.py) ---------------------------------------------------
+
+    def child_entries(self, parent: str) -> list[dict[str, Any]]:
+        """The sessions started as `parent`'s subagents (browser tasks), as entries of its subagent list;
+        `sessionId` makes the web app open them as sessions (their permission prompts are answered there)."""
+        out = []
+        for sid in self.prefs.children(parent):
+            pref = self.prefs.get(sid) or {}
+            proc = self.get_hosted(sid)
+            running = bool(proc is not None and proc.alive and (proc.busy or proc.queue or proc.permissions))
+            out.append({"agentId": f"rz-{sid}", "sessionId": sid, "toolUseId": None,
+                        "description": pref.get("subagentTask") or "", "agentType": "浏览器任务", "background": True,
+                        "finished": not running, "running": running, "size": 0, "mtime": pref.get("time") or 0})
+        return out
 
     def bins(self) -> dict[str, str | None]:
         return {"claude": self.cfg.claude_bin, "codex": self.harnesses.bin("codex"), "dsh": self.harnesses.bin("dsh"),

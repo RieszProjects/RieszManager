@@ -245,7 +245,8 @@ async def session_detail(request: web.Request) -> web.Response:
 async def session_subagents(request: web.Request) -> web.Response:
     """The session's subagents (see subagents.py): agentId, the Agent tool call that started it, ..."""
     hub = request.app[HUB]
-    return _json({"subagents": hub.subagents.list(_session_id(request))})
+    sid = _session_id(request)
+    return _json({"subagents": hub.subagents.list(sid) + hub.child_entries(sid)})
 
 
 async def subagent_items(request: web.Request) -> web.Response:
@@ -1173,7 +1174,7 @@ async def h_set_api(request: web.Request, hub: Hub, sid: str) -> web.Response:
 
 
 async def h_subagents(request: web.Request, hub: Hub, sid: str) -> web.Response:
-    return _json({"subagents": []})
+    return _json({"subagents": hub.child_entries(sid)})
 
 
 async def h_dismiss(request: web.Request, hub: Hub, sid: str) -> web.Response:

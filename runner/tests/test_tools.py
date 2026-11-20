@@ -240,7 +240,8 @@ class MountTest(unittest.IsolatedAsyncioTestCase):
 
     def test_codex(self):
         args = CodexDriver(cwd="/", sink=None).mount_tools(self.server)
-        self.assertEqual(args[0::2], ["-c", "-c"])
+        self.assertEqual(args[0::2], ["-c", "-c", "-c"])
+        self.assertEqual(args[5], "mcp_servers.riesz.tool_timeout_sec=900")
         self.assertEqual(args[1], f"mcp_servers.riesz.command={json.dumps(sys.executable)}")
         self.assertEqual(json.loads(args[3].split("=", 1)[1]), list(self.server.args))
 
@@ -250,7 +251,8 @@ class MountTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(text.startswith("- insert: "))
         [entry] = json.loads(text[len("- insert: "):])
         self.assertEqual(entry, {"id": "mcp-riesz", "name": "@deepseek-ai/dsh-mcp-client", "config": {
-            "serverName": "riesz", "transport": "stdio", "command": sys.executable, "args": list(self.server.args)}})
+            "serverName": "riesz", "transport": "stdio", "command": sys.executable, "args": list(self.server.args),
+            "toolCallTimeoutMs": 900_000}})
         self.assertEqual(path.parent, self.cfg.state_dir / "tools")
 
     async def test_acp_session_parameters(self):
