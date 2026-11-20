@@ -95,7 +95,12 @@
 <p>Subscriptions are only used in their own tools: the Claude subscription in Claude Code, ChatGPT in Codex, Google AI in Antigravity. DeepSeek Harness could sign in to other providers' subscriptions, but using them from other software is against those providers' terms, so it uses API keys only. Gemini CLI's Google sign-in is not used either (personal accounts moved to Antigravity CLI in June 2026).</p>
 
 <h3 id="handoff">Continue in another tool</h3>
-<p>"转到其他工具继续" in the session menu hands the conversation to another tool to carry on: for now Claude Code or Codex. The conversation is rewritten in the target's own history format (a Claude Code transcript; Codex through its <code>thread/inject_items</code>), so the new tool simply continues. Thinking is not carried over, and tool calls and their results are kept as text excerpts, so the new tool looks files up or reruns commands when it needs details. The original session stays as it was; the new one has a "转自" tag under its title that leads back to it.</p>
+<p>"转到其他工具继续" in the session menu hands the conversation to another tool while it stays one session in the web app: the earlier conversation is still shown, then a "从这里起改用 … 继续" line, then the new tool's replies; the session list keeps one entry, and the old link leads here. The new tool gets a rewritten history: thinking is not carried over, and tool calls and results are kept as text excerpts, so it looks files up or reruns commands when it needs details.</p>
+<ul>
+  <li>Claude Code, Codex, DeepSeek Harness: the history is written into their own records (a Claude Code transcript, Codex's <code>thread/inject_items</code>, a DeepSeek Harness session log) and the conversation simply goes on.</li>
+  <li>Gemini CLI, Antigravity: there is nothing to write into, so the history goes in front of the first message you send there.</li>
+  <li>For a long conversation only what follows its last compaction is handed over (the summary and what came after); if that is still too long and it was a Claude Code session, it is compacted first. If it still does not fit, only the latest part goes, with the location of the full record.</li>
+</ul>
 
 <h2 id="prompts">Approvals and questions</h2>
 <p>When Claude wants to perform an action that needs permission, a confirmation card appears at the bottom of the conversation (for example, “Allow command?” (允许 命令?)) with three buttons:</p>

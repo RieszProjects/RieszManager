@@ -195,6 +195,27 @@ class HarnessRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn(sid, [s["sessionId"] for s in sessions])
         self.assertIn("echo: hi", await self.texts(sid))
 
+    async def test_history_handed_over_with_the_first_message(self):
+        from riesz_runner import handoff
+        from riesz_runner.server import HUB
+        hub = self.client.server.app[HUB]
+        sid = await self.new_session("earlier")
+        await self.until(lambda: self._has_text(sid, "echo: earlier"), "first reply")
+        other = (await hub.harnesses.create("fake", str(self.workspace))).session_id
+        history = handoff.history_text([{"role": "user", "text": "旧问题"}, {"role": "assistant", "text": "旧回答"}],
+                                       handoff.preface("codex", None))
+        shown = handoff.display_items(hub.harnesses.items(sid), sid, "fake")
+        await hub.harnesses.set_imported(other, shown, sid, "原标题", pending=history)
+        await self.call("POST", f"sessions/{other}/messages", {"text": "接着做"})
+        await self.until(lambda: self._has_text(other, "接着做"), "the reply")
+        texts = await self.texts(other)
+        self.assertIn("从这里起改用 fake 继续", texts)
+        self.assertIn("接着做", texts)                                     # the user's own words
+        reply = next(t for t in texts if t.startswith("echo: [以下是从"))     # the harness got the history too
+        self.assertIn("旧回答", reply)
+        self.assertEqual((await self.call("GET", f"sessions/{other}"))["session"]["title"], "原标题")
+        self.assertFalse(hub.harnesses.records[other].get("pendingHandoff"))
+
     async def test_credentials_never_come_back(self):
         from riesz_runner.server import HUB
 

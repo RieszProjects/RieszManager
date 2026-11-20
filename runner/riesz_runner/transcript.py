@@ -313,6 +313,8 @@ class TranscriptView:
         rtype = rec.get("type")
         if rtype in SKIP_TYPES or (rec.get("isSidechain") and not self.sidechain):
             return
+        if rec.get("rzHandoff"):
+            return            # history rewritten for a handoff: the source's own items are shown instead
         if rtype == "user":
             self._user(rec, offset)
         elif rtype == "assistant":

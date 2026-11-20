@@ -7,9 +7,17 @@ as a short text (what was run, an excerpt of what came back), thinking left out.
 That conversation is written the way the target harness keeps history:
 
 - Claude Code: a transcript file under ~/.claude/projects, resumed with --resume;
-- Codex: a new thread, the history added with thread/inject_items (Responses API items).
+- Codex: a new thread, the history added with thread/inject_items (Responses API items);
+- DeepSeek Harness: a session log holding the history as its first user message
+  (dsh accepts no hand-written replies: they need its own stream records);
+- Gemini CLI, Antigravity (nothing to write into): the history goes in front of
+  the first message the user sends there.
 
-The source session is left as it was; the new one records where it came from.
+For the user it stays one session: the source is hidden and points to the new
+one, which shows the source's items first (with a divider) and keeps the
+rewritten history out of sight. A long conversation is cut to what follows its
+last compaction; if still too long, the oldest part is left out, with the full
+record in a file the new harness can read.
 """
 
 from __future__ import annotations
@@ -25,7 +33,10 @@ TOOL_INPUT_CHARS = 400
 TOOL_OUTPUT_CHARS = 1500
 HARNESS_NAMES = {"claude": "Claude Code", "codex": "Codex", "dsh": "DeepSeek Harness", "gemini": "Gemini CLI",
                  "antigravity": "Antigravity"}
-TARGETS = ("claude", "codex")
+TARGETS = ("claude", "codex", "dsh", "gemini", "antigravity")
+PREFACE_START = "[以下是从 "
+HISTORY_END = "[以上是之前的对话记录]"
+BUDGET_CHARS = 240_000          # about 60–80k tokens of history; more is cut (or compacted first)
 
 
 def _clip(text: str, limit: int) -> str:
@@ -91,6 +102,54 @@ def conversation(items: list[dict[str, Any]]) -> list[dict[str, str]]:
     return msgs
 
 
+def since_last_compaction(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The items from the last compaction on (its summary stands for what came before)."""
+    for i in range(len(items) - 1, -1, -1):
+        if items[i].get("kind") == "compact":
+            return items[i:]
+    return items
+
+
+def size(msgs: list[dict[str, str]]) -> int:
+    return sum(len(m["text"]) for m in msgs)
+
+
+def fit(msgs: list[dict[str, str]], budget: int, record: str | None) -> list[dict[str, str]]:
+    """The latest messages that fit the budget; a note on what was left out (and where the whole record is)."""
+    if size(msgs) <= budget:
+        return msgs
+    kept: list[dict[str, str]] = []
+    total = 0
+    for m in reversed(msgs):
+        if total + len(m["text"]) > budget and kept:
+            break
+        kept.insert(0, m)
+        total += len(m["text"])
+    note = f"[更早的 {len(msgs) - len(kept)} 条消息太长，没有放进来" + (f"；完整记录在 {record}" if record else "") + "]"
+    if kept[0]["role"] == "user":
+        kept[0] = {"role": "user", "text": note + "\n\n" + kept[0]["text"]}
+    else:
+        kept.insert(0, {"role": "user", "text": note})
+    return kept
+
+
+def record_text(msgs: list[dict[str, str]]) -> str:
+    return "\n\n".join(f"【{'用户' if m['role'] == 'user' else '助手'}】{m['text']}" for m in msgs)
+
+
+def history_text(msgs: list[dict[str, str]], head: str) -> str:
+    """The conversation as one text, for harnesses that take it as a message (dsh, Gemini CLI, Antigravity)."""
+    return head + "\n\n" + record_text(msgs) + "\n\n" + HISTORY_END
+
+
+def strip_history(text: str) -> str:
+    """What the user wrote, without history put in front of it (empty: the message was only history)."""
+    if not text.startswith(PREFACE_START):
+        return text
+    end = text.find(HISTORY_END)
+    return "" if end < 0 else text[end + len(HISTORY_END):].strip()
+
+
 def preface(source_harness: str, source_model: str | None) -> str:
     name = HARNESS_NAMES.get(source_harness, source_harness)
     model = f"（模型 {source_model}）" if source_model else ""
@@ -114,8 +173,9 @@ def claude_records(msgs: list[dict[str, str]], session_id: str, cwd: str, model:
     for i, m in enumerate(msgs):
         rid = str(uuidlib.uuid4())
         ts = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now - len(msgs) + i)) + ".000Z"
+        # rzHandoff: the web app shows the source's own items instead of these (transcript.py skips them).
         base = {"parentUuid": parent, "isSidechain": False, "userType": "external", "cwd": cwd, "sessionId": session_id,
-                "uuid": rid, "timestamp": ts}
+                "uuid": rid, "timestamp": ts, "rzHandoff": True}
         if m["role"] == "user":
             records.append({**base, "type": "user", "message": {"role": "user", "content": m["text"]}})
         else:
@@ -150,18 +210,52 @@ def responses_items(msgs: list[dict[str, str]]) -> list[dict[str, Any]]:
     return out
 
 
-def display_items(items: list[dict[str, Any]], source: str) -> list[dict[str, Any]]:
-    """The source's items as shown before the new session's own (thinking left out, keys and seqs of their own)."""
-    out = []
-    shown = [it for it in items if it.get("kind") in ("user", "assistant", "command", "output", "compact", "interrupted")]
+def display_items(items: list[dict[str, Any]], source: str, target: str) -> list[dict[str, Any]]:
+    """The source's items as shown before the new session's own, then a divider (keys and seqs of their own)."""
+    kinds = ("user", "assistant", "command", "output", "compact", "interrupted", "notice")
+    shown = [dict(it) for it in items if it.get("kind") in kinds]
+    shown.append({"kind": "notice", "level": "info", "subtype": "handoff", "ts": None, "uuid": None,
+                  "text": f"从这里起改用 {HARNESS_NAMES.get(target, target)} 继续"})
     for n, it in enumerate(shown):
-        it = dict(it)
-        if it.get("kind") == "assistant":
-            it["blocks"] = [b for b in it.get("blocks") or () if b.get("type") != "thinking"]
-            if not it["blocks"]:
-                continue
-        it["key"] = f"handoff:{source[:8]}:{it.get('key')}"
-        it["seq"] = n - len(shown) - 1                        # before the new session's own items (which start at 1)
+        if not str(it.get("key") or "").startswith("handoff:"):
+            it["key"] = f"handoff:{source[:8]}:{it.get('key') or n}"
+        it["seq"] = n - len(shown)                            # before the new session's own items (which start at 1)
         it["imported"] = True
-        out.append(it)
-    return out
+    return shown
+
+
+# ---- DeepSeek Harness -------------------------------------------------------------------------
+
+def dsh_session_dir(home: Path, cwd: str, session_id: str) -> Path:
+    """Where dsh keeps a session's log (its project folder name is the cwd with / as -, between dashes)."""
+    return home / "sessions" / ("-" + cwd.replace("/", "-") + "--") / session_id
+
+
+def write_dsh_seed(home: Path, cwd: str, session_id: str, text: str) -> Path:
+    """A dsh session log (format v4) whose one finished turn is a user message holding the history."""
+    import subprocess
+
+    now = int(time.time() * 1000)
+    header = {"type": "session", "version": 4, "id": session_id, "createdAt": now, "cwd": cwd, "isSeeded": False,
+              "delegationDepth": 0}
+    events = []
+
+    def ev(kind: str, data: dict[str, Any], **extra: Any) -> None:
+        events.append({"type": kind, "seq": len(events), "time": now + len(events), "data": data, **extra})
+
+    ev("turn/start", {"turn": 1})
+    ev("step/start", {"turn": 1, "step": 1})
+    ev("user/message", {"content": [{"type": "text", "text": text}], "source": {"kind": "user"}, "role": "user",
+                        "id": str(uuidlib.uuid4())}, surfaceOp="append")
+    ev("step/end", {"turn": 1, "step": 1})
+    ev("turn/end", {"turn": 1, "reason": {"kind": "completed"}})
+
+    def frame(lines: list[dict[str, Any]]) -> bytes:
+        raw = "".join(json.dumps(x, ensure_ascii=False) + "\n" for x in lines).encode()
+        return subprocess.run(["zstd", "-q", "-c", "--check"], input=raw, capture_output=True, check=True).stdout
+
+    folder = dsh_session_dir(home, cwd, session_id)
+    folder.mkdir(parents=True, exist_ok=False)
+    path = folder / "session.v4.jsonl.zstd"
+    path.write_bytes(frame([header]) + frame(events))         # the header alone in the first frame, as dsh requires
+    return path

@@ -37,6 +37,7 @@ export function useOrganizeView() {
 
     const projectVisible = (p: Project) => p.exists && (showArchived || !archived.project.has(p.id));
     const sessionVisible = (s: SessionSummary) => {
+      if (s.handedOffTo) return false; // continued in another harness: that session stands for it
       const project = s.project ? projectById.get(s.project) : undefined;
       if (project && !project.exists) return false; // its folder was deleted
       return showArchived || !isSessionArchived(s);

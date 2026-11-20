@@ -57,8 +57,8 @@ class ClaudeTranscriptTest(unittest.TestCase):
         for line in path.read_text().splitlines():
             view.feed_line(line, offset)
             offset += len(line) + 1
-        kinds = [i["kind"] for i in view.items]
-        self.assertEqual(kinds, ["user", "assistant", "user", "assistant"])
+        self.assertEqual(view.items, [])                    # the web app shows the source's own items instead
+        self.assertTrue(all(r.get("rzHandoff") for r in records if r.get("type") in ("user", "assistant")))
         parents = [r.get("parentUuid") for r in records if r.get("type") in ("user", "assistant")]
         uuids = [r.get("uuid") for r in records if r.get("type") in ("user", "assistant")]
         self.assertEqual(parents[1:], uuids[:-1])          # one chain
@@ -73,11 +73,45 @@ class CodexItemsTest(unittest.TestCase):
         self.assertEqual(items[1]["content"][0]["type"], "output_text")
 
     def test_display_items_come_first(self):
-        shown = handoff.display_items(ITEMS, "abcdef12-0000")
+        shown = handoff.display_items(ITEMS, "abcdef12-0000", "codex")
         self.assertTrue(all(i["seq"] < 1 for i in shown))
         self.assertEqual([i["seq"] for i in shown], sorted(i["seq"] for i in shown))
-        self.assertFalse(any(b.get("type") == "thinking" for i in shown for b in i.get("blocks") or ()))
-        self.assertNotIn("notice", [i["kind"] for i in shown])
+        self.assertEqual(shown[-1]["text"], "从这里起改用 Codex 继续")       # the divider, last
+        again = handoff.display_items(shown, "11112222-0000", "dsh")     # handed on again: keys stay unique
+        self.assertEqual(len({i["key"] for i in again}), len(again))
+
+
+class PlainHistoryTest(unittest.TestCase):
+    def test_history_in_front_of_a_message_is_hidden(self):
+        msgs = handoff.conversation(ITEMS)
+        text = handoff.history_text(msgs, handoff.preface("claude", "claude-opus-5-5")) + "\n\n接着做"
+        self.assertEqual(handoff.strip_history(text), "接着做")
+        self.assertEqual(handoff.strip_history(handoff.history_text(msgs, handoff.preface("codex", None))), "")
+        self.assertEqual(handoff.strip_history("普通消息"), "普通消息")
+
+    def test_fit_keeps_the_latest(self):
+        msgs = [{"role": "user", "text": "a" * 100}, {"role": "assistant", "text": "b" * 100},
+                {"role": "user", "text": "c" * 100}, {"role": "assistant", "text": "d" * 100}]
+        kept = handoff.fit(msgs, 250, "/rec.md")
+        self.assertEqual(kept[0]["role"], "user")
+        self.assertIn("更早的 2 条消息", kept[0]["text"])
+        self.assertIn("/rec.md", kept[0]["text"])
+        self.assertTrue(kept[-1]["text"].startswith("d"))
+
+    def test_since_last_compaction(self):
+        items = [{"kind": "user", "text": "old"}, {"kind": "compact", "summary": "摘要"}, {"kind": "user", "text": "new"}]
+        self.assertEqual([i.get("text") for i in handoff.since_last_compaction(items)], [None, "new"])
+
+    def test_dsh_seed_log(self):
+        import subprocess
+        home = Path(tempfile.mkdtemp())
+        path = handoff.write_dsh_seed(home, "/w/proj", "sid-1", "历史")
+        self.assertEqual(path.parent.parent.name, "--w-proj--")
+        lines = subprocess.run(["zstd", "-dc", str(path)], capture_output=True, check=True).stdout.decode().splitlines()
+        records = [json.loads(x) for x in lines]
+        self.assertEqual(records[0]["type"], "session")
+        self.assertEqual([r["type"] for r in records[1:]], ["turn/start", "step/start", "user/message", "step/end", "turn/end"])
+        self.assertEqual(records[3]["data"]["content"][0]["text"], "历史")
 
 
 if __name__ == "__main__":

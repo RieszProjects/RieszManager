@@ -214,11 +214,16 @@ class Harnesses:
             return json.loads((self.cache_dir / f"{session_id}.imported.json").read_text(encoding="utf-8")).get("items", [])
         return []
 
-    async def set_imported(self, session_id: str, items: list[dict[str, Any]], source: str, title: str | None) -> None:
+    async def set_imported(self, session_id: str, items: list[dict[str, Any]], source: str, title: str | None,
+                           pending: str | None = None) -> None:
+        """`pending`: history to put in front of the next message (harnesses with no history to write into)."""
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         (self.cache_dir / f"{session_id}.imported.json").write_text(json.dumps({"items": items}, ensure_ascii=False), encoding="utf-8")
         rec = self.records[session_id]
         rec["handoffFrom"] = source
+        rec["promptCount"] = max(rec.get("promptCount") or 0, 1)        # listed like a session with a conversation
+        if pending:
+            rec["pendingHandoff"] = pending
         if title:
             rec["customTitle"] = title
         self._save()
@@ -265,7 +270,7 @@ class Harnesses:
             "permissionMode": rec.get("mode"), "project": self.hub.projects.project_id_for(rec.get("cwd")),
             "live": self.live_info(session_id), "mtime": rec.get("updatedAt") or 0, "size": 0, "keepAlive": False,
             "startedBy": None, "interrupted": self.hub.prefs.interrupted(session_id), "subagents": 0,
-            "api": rec.get("api"), "handoffFrom": rec.get("handoffFrom"),
+            "api": rec.get("api"), "handoffFrom": rec.get("handoffFrom"), "handedOffTo": rec.get("handedOffTo"),
         }
 
     def summaries(self, project: str | None = None) -> list[dict[str, Any]]:
@@ -291,7 +296,7 @@ class Harnesses:
     def items(self, session_id: str) -> list[dict[str, Any]]:
         driver = self.drivers.get(session_id)
         own = driver.items.items if driver is not None and driver.items.items else self._cached_items(session_id)
-        return self._imported(session_id) + own
+        return self._imported(session_id) + _shown(own)
 
     async def models(self, session_id: str | None = None, harness: str | None = None,
                      route: str | None = None) -> list[dict[str, Any]]:
@@ -353,7 +358,7 @@ class Harnesses:
                               env=await self._env(harness, route), **extra)
 
     async def create(self, harness: str, cwd: str, *, model: str | None = None, effort: str | None = None,
-                     mode: str | None = None, api: str | None = None) -> Driver:
+                     mode: str | None = None, api: str | None = None, session_id: str | None = None) -> Driver:
         if harness not in HARNESSES:
             raise ControlError(f"unknown harness {harness}")
         if self.hub.reload_ready.is_set():
@@ -361,7 +366,8 @@ class Harnesses:
         if not Path(cwd).is_dir():
             raise ControlError("directory does not exist")
         route = await self._route(harness, api)
-        session_id = None if harness in ("codex", "gemini", "antigravity") else str(uuidlib.uuid4())   # these name their sessions
+        if session_id is None and harness not in ("codex", "gemini", "antigravity"):   # those name their sessions
+            session_id = str(uuidlib.uuid4())
         driver = await self._make(harness, cwd=cwd, session_id=session_id, route=route, model=model, effort=effort, mode=mode)
         try:
             await driver.start()
@@ -426,6 +432,9 @@ class Harnesses:
         rec["promptCount"] = (rec.get("promptCount") or 0) + 1
         rec["firstPrompt"] = rec.get("firstPrompt") or text[:200]
         rec["lastPrompt"] = text[:200]
+        if rec.get("pendingHandoff"):
+            # The conversation moved here from another harness, put in front of the first message.
+            text = rec.pop("pendingHandoff") + "\n\n" + text
         rec["updatedAt"] = time.time()
         self._active[session_id] = time.time()
         self._save()
@@ -548,8 +557,9 @@ class Harnesses:
         if ev in ("items", "reset"):
             if rec is not None:
                 self._save_items_soon(sid)
-            if ev == "reset" and rec is not None and rec.get("handoffFrom"):
-                event = {**event, "items": self._imported(sid) + list(event.get("items") or [])}
+            if rec is not None and rec.get("handoffFrom"):
+                shown = _shown(list(event.get("items") or []))
+                event = {**event, "items": self._imported(sid) + shown if ev == "reset" else shown}
         if ev == "state":
             event = {"ev": "state", "state": self.state(sid) if rec else driver.snapshot()}
             if rec is not None:
@@ -590,6 +600,20 @@ class Harnesses:
                                           detail=" ".join(str(event.get("text") or "").split())[:160])
         elif ev == "exit" and event.get("code") not in (0, None) and sid not in self._stopping:
             await self.hub._attention(sid, "exited", code=event.get("code"))
+
+
+def _shown(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Items as the web app shows them: history put in front of a message for a handoff is left out."""
+    from .handoff import PREFACE_START, strip_history
+    out = []
+    for it in items:
+        if it.get("kind") == "user" and str(it.get("text") or "").startswith(PREFACE_START):
+            text = strip_history(it["text"])
+            if not text:
+                continue
+            it = {**it, "text": text}
+        out.append(it)
+    return out
 
 
 async def _nowhere(driver: Driver, event: dict[str, Any]) -> None:

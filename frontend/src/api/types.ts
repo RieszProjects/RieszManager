@@ -37,6 +37,8 @@ export interface SessionSummary {
   api?: string | null;
   /** The session whose conversation this one continues in another harness. */
   handoffFrom?: string | null;
+  /** This session's conversation goes on in that session (another harness): it is not listed and leads there. */
+  handedOffTo?: string | null;
   cwd: string | null;
   gitBranch: string | null;
   title: string | null;

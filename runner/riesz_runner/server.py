@@ -274,12 +274,13 @@ async def session_items(request: web.Request) -> web.Response:
         return _json({"items": [], "hasMore": False, "total": 0})
     before = request.query.get("before")
     limit = min(int(request.query.get("limit", str(PAGE_ITEMS))), 1000)
-    items = view.items
+    every = hub.display_items(sid, view.items)        # with the earlier session's items when it continues one
+    items = every
     if before is not None:
         b = int(before)
         items = [it for it in items if it["seq"] < b]
     page = items[-limit:]
-    return _json({"items": page, "hasMore": len(items) > len(page), "total": len(view.items)})
+    return _json({"items": page, "hasMore": len(items) > len(page), "total": len(every)})
 
 
 async def session_image(request: web.Request) -> web.StreamResponse:
@@ -886,10 +887,11 @@ async def websocket(request: web.Request) -> web.WebSocketResponse:
                         subscriptions[sid] = sub
                     continue
                 view = await hub.catch_up(sid)
-                items = view.items[-SNAPSHOT_ITEMS:] if view else []
+                every = hub.display_items(sid, view.items) if view else []
+                items = every[-SNAPSHOT_ITEMS:]
                 queue.put_nowait({
                     "ev": "snapshot", "sessionId": sid, "items": items,
-                    "hasMore": bool(view and len(view.items) > len(items)),
+                    "hasMore": len(every) > len(items),
                     "state": hub.session_state(sid),
                     "session": hub.session_summary(sid) if hub.store.entries.get(sid) else None,
                 })

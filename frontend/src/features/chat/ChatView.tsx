@@ -63,7 +63,7 @@ function resumeCommand(harness: string | null | undefined, sessionId: string): s
 }
 
 /** Harnesses a conversation can be moved to (runner/riesz_runner/handoff.py). */
-const HANDOFF_TARGETS = ["claude", "codex"];
+const HANDOFF_TARGETS = ["claude", "codex", "dsh", "gemini", "antigravity"];
 
 /** "Continue in another tool": the conversation, without thinking, rewritten in that tool's own history. */
 function HandoffMenu({ sessionId, harness, anchor, onClose }: { sessionId: string; harness: string; anchor: HTMLElement | null; onClose: () => void }) {
@@ -76,7 +76,7 @@ function HandoffMenu({ sessionId, harness, anchor, onClose }: { sessionId: strin
     try {
       const res = await api<{ sessionId: string }>(`sessions/${sessionId}/handoff`, { body: { harness: target } });
       onClose();
-      navigate({ view: "session", sessionId: res.sessionId });
+      navigate({ view: "session", sessionId: res.sessionId }, true);
     } catch (err) {
       toast((err as Error).message, "error");
     } finally {
@@ -198,12 +198,12 @@ const DRAG_IDLE_MS = 700;
 
 export function ChatView({ sessionId }: { sessionId: string }) {
   const summary = useApp((s) => s.sessions[sessionId]);
-  // The harness of the session this one was moved from (handoff), if any.
-  const fromHarness = useApp((s) => {
-    const from = s.sessions[sessionId]?.handoffFrom;
-    return from ? s.sessions[from]?.harness ?? "claude" : null;
-  });
   const navigate = useUi((s) => s.navigate);
+  // A session continued in another harness leads to the session that carries it on.
+  const handedOffTo = summary?.handedOffTo;
+  useEffect(() => {
+    if (handedOffTo) navigate({ view: "session", sessionId: handedOffTo }, true);
+  }, [handedOffTo, navigate]);
   const live = useApp((s) => s.live[sessionId]);
   const projects = useApp((s) => s.projects);
   const data = useSessions((s) => s.data[sessionId]);
@@ -327,12 +327,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
               <StatusDot live={live} size={7} />
               {harness && <span className={`rz-tag harness harness-${harness}`}>{harnessLabel(harness)}</span>}
               {apiTag && <span className="rz-tag harness">{apiTag}</span>}
-              {summary?.handoffFrom && (
-                <button type="button" className="rz-tag harness rz-tag-btn" title="打开原来的会话"
-                  onClick={() => navigate({ view: "session", sessionId: summary.handoffFrom! })}>
-                  转自 {harnessLabel(fromHarness)}
-                </button>
-              )}
+
               {project && <span className="clamp-1">{project.name}</span>}
               {summary?.gitBranch && <span className="dim mono clamp-1">⎇ {summary.gitBranch}</span>}
               {keepAlive && <span className="rz-tag keep" title="保持运行：空闲时不会被关闭"><Pin size={10} />常驻</span>}
