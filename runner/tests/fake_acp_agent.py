@@ -122,6 +122,16 @@ for line in sys.stdin:
         send({"id": rid, "result": {"sessionId": "11111111-2222-4333-8444-555555555555", **SESSION}})
     elif method == "session/load":
         sid = p["sessionId"]
+        if os.environ.get("FAKE_ACP_LATE_REPLAY"):
+            # Like Antigravity: answer first, then send the history.
+            send({"id": rid, "result": SESSION})
+
+            def replay(sid=sid):
+                cancelled.wait(0.2)
+                update(sid, {"sessionUpdate": "user_message_chunk", "content": {"type": "text", "text": "earlier question"}})
+                update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "earlier answer"}})
+            threading.Thread(target=replay, daemon=True).start()
+            continue
         update(sid, {"sessionUpdate": "user_message_chunk", "content": {"type": "text", "text": "earlier question"}})
         update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "earlier answer"}})
         send({"id": rid, "result": SESSION})

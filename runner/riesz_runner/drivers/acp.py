@@ -104,6 +104,7 @@ class AcpDriver(Driver):
         self._kinds: dict[str, str] = {}          # tool call id -> its ACP kind (updates may leave it out)
         self._commands: list[dict[str, Any]] = []   # the agent's own slash commands (available_commands_update)
         self._open: dict[str, float] = {}           # tool calls started and not finished: id -> when
+        self._last_update = 0.0                     # when the last session/update came (monotonic)
 
     @property
     def pid(self) -> int | None:
@@ -150,6 +151,9 @@ class AcpDriver(Driver):
                 try:
                     res = await self.peer.request("session/load", {"sessionId": self.session_id, "cwd": self.cwd, "mcpServers": self._mcp_servers()},
                                                   timeout=180)
+                    # Antigravity answers before it has sent all of the history: the rest would land after the
+                    # next message. The replay is over once the updates stop.
+                    await self._settle()
                 finally:
                     self._loading = False
                 self._close_current()
@@ -404,9 +408,18 @@ class AcpDriver(Driver):
         self.items.put(assistant_item(key, [tool_block(key, "TodoWrite", {"todos": todos}, tool_result(""))]))
         self._close_current()
 
+    async def _settle(self, quiet: float = 0.5, limit: float = 15.0) -> None:
+        """Wait until no session/update has come for `quiet` seconds (at most `limit`)."""
+        start = time.monotonic()
+        while time.monotonic() - start < limit:
+            await asyncio.sleep(quiet / 2)
+            if time.monotonic() - self._last_update >= quiet:
+                return
+
     async def _notification(self, method: str, params: Any) -> None:
         if method != "session/update":
             return
+        self._last_update = time.monotonic()
         u = (params or {}).get("update") or {}
         kind = u.get("sessionUpdate")
         if kind == "agent_message_chunk":

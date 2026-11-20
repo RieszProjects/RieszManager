@@ -126,6 +126,27 @@ class BackgroundTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("paper built", driver.last_assistant_text())
 
 
+class LateReplayTest(unittest.IsolatedAsyncioTestCase):
+    """Antigravity answers session/load before replaying the history: the next message still goes after it."""
+
+    async def test_message_sent_right_after_resuming(self):
+        env = {**os.environ, "FAKE_ACP_LATE_REPLAY": "1"}
+        driver = AntigravityDriver(agy=AGENT, cwd=tempfile.mkdtemp(), sink=Events(), env=env,
+                                   session_id="11111111-2222-4333-8444-555555555555")
+        self.addAsyncCleanup(driver.stop)
+        await driver.start()
+        await driver.send("now")
+        deadline = time.time() + 10
+        while not driver.sink.of("result"):
+            self.assertLess(time.time(), deadline)
+            await asyncio.sleep(0.02)
+        await driver.flush()
+        shown = [(i["kind"], i.get("text") or " ".join(b["text"] for b in i.get("blocks") or () if b.get("type") == "text"))
+                 for i in driver.items.items]
+        self.assertEqual(shown, [("user", "earlier question"), ("assistant", "earlier answer"),
+                                 ("user", "now"), ("assistant", "echo: now [0 images, default]")])
+
+
 class ModelsTest(unittest.TestCase):
     def test_signed_out(self):
         self.assertEqual(agy_models("Fetching available models...\nError: Please sign in to view available models."), [])
