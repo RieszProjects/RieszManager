@@ -106,6 +106,10 @@ def own_session() -> str | None:
 
 
 def read_message(words: list[str], required: bool = True) -> str:
+    if "-" in words and words != ["-"]:
+        # Usually a command that split into more arguments than meant (e.g. an id built with a glob);
+        # sending the words would deliver a fragment instead of the message on standard input.
+        raise CliError(f"'-' (read the message from standard input) must be the only message argument; got {words!r}")
     if words and words != ["-"]:
         return " ".join(words)
     if words == ["-"] or not sys.stdin.isatty():
