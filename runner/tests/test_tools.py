@@ -156,6 +156,48 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
         started = [s for s in (await self.api("GET", "sessions"))["sessions"] if s.get("startedBy") == me]
         self.assertEqual(len(started), 1)
 
+    async def test_send_file(self):
+        me = await self.session("one")
+        driver = self.app[HUB].harnesses.drivers[me]
+        driver.fake_pid = os.getpid()
+        (self.workspace / "plot.png").write_bytes(b"\x89PNG\r\n\x1a\nfake")
+        (self.workspace / "notes.md").write_text("# 结论\n", encoding="utf-8")
+        relay = await self.relay()
+        text, error = await relay.call("send_file", paths=["plot.png", str(self.workspace / "notes.md")], caption="结果")
+        self.assertFalse(error, text)
+        self.assertIn("plot.png", text)
+        files = (await self.api("GET", f"sessions/{me}/shared"))["files"]
+        self.assertEqual(sorted(f["name"] for f in files), ["notes.md", "plot.png"])
+        md = next(f for f in files if f["name"] == "notes.md")
+        self.assertEqual((md["project"], md["mime"], md["caption"]), (f"@shared/{me}", "text/markdown", "结果"))
+        # The viewer opens it like any file, from the copy (the original may change or go).
+        (self.workspace / "notes.md").unlink()
+        shown = (await self.api("GET", f"files/content?project=@shared/{me}&path={md['ref']}"))["file"]
+        self.assertEqual(shown["content"], "# 结论\n")
+        text, error = await relay.call("send_file", path="missing.txt")
+        self.assertTrue(error)
+        self.assertIn("不存在", text)
+
+    async def test_open_a_linked_file(self):
+        me = await self.session("one")
+        (self.workspace / "a.txt").write_text("x")
+        res = await self.api("POST", f"sessions/{me}/open-file", {"path": f"file://{self.workspace}/a.txt"})
+        self.assertEqual(res, {"project": "work", "path": "a.txt"})
+        outside = Path(tempfile.mkdtemp()) / "secret.txt"
+        outside.write_text("no")
+        async with self.http.post(f"http://runner/v1/sessions/{me}/open-file", json={"path": str(outside)},
+                                  headers={"Authorization": f"Bearer {TOKEN}"}) as resp:
+            self.assertEqual(resp.status, 403)
+        # A file the harness wrote for the user in its own folder: sent, then opened from the copy.
+        art = Path(tempfile.mkdtemp())
+        FakeDriver.artifact_dirs = (str(art / "{id}"),)
+        self.addCleanup(setattr, FakeDriver, "artifact_dirs", ())
+        (art / me).mkdir()
+        (art / me / "plan.md").write_text("计划")
+        res = await self.api("POST", f"sessions/{me}/open-file", {"path": f"file://{art}/{me}/plan.md"})
+        self.assertEqual(res["project"], f"@shared/{me}")
+        self.assertEqual((await self.api("GET", f"files/content?project=@shared/{me}&path={res['path']}"))["file"]["content"], "计划")
+
     async def test_a_process_outside_hosted_sessions_is_refused(self):
         await self.session("one")                                      # claims no process
         relay = await self.relay()                                     # the list is for anyone (a harness asks while it starts)

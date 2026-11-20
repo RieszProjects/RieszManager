@@ -891,3 +891,19 @@ body.rz-dragging, body.rz-dragging * { cursor: grabbing !important; user-select:
 .rz-chip.mode-autoEdit { color: var(--sage-strong); border-color: rgba(147, 168, 140, 0.3); }
 .rz-reload-wait { margin-left: 8px; font-size: 11.5px; color: var(--amber-strong); white-space: nowrap; cursor: default; }
 .rz-tag.harness-antigravity { color: #9fc4e8; background: rgba(110, 160, 214, 0.12); border-color: rgba(110, 160, 214, 0.32); }
+
+/* Files an agent sent with send_file (features/chat/tools/SentFiles.tsx). */
+.rz-sent { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 10px 10px; }
+.rz-sent-caption { flex-basis: 100%; font-size: 13px; color: var(--text2); }
+.rz-sent-image { display: block; max-width: min(420px, 100%); padding: 0; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--bg1); cursor: zoom-in; overflow: hidden; line-height: 0; }
+.rz-sent-image img { display: block; max-width: 100%; max-height: 320px; width: auto; height: auto; }
+.rz-sent-file { display: flex; align-items: center; max-width: 100%; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--bg1); }
+.rz-sent-open {
+  display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 10px; border: 0; background: none;
+  color: var(--text); font: inherit; font-size: 13px; cursor: pointer; text-align: left;
+}
+.rz-sent-open:hover .rz-sent-name { text-decoration: underline; }
+.rz-sent-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rz-sent-size { flex: none; font-size: 12px; }
+.rz-sent-download { display: flex; padding: 8px 10px; border-left: 1px solid var(--line-soft); color: var(--text2); }
+.rz-sent-download:hover { color: var(--sage-strong); }

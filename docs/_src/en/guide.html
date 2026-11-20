@@ -196,13 +196,15 @@ rieszctl session schedule pause ID       # resume turns it back on, run sends no
 <p>Every session Riesz Manager hosts, whether it runs Claude Code, Codex, DeepSeek Harness, Gemini CLI or Antigravity, has the same set of Riesz Manager tools (named <code>mcp__riesz__…</code>) it can call itself:</p>
 <div class="wrap"><table style="--first-col: 10em">
 <tr><th>Tool</th><th>What it does</th></tr>
+<tr><td><code>send_file</code></td><td>Sends you files: images show in the conversation, other files as cards that open in the file viewer or download. It sends a copy, so later changes to the original do not matter.</td></tr>
 <tr><td><code>schedule_add</code></td><td>Adds a <a href="#schedules">scheduled wake-up</a> for the session itself (or another one). These are the same schedules as in the web app, where they can be seen and changed.</td></tr>
 <tr><td><code>schedule_list</code>, <code>schedule_change</code></td><td>Lists schedules; pauses, resumes, runs one now or removes one.</td></tr>
 <tr><td><code>session_list</code></td><td>Lists the running and kept-running sessions, and the tool each one uses.</td></tr>
 <tr><td><code>session_send</code>, <code>session_reply</code></td><td>Sends another session a message; shows its state and latest reply.</td></tr>
 <tr><td><code>session_new</code></td><td>Starts a new session hosted by Riesz Manager, in a tool of its choice.</td></tr>
 </table></div>
-<p>They do what <code>rieszctl session</code> does, without going through the shell. Whether a call needs your approval follows each tool's own permission mode. DeepSeek Harness also has a schedule tool of its own; its schedules do not go through Riesz Manager and do not fire once the session's process has stopped, so for lasting schedules ask it to use <code>mcp__riesz__schedule_add</code>.</p>
+<p>Links to local files in replies (<code>file:///…</code>) open too: files in the workspace open in the viewer, and plans and other files Antigravity writes in its own folder are copied first; files elsewhere cannot be opened.</p>
+<p>The schedule and session tools do what <code>rieszctl session</code> does, without going through the shell. Whether a call needs your approval follows each tool's own permission mode. DeepSeek Harness also has a schedule tool of its own; its schedules do not go through Riesz Manager and do not fire once the session's process has stopped, so for lasting schedules ask it to use <code>mcp__riesz__schedule_add</code>.</p>
 
 <h2 id="files">Project files</h2>
 <p>The “Files” (文件) tab in the right panel shows a read-only file tree of the current project, with git status badges on modified and untracked files; files and folders ignored by git are shown greyed out. Click any file to open the preview modal:</p>

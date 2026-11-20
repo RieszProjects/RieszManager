@@ -9,6 +9,7 @@ import { Markdown } from "@/components/Markdown";
 import { languageFor } from "@/lib/language";
 import { toast, useUi } from "@/store/ui";
 import { useSessionContext } from "../SessionContext";
+import { isSendFile, SentFiles } from "./SentFiles";
 import { mcpParts, toolMeta } from "./toolMeta";
 
 const OPEN_BY_DEFAULT = new Set(["Edit", "MultiEdit", "Write", "TodoWrite", "ExitPlanMode", "AskUserQuestion", "NotebookEdit", "ApplyPatch"]);
@@ -325,13 +326,14 @@ function ToolBlockImpl({ tool }: { tool: ToolBlockType }) {
         <span className="rz-tool-icon">
           {pending ? <LoaderCircle size={15} className="spin" /> : terminated ? <CircleSlash size={15} /> : error ? <TriangleAlert size={15} /> : <Icon size={15} />}
         </span>
-        <span className="rz-tool-label">{meta.label}</span>
-        {mcp && <span className="rz-tool-server">{mcp.server}</span>}
+        <span className="rz-tool-label">{isSendFile(tool.name) ? "发送文件" : meta.label}</span>
+        {mcp && !isSendFile(tool.name) && <span className="rz-tool-server">{mcp.server}</span>}
         <span className="rz-tool-summary mono">{meta.summary}</span>
         {terminated ? <span className="rz-tool-terminated">已终止</span> : headExtra(tool)}
         <ChevronRight size={14} className="rz-chevron" />
       </button>
       {(tool.name === "Agent" || tool.name === "Task") && <SubagentBar tool={tool} />}
+      {isSendFile(tool.name) && <SentFiles tool={tool} />}
       {open && (
         <div className="rz-tool-body">
           {body(tool)}

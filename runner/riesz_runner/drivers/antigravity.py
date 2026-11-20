@@ -31,6 +31,7 @@ MODE_DESCRIPTIONS = {m.id: m.description for m in MODES}
 
 class AntigravityDriver(AcpDriver):
     harness = "antigravity"
+    artifact_dirs = ("~/.gemini/antigravity-cli/brain/{id}",)       # implementation_plan.md, walkthroughs, ...
     capabilities = Capabilities(queue=True, approve_for_session=True, model_switch="next-turn", effort_switch="none")
     default_modes = MODES
 

@@ -10,6 +10,7 @@ import mimetypes
 import os
 import re
 import time
+import urllib.parse
 import uuid as uuidlib
 from pathlib import Path
 from typing import Any
@@ -589,6 +590,58 @@ async def schedule_action(request: web.Request) -> web.Response:
     return _json({"schedule": _schedule_view(hub, s)})
 
 
+def _handoff_chain(hub: Hub, sid: str) -> list[str]:
+    """The session and the ones it continues (handoffFrom), newest first."""
+    chain = [sid]
+    while len(chain) < 10:
+        rec = hub.harnesses.records.get(chain[-1]) or {}
+        prev = rec.get("handoffFrom") or (hub.prefs.get(chain[-1]) or {}).get("handoffFrom")
+        if not prev or prev in chain:
+            break
+        chain.append(prev)
+    return chain
+
+
+async def session_shared(request: web.Request) -> web.Response:
+    """Files the session's agent sent to the user (send_file), and those of the sessions it continues."""
+    hub = request.app[HUB]
+    sid = _session_id(request)
+    return _json({"files": [f for s in _handoff_chain(hub, sid) for f in hub.shares.list(s)]})
+
+
+async def open_file(request: web.Request) -> web.Response:
+    """Where the web app's file viewer finds a file a reply links to: {"project", "path"}.
+    Files in the workspace open in place; files the session's harness wrote for the user in its own
+    folders (Driver.artifact_dirs) are copied to the session's sent files; anything else is refused."""
+    hub = request.app[HUB]
+    sid = _session_id(request)
+    raw = str((await _body(request)).get("path") or "")
+    if raw.startswith("file://"):
+        raw = urllib.parse.unquote(urllib.parse.urlparse(raw).path)
+    if not raw.startswith("/"):
+        return _err(400, "an absolute path is needed")
+    path = Path(os.path.realpath(raw))
+    if not path.is_file():
+        return _err(404, "文件不存在")
+    try:
+        rel = path.relative_to(hub.cfg.workspace_root)
+        if len(rel.parts) > 1:
+            return _json({"project": rel.parts[0], "path": "/".join(rel.parts[1:])})
+        return _json({"project": ROOT_ID, "path": rel.parts[0]})
+    except ValueError:
+        pass
+    rec = hub.harnesses.records.get(sid)
+    if rec is not None:
+        for template in HARNESSES[rec["harness"]].driver.artifact_dirs:
+            folder = Path(os.path.realpath(os.path.expanduser(template.format(id=sid))))
+            if folder in path.parents:
+                entry = hub.shares.share(sid, str(path))
+                return _json({"project": entry["project"], "path": entry["ref"]})
+    if hub.cfg.allow_external_files:
+        return _json({"project": hub.projects.project_id_for(str(path.parent)), "path": path.name})
+    return _err(403, "这个文件不在工作区里，网页打不开；可以让它用 send_file 把文件发给你")
+
+
 RESUME_TEXT = ("刚才服务器重启（或运行环境意外停止），你上一轮的工作被打断了，当时在跑的命令和后台任务也都停了。"
                "请先看看中断前在做什么、做到了哪一步，再接着完成。")
 
@@ -816,6 +869,11 @@ async def history(request: web.Request) -> web.Response:
 def _project_root(request: web.Request) -> Path:
     hub = request.app[HUB]
     pid = request.query.get("project", "")
+    shared = hub.shares.project_root(pid)          # files agents sent ("@shared/<session id>", shares.py)
+    if shared is not None:
+        if not shared.is_dir():
+            raise files_mod.FileAccessError("nothing was sent in this session")
+        return shared
     path = hub.projects.path_for(pid)
     if path is None or not path.is_dir():
         raise files_mod.FileAccessError("unknown project")
@@ -1242,6 +1300,8 @@ def build_app(cfg: Config) -> web.Application:
     r.add_post("/v1/sessions/{sid}/stop", stop_session)
     r.add_post("/v1/sessions/{sid}/keep-alive", keep_alive)
     r.add_post("/v1/sessions/{sid}/resume", resume_session)
+    r.add_get("/v1/sessions/{sid}/shared", session_shared)
+    r.add_post("/v1/sessions/{sid}/open-file", open_file)
     r.add_get("/v1/tools", list_tools)
     r.add_post("/v1/tools/call", call_tool)
     r.add_get("/v1/schedules", list_schedules)
@@ -1272,6 +1332,8 @@ def build_app(cfg: Config) -> web.Application:
     r.add_post("/v1/sessions/{sid}/handoff", handoff_session)
     r.add_get(r"/v1/harnesses/{harness:[a-z]{1,16}}/models", harness_models)
     HARNESS_HANDLERS.update({
+        session_shared: lambda request, _hub, _sid: session_shared(request),
+        open_file: lambda request, _hub, _sid: open_file(request),
         session_detail: h_detail, session_items: h_items, session_image: h_image, session_commands: h_commands,
         context_limits: h_context_limits, send_message: h_send, resume_session: h_resume, start_session: h_start,
         stop_session: h_stop, interrupt: h_interrupt, cancel_message: h_cancel, answer_permission: h_permission,

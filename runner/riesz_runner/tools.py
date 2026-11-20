@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 import aiohttp
 
 from .drivers.base import ToolServer
+from .shares import ShareError
 
 if TYPE_CHECKING:
     from .hub import Hub
@@ -315,9 +316,44 @@ async def session_new(call: Call, a: dict[str, Any]) -> str:
     return f"已开新会话 {sid}（目录 {cwd}），它会出现在 Riesz Manager 网页里。用 session_reply 查看它的回复"
 
 
+async def send_file(call: Call, a: dict[str, Any]) -> str:
+    paths = a.get("paths") or a.get("path")
+    paths = [paths] if isinstance(paths, str) else list(paths or [])
+    if not paths:
+        raise ToolError("path 不能为空")
+    cwd = call.cwd() or "/"
+    sent, failed = [], []
+    for raw in paths:
+        full = os.path.join(cwd, os.path.expanduser(str(raw)))
+        try:
+            entry = call.hub.shares.share(call.session_id, full, a.get("caption"))
+        except ShareError as exc:
+            failed.append(str(exc))
+            continue
+        sent.append(f"{entry['name']}（{_size(entry['size'])}）")
+    if not sent:
+        raise ToolError("；".join(failed))
+    return "已发给用户：" + "、".join(sent) + ("\n没发出去：" + "；".join(failed) if failed else "")
+
+
+def _size(n: int) -> str:
+    for unit in ("B", "KB", "MB"):
+        if n < 1024 or unit == "MB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n} B"
+
+
 _SESSION_ID = {"type": "string", "description": "会话 ID（可以只写前 8 位）"}
 
 TOOLS: list[Tool] = [
+    Tool("send_file",
+         "把文件发给用户：图片、PDF、文档、表格、任何文件都行，会显示在用户的对话里（图片直接显示，其他文件可以点开查看或下载）。"
+         "想让用户看一个文件时用它，不要只在回复里写路径或 file:// 链接。",
+         {"path": {"type": "string", "description": "文件路径（相对路径按你的工作目录算）"},
+          "paths": {"type": "array", "items": {"type": "string"}, "description": "一次发多个文件时用"},
+          "caption": {"type": "string", "description": "附一句说明（可选）"}},
+         send_file),
     Tool("schedule_add",
          "定时唤醒：到点时 Riesz Manager 给会话（默认是你自己所在的会话）发一条消息，会话没在运行就先启动它。"
          "定时保存在 Riesz Manager 里，重启、空闲关闭后都有效。at（每天几点）和 every（每隔多久）二选一。",

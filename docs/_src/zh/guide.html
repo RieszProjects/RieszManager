@@ -195,13 +195,15 @@ rieszctl session schedule pause ID       # 暂停；resume 重新打开，run �
 <p>Riesz Manager托管的会话，不管用的是Claude Code、Codex、DeepSeek Harness、Gemini CLI还是Antigravity，都有同一组Riesz Manager工具（名字以<code>mcp__riesz__</code>开头），会话可以自己调用：</p>
 <div class="wrap"><table style="--first-col: 10em">
 <tr><th>工具</th><th>作用</th></tr>
+<tr><td><code>send_file</code></td><td>把文件发给你：图片直接显示在对话里，其他文件显示成卡片，点开在文件查看器里看，也可以下载。发出的是一份副本，原文件后来改了或删了也不影响。</td></tr>
 <tr><td><code>schedule_add</code></td><td>给自己（或别的会话）加一个<a href="#schedules">定时唤醒</a>，和网页上的定时是同一套，网页上能看到、能改。</td></tr>
 <tr><td><code>schedule_list</code>、<code>schedule_change</code></td><td>列出定时；暂停、恢复、立即发送一次、删除。</td></tr>
 <tr><td><code>session_list</code></td><td>列出正在运行和保持运行的会话，以及各自用的工具。</td></tr>
 <tr><td><code>session_send</code>、<code>session_reply</code></td><td>给另一个会话发消息；查看它的状态和最后一条回复。</td></tr>
 <tr><td><code>session_new</code></td><td>开一个由Riesz Manager托管的新会话，可以指定用哪个工具。</td></tr>
 </table></div>
-<p>它们做的事和<code>rieszctl session</code>一样，只是不经过命令行。调用时要不要你确认，由各工具自己的权限模式决定。DeepSeek Harness自己也带定时工具，那种定时不经过Riesz Manager，会话进程关掉后不会触发；要长期使用，请让它用<code>mcp__riesz__schedule_add</code>。</p>
+<p>回复里指向本机文件的链接（<code>file:///…</code>）也能点开：工作区里的文件直接在查看器里打开，Antigravity写在它自己目录里的计划等文件会先复制一份再打开，其他位置的文件打不开。</p>
+<p>定时和会话这几个工具做的事和<code>rieszctl session</code>一样，只是不经过命令行。调用时要不要你确认，由各工具自己的权限模式决定。DeepSeek Harness自己也带定时工具，那种定时不经过Riesz Manager，会话进程关掉后不会触发；要长期使用，请让它用<code>mcp__riesz__schedule_add</code>。</p>
 
 <h2 id="files">项目文件</h2>
 <p>右边面板的「文件」标签展示当前项目的文件树（只读），修改、新增等文件带有git状态标记，被git忽略的文件和文件夹显示为灰色。点任意文件可以打开预览窗口：</p>

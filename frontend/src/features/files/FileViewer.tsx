@@ -55,7 +55,7 @@ export function FileViewer() {
         <>
           <div className="rz-fileviewer-head">
             <div className="rz-fileviewer-title">
-              <div className="mono clamp-1">{target.path}</div>
+              <div className="mono clamp-1">{target.project.startsWith("@shared/") ? target.path.split("/").pop() : target.path}</div>
               {info && <div className="dim">{fileSize(info.size)} · 修改于 {clockTime(info.mtime)}{info.truncated ? " · 仅显示前面部分" : ""}</div>}
             </div>
             {info?.kind === "text" && previewable && (

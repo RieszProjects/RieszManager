@@ -53,6 +53,8 @@ ROUTES: list[tuple[str, re.Pattern[str], str]] = [
          "/v1/sessions/{sid}/{action}"),
         ("POST", rf"^sessions/(?P<sid>{UUID})/permissions/(?P<rid>[\w-]{{1,80}})$",
          "/v1/sessions/{sid}/permissions/{rid}"),
+        ("GET", rf"^sessions/(?P<sid>{UUID})/shared$", "/v1/sessions/{sid}/shared"),
+        ("POST", rf"^sessions/(?P<sid>{UUID})/open-file$", "/v1/sessions/{sid}/open-file"),
         ("GET", r"^history$", "/v1/history"),
         ("GET", r"^files/(?P<op>list|content|search)$", "/v1/files/{op}"),
     ]

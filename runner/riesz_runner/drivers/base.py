@@ -242,6 +242,9 @@ class Driver:
 
     harness = "?"
     capabilities = Capabilities()
+    # Folders where the harness itself writes files for the user (plans, reports), "{id}" for the session id:
+    # links to files there in its replies can be opened in the web app (server.py: open_file).
+    artifact_dirs: tuple[str, ...] = ()
 
     def __init__(self, *, cwd: str, sink: Sink, session_id: str | None = None, model: str | None = None,
                  effort: str | None = None, mode: str | None = None, env: dict[str, str] | None = None,
