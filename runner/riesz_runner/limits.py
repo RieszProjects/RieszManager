@@ -2,6 +2,7 @@
 
 - ChatGPT (Codex): its 5-hour and weekly windows from `account/rateLimits/read`, taken from a
   running Codex session's latest update when there is one, else from a short-lived app-server.
+- Google (Antigravity): `agy -p /quota`, which prints each model group's windows (no model is called).
 
 Each entry: {"id": route, "label", "plan", "windows": [{"label", "kind", "percent", "resetsAt",
 "resetText"}], "limited", "error"}, the windows shaped like usage.py's so the web app shows them alike.
@@ -13,8 +14,10 @@ import asyncio
 import logging
 import os
 import time
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from .credentials import _output
 from .drivers.codex import CLIENT_INFO
 from .drivers.jsonrpc import JsonRpcPeer
 
@@ -27,6 +30,8 @@ CACHE_SECONDS = 5 * 60
 MIN_REFRESH_SECONDS = 60
 LIVE_SECONDS = 10 * 60          # a running session's update is used if it is this recent
 KINDS = {300: "session", 1440: "day", 10080: "week"}
+AGY_KINDS = {"five hour": "session", "daily": "day", "weekly": "week"}
+AGY_GROUPS = {"gemini models": "Gemini 模型", "claude and gpt models": "Claude 和 GPT 模型"}
 
 
 def codex_windows(snapshot: dict[str, Any] | None) -> tuple[list[dict[str, Any]], bool]:
@@ -42,6 +47,31 @@ def codex_windows(snapshot: dict[str, Any] | None) -> tuple[list[dict[str, Any]]
         windows.append({"label": label, "kind": kind, "percent": float(w["usedPercent"]),
                         "resetsAt": w.get("resetsAt"), "resetText": None})
     return windows, bool((snapshot or {}).get("rateLimitReachedType"))
+
+
+def agy_windows(out: str) -> list[dict[str, Any]]:
+    """`agy -p /quota` lines ("Gemini Models<TAB>Weekly Limit Remaining<TAB>100%<TAB>2026-11-27T19:46:39Z") as windows."""
+    windows = []
+    for line in out.splitlines():
+        parts = [p.strip() for p in line.split("\t")]
+        if len(parts) != 4 or not parts[2].endswith("%"):
+            continue
+        group, name, remaining, reset = parts
+        try:
+            left = float(remaining[:-1])
+        except ValueError:
+            continue
+        try:
+            resets_at: float | None = datetime.fromisoformat(reset.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            resets_at = None
+        kind = next((k for key, k in AGY_KINDS.items() if name.lower().startswith(key)), "other")
+        scope = AGY_GROUPS.get(group.lower(), group)
+        # "(scope)" is shown after the window's name by the web app; an unknown window keeps its own name.
+        label = f"{name} ({scope})" if kind != "other" else f"{name}（{scope}）"
+        windows.append({"label": label, "kind": kind, "percent": max(0.0, 100.0 - left), "resetsAt": resets_at,
+                        "resetText": None if resets_at else reset})
+    return windows
 
 
 class Limits:
@@ -62,7 +92,7 @@ class Limits:
             age = time.time() - self._fetched
             if self._view is not None and (age < MIN_REFRESH_SECONDS or (age < CACHE_SECONDS and not force)):
                 return self._view
-            entries = [e for e in await asyncio.gather(self._codex()) if e is not None]
+            entries = [e for e in await asyncio.gather(self._codex(), self._antigravity()) if e is not None]
             self._fetched = time.time()
             self._view = {"limits": entries, "fetchedAt": self._fetched}
             return self._view
@@ -83,6 +113,25 @@ class Limits:
         except Exception as exc:  # noqa: BLE001 - shown as a failed check
             entry["error"] = str(exc) or type(exc).__name__
             log.info("codex limits check failed: %s", entry["error"])
+        return entry
+
+    async def _antigravity(self) -> dict[str, Any] | None:
+        login = await self.hub.credentials.subscription("gemini", self.hub.bins())
+        if login is None:
+            return None
+        entry: dict[str, Any] = {"id": "gemini:subscription", "label": "Google 订阅", "plan": None, "windows": [],
+                                 "limited": False, "error": None}
+        try:
+            agy = self.hub.harnesses.bin("antigravity")
+            if not agy:
+                raise RuntimeError("agy is not installed")
+            entry["windows"] = agy_windows(await _output([agy, "-p", "/quota"]))
+            if not entry["windows"]:
+                raise RuntimeError("agy /quota printed no quota")
+            entry["limited"] = any(w["percent"] >= 100 for w in entry["windows"])
+        except Exception as exc:  # noqa: BLE001 - shown as a failed check
+            entry["error"] = str(exc) or type(exc).__name__
+            log.info("antigravity quota check failed: %s", entry["error"])
         return entry
 
     async def _read_codex(self) -> dict[str, Any] | None:

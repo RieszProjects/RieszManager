@@ -7,7 +7,7 @@ import unittest
 from types import SimpleNamespace
 from typing import Any
 
-from riesz_runner.limits import Limits, codex_windows
+from riesz_runner.limits import Limits, agy_windows, codex_windows
 
 SNAPSHOT = {"primary": {"usedPercent": 12, "windowDurationMins": 300, "resetsAt": 1795220712},
             "secondary": {"usedPercent": 96, "windowDurationMins": 10080, "resetsAt": 1795572611},
@@ -35,6 +35,19 @@ class LimitsTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(limited)
         self.assertTrue(codex_windows({**SNAPSHOT, "rateLimitReachedType": "rateLimitReached"})[1])
         self.assertEqual(codex_windows(None), ([], False))
+
+    def test_antigravity_quota_lines(self):
+        out = ("Gemini Models\tWeekly Limit Remaining\t75%\t2026-11-27T19:46:39Z\n"
+               "Gemini Models\tFive Hour Limit Remaining\t100%\t2026-11-21T00:46:39Z\n"
+               "Claude and GPT models\tWeekly Limit Remaining\t0%\tsoon\n"
+               "Upgrade\thttps://example.invalid\n")
+        windows = agy_windows(out)
+        self.assertEqual([(w["label"], w["kind"], w["percent"]) for w in windows], [
+            ("Weekly Limit Remaining (Gemini 模型)", "week", 25.0),
+            ("Five Hour Limit Remaining (Gemini 模型)", "session", 0.0),
+            ("Weekly Limit Remaining (Claude 和 GPT 模型)", "week", 100.0)])
+        self.assertEqual(windows[0]["resetsAt"], 1795808799.0)
+        self.assertEqual((windows[2]["resetsAt"], windows[2]["resetText"]), (None, "soon"))
 
     async def test_a_running_sessions_update_is_used(self):
         limits = Limits(hub({"plan": None}))
