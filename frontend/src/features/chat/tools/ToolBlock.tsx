@@ -1,10 +1,12 @@
-import { CheckCircle2, ChevronRight, Circle, CircleDot, CircleSlash, LoaderCircle, TriangleAlert } from "lucide-react";
+import { CheckCircle2, ChevronRight, Circle, CircleDot, CircleSlash, Globe, LoaderCircle, TriangleAlert, Workflow } from "lucide-react";
 import { memo, useEffect, useState, type ReactNode } from "react";
 import { api, imageUrl } from "@/api/client";
 import type { ToolBlock as ToolBlockType, ToolResult } from "@/api/types";
 import { CodeBlock } from "@/components/CodeBlock";
 import { DiffView, diffStats, patchHunks, type Hunk, type PatchChange } from "@/components/DiffView";
 import { shortPath } from "@/lib/format";
+import { harnessLabel } from "@/lib/harnesses";
+import { useSubagentLists } from "@/features/sessions/SessionSubagents";
 import { Markdown } from "@/components/Markdown";
 import { languageFor } from "@/lib/language";
 import { toast, useUi } from "@/store/ui";
@@ -312,11 +314,46 @@ function SubagentBar({ tool }: { tool: ToolBlockType }) {
 }
 
 /** Riesz Manager's own tools under any harness's naming (mcp__riesz__x, "Run mcp_riesz_x", "x(...)"). */
-const RIESZ_LABELS: Record<string, string> = { send_file: "发送文件", browser_task: "浏览器任务" };
-function rieszLabel(name: string): string | null {
+const RIESZ_LABELS: Record<string, string> = {
+  send_file: "发送文件", browser_task: "浏览器任务", subagent_start: "子代理", subagent_send: "发给子代理",
+};
+function rieszTool(name: string): string | null {
   const n = name.replace(/^Run /, "");
   const m = /^mcp_+riesz_+([a-z_]+)$/i.exec(n) ?? /^([a-z_]+)\b/.exec(n);
-  return (m && RIESZ_LABELS[m[1]]) ?? null;
+  return m && RIESZ_LABELS[m[1]] ? m[1] : null;
+}
+function rieszLabel(name: string): string | null {
+  const tool = rieszTool(name);
+  return tool ? RIESZ_LABELS[tool] : null;
+}
+
+/** Under a browser_task / subagent_start / subagent_send call: a link to the session that did the work. */
+function ChildSessionLink({ tool }: { tool: ToolBlockType }) {
+  const { sessionId } = useSessionContext();
+  const kind = rieszTool(tool.name);
+  const list = useSubagentLists((s) => s.lists[sessionId]);
+  const load = useSubagentLists((s) => s.load);
+  const navigate = useUi((s) => s.navigate);
+  const done = Boolean(tool.result);
+  useEffect(() => {
+    if (sessionId) void load(sessionId).catch(() => undefined);
+  }, [sessionId, load, done]);
+  const input = (tool.input ?? {}) as Record<string, unknown>;
+  const task = String(input.task ?? "");
+  const wanted = kind === "browser_task" ? `浏览器任务：${task}`.slice(0, 200) : task.slice(0, 200);
+  const agentId = String(input.agent_id ?? "");
+  const found = [...(list ?? [])].reverse().find((a) => a.sessionId &&
+    (kind === "subagent_send" ? agentId && a.sessionId.startsWith(agentId) : a.description === wanted));
+  if (!found?.sessionId) return null;
+  const target = found.sessionId;
+  return (
+    <button type="button" className="rz-child-link" onClick={() => navigate({ view: "session", sessionId: target })}>
+      {found.via === "browser" ? <Globe size={13} /> : <Workflow size={13} />}
+      <span>打开{found.via === "browser" ? "浏览器任务" : "子代理"}会话</span>
+      {found.via === "riesz" && found.harness && <span className={`rz-tag harness-${found.harness} rz-subagent-tag`}>{harnessLabel(found.harness)}</span>}
+      <ChevronRight size={13} />
+    </button>
+  );
 }
 
 function ToolBlockImpl({ tool }: { tool: ToolBlockType }) {
@@ -342,6 +379,7 @@ function ToolBlockImpl({ tool }: { tool: ToolBlockType }) {
       </button>
       {(tool.name === "Agent" || tool.name === "Task") && <SubagentBar tool={tool} />}
       {isSendFile(tool.name) && <SentFiles tool={tool} />}
+      {(rieszTool(tool.name) === "browser_task" || rieszTool(tool.name)?.startsWith("subagent_")) && <ChildSessionLink tool={tool} />}
       {open && (
         <div className="rz-tool-body">
           {body(tool)}

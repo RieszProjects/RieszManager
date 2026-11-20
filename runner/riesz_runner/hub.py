@@ -695,6 +695,18 @@ class Hub:
             return None
         return bool(proc.busy or proc.queue or proc.permissions)
 
+    def _last_active(self, sid: str, pref: dict[str, Any]) -> float:
+        """When a session last did something (its subagent row is "recent" for a while after)."""
+        if self.harnesses.has(sid):
+            last = (self.harnesses.records.get(sid) or {}).get("updatedAt") or 0
+        else:
+            entry = self.store.get(sid)
+            last = entry.mtime if entry is not None else 0
+            proc = self.get_hosted(sid)
+            if proc is not None:
+                last = max(last, proc.last_activity)
+        return max(last, pref.get("time") or 0)
+
     def child_entries(self, parent: str) -> list[dict[str, Any]]:
         """The sessions started as `parent`'s subagents (tools.py: subagent_start, browser_task), as entries of
         its subagent list. `sessionId` makes the web app open them as sessions (prompts are answered there);
@@ -709,7 +721,7 @@ class Hub:
                         "description": pref.get("subagentTask") or "",
                         "agentType": "浏览器任务" if browser else (HARNESSES[harness].name if harness in HARNESSES else "Claude Code"),
                         "via": "browser" if browser else "riesz", "harness": harness, "background": True,
-                        "finished": not running, "running": running, "size": 0, "mtime": pref.get("time") or 0})
+                        "finished": not running, "running": running, "size": 0, "mtime": self._last_active(sid, pref)})
         return out
 
     def bins(self) -> dict[str, str | None]:
