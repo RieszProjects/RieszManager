@@ -130,9 +130,9 @@ HARNESSES: dict[str, HarnessSpec] = {s.id: s for s in (
         id="antigravity", name="Antigravity", label="Antigravity", bin="agy", driver=AntigravityDriver, arg="agy",
         native_provider="gemini", resume_command="agy --conversation {id}", handoff="first-message", fork="copy",
         commands={"compact": "offered:/compact"},     # agy has /compact; used when its ACP command list offers it
-        # No read-only mode: plan (plans first, then asks like default) is the most careful. Auto needs its
-        # terminal sandbox, so accept-edits stands in. Nothing approves everything: Riesz Manager's rz-bypass.
-        modes={"readonly": "plan", "ask": "default", "edits": "accept-edits", "auto": "accept-edits", "full": "rz-bypass"},
+        # No read-only mode: plan (plans first, then asks like default) is the most careful. Nothing
+        # approves everything: Riesz Manager's rz-bypass.
+        modes={"readonly": "plan", "ask": "default", "edits": "accept-edits", "auto": "auto", "full": "rz-bypass"},
         tools="mcp",
     ),
 )}

@@ -74,7 +74,7 @@ class BypassTest(unittest.IsolatedAsyncioTestCase):
         driver = await self.start()
         self.assertEqual([(m.id, m.tier) for m in driver.modes()],
                          [("default", "ask"), ("accept-edits", "edits"), ("plan", "ask"), ("rz-bypass", "full")])
-        self.assertEqual(driver.modes()[2].name, "先计划")
+        self.assertEqual(driver.modes()[2].name, "先计划")                  # the agent's own list (no auto here)
 
     async def test_permission_requests_are_approved_without_a_prompt(self):
         driver = await self.start()
