@@ -102,6 +102,36 @@ class PlainHistoryTest(unittest.TestCase):
         self.assertIn("/rec.md", kept[0]["text"])
         self.assertTrue(kept[-1]["text"].startswith("d"))
 
+    def test_long_history_in_several_messages(self):
+        msgs = [{"role": "user" if i % 2 == 0 else "assistant", "text": f"第{i}条，" + "中文内容" * 4000} for i in range(12)]
+        history = handoff.history_text(msgs, handoff.preface("claude", None))
+        parts = handoff.split_message(history, "新消息")
+        self.assertGreater(len(parts), 1)
+        self.assertTrue(all(len(part.encode()) <= handoff.MESSAGE_BYTES for part in parts))
+        self.assertTrue(all(part.startswith(handoff.PREFACE_START) for part in parts))        # the web app hides them
+        self.assertTrue(all(part.endswith(handoff.PART_NOTE) for part in parts[:-1]))
+        self.assertTrue(parts[-1].endswith("新消息"))                                          # the user's words, whole
+        self.assertEqual([handoff.strip_history(part) for part in parts], [""] * (len(parts) - 1) + ["新消息"])
+        self.assertTrue(all(f"第{i}条" in "".join(parts) for i in range(12)))
+        self.assertEqual(handoff.split_message("[以下是从 X]\n\n【用户】hi\n\n" + handoff.HISTORY_END, "ok"),
+                         ["[以下是从 X]\n\n【用户】hi\n\n" + handoff.HISTORY_END + "\n\nok"])
+
+    def test_one_record_bigger_than_a_message(self):
+        history = handoff.history_text([{"role": "user", "text": "长" * 200_000}], "[以下是从 X 会话转过来的历史记录。]")
+        parts = handoff.split_message(history, "末尾")
+        self.assertTrue(all(len(part.encode()) <= handoff.MESSAGE_BYTES for part in parts))
+        self.assertEqual(sum(part.count("长") for part in parts), 200_000)
+        self.assertTrue(parts[-1].endswith("末尾"))
+
+    def test_parts_and_their_replies_hidden(self):
+        from riesz_runner.harnesses import _shown
+        part = "[以下是从 X 会话转过来的历史记录。]\n（第 1/2 部分）\n\n【用户】旧\n\n" + handoff.PART_NOTE
+        last = "[以下是从 X 会话转过来的历史记录。]\n（第 2/2 部分）\n\n" + handoff.HISTORY_END + "\n\n新问题"
+        items = [{"kind": "user", "text": part}, {"kind": "assistant", "blocks": [{"type": "text", "text": "收到"}]},
+                 {"kind": "user", "text": last}, {"kind": "assistant", "blocks": [{"type": "text", "text": "回答"}]}]
+        self.assertEqual([(i["kind"], i.get("text") or i["blocks"][0]["text"]) for i in _shown(items)],
+                         [("user", "新问题"), ("assistant", "回答")])
+
     def test_since_last_compaction(self):
         items = [{"kind": "user", "text": "old"}, {"kind": "compact", "summary": "摘要"}, {"kind": "user", "text": "new"}]
         self.assertEqual([i.get("text") for i in handoff.since_last_compaction(items)], [None, "new"])

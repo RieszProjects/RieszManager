@@ -35,7 +35,7 @@ from .drivers.codex import CodexDriver, fork_thread, probe_models
 from .drivers.dsh import EFFORTS, DshDriver
 from .drivers.gemini import GeminiDriver, settings_file
 from .drivers.jsonrpc import JsonRpcError
-from . import routes
+from . import handoff, routes
 from .attention import LONG_TURN_SECONDS, describe_request
 from .credentials import PROVIDERS, CredentialError
 from .process import ClaudeProcess, ControlError
@@ -570,8 +570,11 @@ class Harnesses:
         rec["lastPrompt"] = text[:200]
         if rec.get("pendingHandoff") and not stripped.startswith("/"):
             # The conversation moved here from another harness, put in front of the first message
-            # (not of a slash command, which the harness would no longer take as one).
-            text = rec.pop("pendingHandoff") + "\n\n" + text
+            # (not of a slash command, which the harness would no longer take as one); a history too big
+            # for one message goes first in parts of its own (handoff.split_message).
+            *parts, text = handoff.split_message(rec.pop("pendingHandoff"), text)
+            for part in parts:
+                await driver.send(part, [], str(uuidlib.uuid4()))
         rec["updatedAt"] = time.time()
         self._active[session_id] = time.time()
         self._save()
@@ -797,17 +800,32 @@ class Harnesses:
 
 
 def _shown(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Items as the web app shows them: history put in front of a message for a handoff is left out."""
+    """Items as the web app shows them: history put in front of a message for a handoff is left out, and so
+    are the parts of a history sent in several messages, with the agent's short replies to them (「收到」)."""
     from .handoff import PREFACE_START, strip_history
     out = []
+    after_part = False
     for it in items:
-        if it.get("kind") == "user" and str(it.get("text") or "").lstrip().startswith(PREFACE_START):
-            text = strip_history(it["text"])
-            if not text:
-                continue
-            it = {**it, "text": text}
+        if it.get("kind") == "user":
+            after_part = False
+            if str(it.get("text") or "").lstrip().startswith(PREFACE_START):
+                text = strip_history(it["text"])
+                if not text:
+                    after_part = True
+                    continue
+                it = {**it, "text": text}
+        elif after_part and it.get("kind") == "assistant" and _short_reply(it):
+            continue
         out.append(it)
     return out
+
+
+def _short_reply(item: dict[str, Any]) -> bool:
+    """A reply with nothing but a few words (no tool calls): the 「收到」 to a part of the history."""
+    blocks = item.get("blocks") or []
+    if any(b.get("type") == "tool" for b in blocks):
+        return False
+    return sum(len(b.get("text") or "") for b in blocks if b.get("type") == "text") < 200
 
 
 async def _nowhere(driver: Driver, event: dict[str, Any]) -> None:

@@ -41,6 +41,11 @@ STRATEGIES = {
 PREFACE_START = "[以下是从 "
 HISTORY_END = "[以上是之前的对话记录]"
 BUDGET_CHARS = 240_000          # about 60–80k tokens of history; more is cut (or compacted first)
+# One message to a harness that gets the history in front of the first message (UTF-8 bytes). Antigravity
+# takes about 192 KB and cuts the rest, from the end, where the user's own words are: a longer history is
+# sent as several messages (split_message).
+MESSAGE_BYTES = 150_000
+PART_NOTE = "（历史还没发完，先不要做任何事，只回复「收到」。）"
 
 
 def _clip(text: str, limit: int) -> str:
@@ -144,6 +149,50 @@ def record_text(msgs: list[dict[str, str]]) -> str:
 def history_text(msgs: list[dict[str, str]], head: str) -> str:
     """The conversation as one text, for harnesses that take it as a message (dsh, Gemini CLI, Antigravity)."""
     return head + "\n\n" + record_text(msgs) + "\n\n" + HISTORY_END
+
+
+def _bytes(text: str) -> int:
+    return len(text.encode("utf-8"))
+
+
+def _cut(text: str, limit: int) -> tuple[str, str]:
+    """`text` split so the first part is at most `limit` bytes (at a character)."""
+    data = text.encode("utf-8")[:limit]
+    head = data.decode("utf-8", "ignore")
+    return head, text[len(head):]
+
+
+def split_message(history: str, text: str, limit: int = MESSAGE_BYTES) -> list[str]:
+    """The history put in front of the user's message: one message, or several when it is too big for one.
+    Every part starts like the history (so the web app hides it); the parts before the last ask the agent
+    only to answer 「收到」; the last has the end of the history and the user's words."""
+    whole = history + "\n\n" + text
+    if _bytes(whole) <= limit:
+        return [whole]
+    head, _, rest = history.partition("\n\n")
+    body = rest[: rest.rfind(HISTORY_END)].rstrip() if HISTORY_END in rest else rest
+    room = limit - _bytes(head) - _bytes(PART_NOTE) - 200
+    chunks: list[str] = []
+    current = ""
+    for record in re.split(r"\n\n(?=【(?:用户|助手)】)", body):
+        while _bytes(record) > room:                  # one record bigger than a message
+            piece, record = _cut(record, room - _bytes(current) - 2 if current else room)
+            chunks.append(current + ("\n\n" if current else "") + piece)
+            current = ""
+        if current and _bytes(current) + 2 + _bytes(record) > room:
+            chunks.append(current)
+            current = record
+        else:
+            current = current + ("\n\n" if current else "") + record
+    tail = "\n\n" + HISTORY_END + "\n\n" + text
+    last_fits = _bytes(head) + 40 + _bytes(current) + _bytes(tail) <= limit
+    if current and not last_fits:
+        chunks.append(current)
+        current = ""
+    n = len(chunks) + 1
+    parts = [f"{head}\n（第 {i}/{n} 部分）\n\n{chunk}\n\n{PART_NOTE}" for i, chunk in enumerate(chunks, 1)]
+    parts.append(f"{head}\n（第 {n}/{n} 部分）" + (f"\n\n{current}" if current else "") + tail)
+    return parts
 
 
 def strip_history(text: str) -> str:
