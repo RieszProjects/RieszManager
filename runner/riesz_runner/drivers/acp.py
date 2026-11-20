@@ -23,7 +23,7 @@ import uuid as uuidlib
 from pathlib import Path
 from typing import Any
 
-from .base import Capabilities, Driver, Mode, ToolServer, assistant_item, command, interrupted_item, notice_item, tool_block, tool_result, user_item
+from .base import BYPASS, Capabilities, Driver, Mode, ToolServer, most_permissive, assistant_item, command, interrupted_item, notice_item, tool_block, tool_result, user_item
 from .jsonrpc import JsonRpcError, JsonRpcPeer, PeerClosed
 
 log = logging.getLogger(__name__)
@@ -109,7 +109,15 @@ class AcpDriver(Driver):
         return self.peer.pid if self.peer else None
 
     def modes(self) -> list[Mode]:
-        return self._modes
+        """The agent's modes, and Riesz Manager's BYPASS when none of them approves everything."""
+        return self._modes if any(m.tier == "full" for m in self._modes) else [*self._modes, BYPASS]
+
+    def _native(self, mode: str | None) -> str | None:
+        """The agent's own mode for `mode`: BYPASS runs on the agent's most permissive one."""
+        if mode == BYPASS.id:
+            base = most_permissive(self._modes)
+            return base.id if base else None
+        return mode
 
     def _env(self) -> dict[str, str]:
         env = dict(self.env if self.env is not None else os.environ)
@@ -164,17 +172,20 @@ class AcpDriver(Driver):
         """Modes and models from session/new or session/load; then the ones this session should use."""
         modes = res.get("modes") or {}
         if modes.get("availableModes"):
-            self._modes = [Mode(m.get("id"), self.mode_name(m), self.mode_tier(m), m.get("description") or "")
+            self._modes = [Mode(m.get("id"), self.mode_name(m), self.mode_tier(m), self.mode_description(m))
                            for m in modes["availableModes"]]
         models = res.get("models") or {}
         if models.get("availableModels"):
             self._models = [{"value": m.get("modelId"), "displayName": m.get("name") or m.get("modelId"),
                              "description": m.get("description") or ""} for m in models["availableModels"]]
         current_mode, current_model = modes.get("currentModeId"), models.get("currentModelId")
-        if self.mode and self.mode != current_mode and any(m.id == self.mode for m in self._modes):
+        wanted = self._native(self.mode)
+        if wanted and wanted != current_mode and any(m.id == wanted for m in self._modes):
             with contextlib.suppress(JsonRpcError):
-                await self.peer.request("session/set_mode", {"sessionId": self.session_id, "modeId": self.mode}, timeout=30)
-                current_mode = self.mode
+                await self.peer.request("session/set_mode", {"sessionId": self.session_id, "modeId": wanted}, timeout=30)
+                current_mode = wanted
+        if self.mode == BYPASS.id and current_mode == wanted:
+            current_mode = BYPASS.id
         if self.model and self.model != current_model:
             with contextlib.suppress(JsonRpcError):
                 await self.peer.request("session/set_model", {"sessionId": self.session_id, "modelId": self.model}, timeout=30)
@@ -184,6 +195,9 @@ class AcpDriver(Driver):
 
     def mode_name(self, mode: dict[str, Any]) -> str:
         return str(mode.get("name") or mode.get("id"))
+
+    def mode_description(self, mode: dict[str, Any]) -> str:
+        return str(mode.get("description") or "")
 
     def mode_tier(self, mode: dict[str, Any]) -> str:
         """The tier (modes.py) of a mode the agent reported; its known modes first, then a guess from the id."""
@@ -291,10 +305,11 @@ class AcpDriver(Driver):
             await self.peer.notify("session/cancel", {"sessionId": self.session_id})
 
     async def set_mode(self, mode: str) -> None:
-        if mode not in {m.id for m in self._modes}:
+        if mode not in {m.id for m in self.modes()}:
             raise ValueError(f"unknown mode {mode}")
-        if self.peer is not None and self.ready:
-            await self.peer.request("session/set_mode", {"sessionId": self.session_id, "modeId": mode}, timeout=30)
+        native = self._native(mode)
+        if self.peer is not None and self.ready and native:
+            await self.peer.request("session/set_mode", {"sessionId": self.session_id, "modeId": native}, timeout=30)
         await super().set_mode(mode)
 
     async def set_model(self, model: str | None) -> None:
@@ -386,7 +401,10 @@ class AcpDriver(Driver):
                 await self.emit_state()
             return
         elif kind == "current_mode_update":
-            self.mode = u.get("currentModeId") or self.mode
+            reported = u.get("currentModeId") or self.mode
+            # Under BYPASS the agent runs in its own most permissive mode: that is still BYPASS.
+            if not (self.mode == BYPASS.id and reported == self._native(BYPASS.id)):
+                self.mode = reported
             if not self._loading:
                 await self.emit_state()
             return

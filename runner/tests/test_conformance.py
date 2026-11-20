@@ -50,6 +50,8 @@ class ConformanceTest(unittest.TestCase):
                 self.assertTrue(modes, "a harness lists its permission modes")
                 self.assertIn(driver.mode, modes, "the default mode is one of them")
                 self.assertTrue(all(isinstance(m, Mode) and m.tier in TIERS for m in modes.values()))
+                self.assertEqual(modes[spec.modes["full"]].tier, "full",
+                                 "every harness has a mode that approves everything (its own, or drivers.base.BYPASS)")
                 for m in modes.values():
                     # A session in mode m moving to this harness lands in a mode of the same tier.
                     self.assertEqual(modes[spec.modes[m.tier]].tier, m.tier,

@@ -96,6 +96,19 @@ class Mode:
             raise ValueError(f"mode {self.id}: tier {self.tier!r} is not one of {TIERS}")
 
 
+# Riesz Manager's own "approve everything" mode, for a harness without such a mode of its own: the
+# harness runs in its most permissive mode, and every permission request it still makes is approved
+# here (Driver.ask). Questions to the user still reach the user.
+BYPASS = Mode("rz-bypass", "全部自动通过", "full", "Riesz Manager 自动批准它的所有权限请求；它向你提的问题照常显示")
+TIER_ORDER = ("readonly", "ask", "edits", "auto", "full")
+
+
+def most_permissive(modes: list[Mode]) -> Mode | None:
+    """The harness's own mode that asks least (BYPASS itself left out)."""
+    own = [m for m in modes if m.id != BYPASS.id]
+    return max(own, key=lambda m: TIER_ORDER.index(m.tier), default=None)
+
+
 def iso(ts: float | None = None) -> str:
     return datetime.fromtimestamp(ts if ts is not None else time.time(), timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -303,8 +316,19 @@ class Driver:
 
     # ---- permissions --------------------------------------------------------------------
 
+    def auto_approves(self, entry: dict[str, Any]) -> bool:
+        """In a full-tier mode (the harness's own, or BYPASS) a permission request is approved without asking.
+        Questions (AskUserQuestion, or entries marked "question") always go to the user."""
+        if entry.get("question") or entry.get("toolName") == "AskUserQuestion":
+            return False
+        mode = next((m for m in self.modes() if m.id == self.mode), None)
+        return mode is not None and mode.tier == "full"
+
     async def ask(self, entry: dict[str, Any]) -> dict[str, Any]:
         """Show a permission request and wait for the answer: {"allow": bool, "scope": "once"|"session", "message", "answers"}."""
+        if self.auto_approves(entry):
+            log.info("%s %s: approved %s (mode %s)", self.harness, str(self.session_id)[:8], entry.get("toolName"), self.mode)
+            return {"allow": True, "scope": "once", "message": None, "answers": {}}
         entry = {"suggestions": [], "ts": time.time(), **entry}
         pending = PendingPermission(entry)
         self.permissions[entry["requestId"]] = pending

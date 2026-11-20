@@ -50,6 +50,59 @@ class SignInTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(texts, ["echo: hi [0 images, default]"])
 
 
+class BypassTest(unittest.IsolatedAsyncioTestCase):
+    """Antigravity has no mode that approves everything: Riesz Manager's rz-bypass approves for it."""
+
+    async def start(self, mode: str | None = None) -> AntigravityDriver:
+        env = {**os.environ, "FAKE_ACP_MODES": "agy"}
+        driver = AntigravityDriver(agy=AGENT, cwd=tempfile.mkdtemp(), sink=Events(), env=env, mode=mode)
+        self.addAsyncCleanup(driver.stop)
+        await driver.start()
+        return driver
+
+    async def turn(self, driver: AntigravityDriver, text: str) -> str:
+        n = len(driver.sink.of("result"))
+        await driver.send(text)
+        deadline = time.time() + 10
+        while len(driver.sink.of("result")) == n:
+            self.assertLess(time.time(), deadline, "the turn ends without anyone answering a prompt")
+            await asyncio.sleep(0.02)
+        await driver.flush()
+        return [b["text"] for i in driver.items.items if i["kind"] == "assistant" for b in i["blocks"] if b["type"] == "text"][-1]
+
+    async def test_offered_with_the_agents_own_modes(self):
+        driver = await self.start()
+        self.assertEqual([(m.id, m.tier) for m in driver.modes()],
+                         [("default", "ask"), ("accept-edits", "edits"), ("plan", "ask"), ("rz-bypass", "full")])
+        self.assertEqual(driver.modes()[2].name, "先计划")
+
+    async def test_permission_requests_are_approved_without_a_prompt(self):
+        driver = await self.start()
+        await driver.set_mode("rz-bypass")
+        self.assertEqual(driver.mode, "rz-bypass")
+        self.assertEqual(await self.turn(driver, "hi"), "echo: hi [0 images, accept-edits]")   # the agent's own most permissive
+        self.assertEqual(await self.turn(driver, "edit"), "done proceed_once")
+        self.assertEqual(driver.sink.of("permission"), [], "nothing was shown to the user")
+        self.assertEqual(driver.mode, "rz-bypass")
+
+    async def test_resumed_in_bypass(self):
+        driver = await self.start(mode="rz-bypass")
+        self.assertEqual(driver.mode, "rz-bypass")
+        self.assertEqual(await self.turn(driver, "edit"), "done proceed_once")
+        self.assertEqual(driver.sink.of("permission"), [])
+
+    async def test_other_modes_still_ask(self):
+        driver = await self.start()
+        task = asyncio.create_task(self.turn(driver, "edit"))
+        deadline = time.time() + 10
+        while not driver.permissions:
+            self.assertLess(time.time(), deadline)
+            await asyncio.sleep(0.02)
+        [request_id] = driver.permissions
+        driver.answer_permission(request_id, allow=True)
+        self.assertEqual(await task, "done proceed_once")
+
+
 class ModelsTest(unittest.TestCase):
     def test_signed_out(self):
         self.assertEqual(agy_models("Fetching available models...\nError: Please sign in to view available models."), [])

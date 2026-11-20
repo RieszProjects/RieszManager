@@ -14,13 +14,19 @@ from .acp import AcpDriver
 from .base import Capabilities, Mode
 from .jsonrpc import JsonRpcError
 
+# What `agy acp` offers (checked 11-20 with a Google sign-in): default, accept-edits and plan. Its
+# plan mode is not read-only: it plans first, then works and asks like default. Auto mode appears only
+# where its terminal sandbox runs (not with kernel.apparmor_restrict_unprivileged_userns = 1); it is
+# then reported by the agent and named below. With no mode that approves everything, the ACP driver
+# adds Riesz Manager's BYPASS.
 MODES = [
     Mode("default", "逐项确认", "ask", "编辑文件和运行命令前都先问你"),
-    Mode("accept-edits", "自动接受编辑", "edits", "编辑文件自动通过，命令仍需确认"),
-    Mode("auto", "自动", "auto", "由 Antigravity 判断，安全的操作自动执行"),
-    Mode("plan", "计划模式", "readonly", "只读，先给出计划"),
+    Mode("accept-edits", "自动接受编辑", "edits", "工作区里的编辑自动通过，命令仍要确认"),
+    Mode("plan", "先计划", "ask", "先仔细规划再动手；编辑和命令照常要你确认"),
 ]
-MODE_NAMES = {m.id: m.name for m in MODES} | {"accept_edits": "自动接受编辑", "acceptEdits": "自动接受编辑"}
+EXTRA = {"auto": ("自动", "工作区内的编辑和沙箱里的命令自动执行，越出沙箱前先由它的审查代理判断")}
+MODE_NAMES = {m.id: m.name for m in MODES} | {k: v[0] for k, v in EXTRA.items()}
+MODE_DESCRIPTIONS = {m.id: m.description for m in MODES} | {k: v[1] for k, v in EXTRA.items()}
 
 
 class AntigravityDriver(AcpDriver):
@@ -35,6 +41,9 @@ class AntigravityDriver(AcpDriver):
 
     def mode_name(self, mode: dict[str, Any]) -> str:
         return MODE_NAMES.get(str(mode.get("id")), super().mode_name(mode))
+
+    def mode_description(self, mode: dict[str, Any]) -> str:
+        return MODE_DESCRIPTIONS.get(str(mode.get("id")), super().mode_description(mode))
 
     async def authenticate(self, error: JsonRpcError) -> bool:
         if "auth" not in error.message.lower():

@@ -105,7 +105,7 @@
 <tr><td>Codex</td><td>"Read only" may only read files and asks before editing or going online; "Auto" may edit files in the workspace and run commands, and asks before going outside the workspace or online; "Full access" is not sandboxed and does not ask.</td></tr>
 <tr><td>DeepSeek Harness</td><td>"Read only" asks before writing files; "Workspace write" may edit files in the workspace and run commands, and asks before going outside it; "Full access" is not sandboxed.</td></tr>
 <tr><td>Gemini CLI</td><td>"Ask each time" asks before editing files and running commands; "Accept edits" approves edits and still asks for commands; "Fully automatic" does not ask; "Plan mode" is read-only and plans first.</td></tr>
-<tr><td>Antigravity</td><td>Antigravity's own modes (ask each time, accept edits, auto, plan, ...).</td></tr>
+<tr><td>Antigravity</td><td>“Ask each time” (逐项确认) asks before editing files and running commands; “Accept edits” (自动接受编辑) lets edits in the workspace through and still asks before commands; “Plan first” (先计划) plans carefully before acting, then asks as usual; “Approve everything” (全部自动通过): Antigravity has no such mode, so Riesz Manager approves all its permission requests for it, while questions it asks you still show. Its “Auto” mode needs its terminal sandbox and appears only where the system lets ordinary programs create user namespaces.</td></tr>
 </table></div>
 <p>How they differ from Claude Code sessions:</p>
 <ul>

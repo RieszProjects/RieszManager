@@ -482,7 +482,7 @@ class CodexDriver(Driver):
         if method == "mcpServer/elicitation/request":
             answer = await self.ask({"requestId": request_id, "toolName": f"mcp__{p.get('serverName') or 'server'}",
                                      "input": {k: v for k, v in p.items() if k not in ("threadId", "turnId")},
-                                     "reason": p.get("message")})
+                                     "reason": p.get("message"), "question": True})   # it may ask for input
             return {"action": "accept" if answer.get("allow") else ("cancel" if answer.get("cancelled") else "decline"),
                     "content": None, "_meta": None}
         if method == "item/permissions/requestApproval":

@@ -76,7 +76,10 @@ def prompt(rid, p):
     send({"id": rid, "result": {"stopReason": "end_turn"}})
 
 
-SESSION = {"modes": {"currentModeId": "default", "availableModes": [{"id": "default", "name": "Default"}, {"id": "yolo", "name": "YOLO"}]},
+# FAKE_ACP_MODES=agy: Antigravity's modes (none approves everything) instead of default and yolo.
+MODES = ([{"id": "default", "name": "Default"}, {"id": "accept-edits", "name": "Accept edits"}, {"id": "plan", "name": "Plan"}]
+         if os.environ.get("FAKE_ACP_MODES") == "agy" else [{"id": "default", "name": "Default"}, {"id": "yolo", "name": "YOLO"}])
+SESSION = {"modes": {"currentModeId": "default", "availableModes": MODES},
            "models": {"currentModelId": "gemini-pro", "availableModels": [{"modelId": "gemini-pro", "name": "Gemini Pro"},
                                                                           {"modelId": "gemini-flash", "name": "Gemini Flash"}]}}
 
