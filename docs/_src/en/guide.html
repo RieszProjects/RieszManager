@@ -76,7 +76,6 @@
 <p>How they differ from Claude Code sessions:</p>
 <ul>
   <li>A message sent while Codex works joins the turn in progress; DeepSeek Harness, Gemini CLI and Antigravity take it after the turn ends.</li>
-  <li>Antigravity sessions only take messages typed in the web app: no scheduled wake-ups, and other sessions cannot message them with <code>rieszctl</code> (Google's terms allow only your own interactive use; see <a href="deploy.html#harnesses">Deployment</a>).</li>
   <li>Codex's and Gemini CLI's permission cards have one more button, "Allow for this session".</li>
   <li>DeepSeek Harness replies appear a step at a time rather than word by word, and interrupting restarts its process on the same session. Changing its model or reasoning effort restarts it too: right away when idle, after the turn when working.</li>
   <li>There are no slash commands, subagent lists, forking or "Keep running". "Copy terminal resume command" gives <code>codex resume</code>, <code>dsh tui --resume</code> or <code>agy --conversation</code> (Gemini CLI has no command to resume by session id).</li>

@@ -1,4 +1,4 @@
-"""Antigravity sessions (drivers/antigravity.py) against the scripted ACP agent, and what they may not do."""
+"""Antigravity sessions (drivers/antigravity.py) against the scripted ACP agent."""
 
 from __future__ import annotations
 
@@ -12,10 +12,8 @@ from pathlib import Path
 from riesz_runner.credentials import agy_models
 from riesz_runner.drivers.antigravity import AntigravityDriver
 from riesz_runner.drivers.jsonrpc import JsonRpcError
-from riesz_runner.schedules import ScheduleError, Scheduler
 
 from .helpers import Events
-from .test_schedules import fake_hub
 
 AGENT = str(Path(__file__).parent / "fake_acp_agent.py")
 
@@ -59,14 +57,6 @@ class ModelsTest(unittest.TestCase):
     def test_listing(self):
         out = "Fetching available models...\nAvailable models:\n  gemini-4-argon  Gemini 4 Argon (default)\n  - claude-opus-5-5\n"
         self.assertEqual([m["value"] for m in agy_models(out)], ["gemini-4-argon", "claude-opus-5-5"])
-
-
-class InteractiveOnlyTest(unittest.IsolatedAsyncioTestCase):
-    async def test_no_scheduled_wake_ups(self):
-        hub = fake_hub(Path(tempfile.mkdtemp()))
-        hub.harnesses = type("H", (), {"harness_of": staticmethod(lambda sid: "antigravity")})()
-        with self.assertRaises(ScheduleError):
-            await Scheduler(hub).create({"sessionId": "6e0f5a52-0000-4000-8000-000000000001", "prompt": "x", "every": 60})
 
 
 if __name__ == "__main__":

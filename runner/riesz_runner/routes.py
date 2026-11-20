@@ -17,8 +17,7 @@ session takes the first one that is available unless told otherwise.
   is against the providers' terms.
 - Antigravity CLI: the Google sign-in of `agy` itself (the user's Google AI
   subscription, `agy acp --login`), or a Gemini API key. The official agy runs
-  unmodified and keeps its own sign-in; its sessions take messages typed in the
-  web app only (no scheduled wake-ups, no messages from other sessions).
+  unmodified and keeps its own sign-in.
 - Gemini CLI: a Gemini API key (GEMINI_API_KEY). Its Google sign-in is not used:
   personal accounts moved to Antigravity CLI, and Google's terms rule out using
   a Gemini CLI login from other software.

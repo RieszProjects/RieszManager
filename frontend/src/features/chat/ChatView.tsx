@@ -13,7 +13,7 @@ import { Mascot } from "@/components/Mascot";
 import { StatusDot } from "@/components/StatusDot";
 import { copyText } from "@/lib/clipboard";
 import { clockTime } from "@/lib/format";
-import { harnessLabel, INTERACTIVE_ONLY, routeTag } from "@/lib/harnesses";
+import { harnessLabel, routeTag } from "@/lib/harnesses";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { sessionTitle, useApp } from "@/store/app";
 import { useOrganize } from "@/store/organize";
@@ -101,13 +101,11 @@ function SessionMenu({ sessionId, state, cwd, title, keepAlive, harness }: {
             <ListItemIcon><GitFork size={16} /></ListItemIcon>分叉为新会话
           </MenuItem>
         )}
-        {!INTERACTIVE_ONLY.has(harness ?? "") && (
-          <MenuItem onClick={() => { close(); setScheduleSession(sessionId); }}>
-            <ListItemIcon><AlarmClock size={16} /></ListItemIcon>
-            <span className="rz-menu-grow">定时唤醒</span>
-            {scheduleCount > 0 && <span className="dim">{scheduleCount}</span>}
-          </MenuItem>
-        )}
+        <MenuItem onClick={() => { close(); setScheduleSession(sessionId); }}>
+          <ListItemIcon><AlarmClock size={16} /></ListItemIcon>
+          <span className="rz-menu-grow">定时唤醒</span>
+          {scheduleCount > 0 && <span className="dim">{scheduleCount}</span>}
+        </MenuItem>
         {!harness && (
           <MenuItem onClick={() => run(() => setKeepAlive(sessionId, !keepAlive))}>
             <ListItemIcon><Pin size={16} /></ListItemIcon>

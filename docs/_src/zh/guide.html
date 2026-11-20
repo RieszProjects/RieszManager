@@ -75,7 +75,6 @@
 <p>和Claude Code会话的不同之处：</p>
 <ul>
   <li>Codex工作时发出的消息会并入正在进行的这一轮；DeepSeek Harness、Gemini CLI和Antigravity则排到这一轮结束之后。</li>
-  <li>Antigravity的会话只接受你在网页里输入的消息：不能设定时唤醒，其他会话也不能用<code>rieszctl</code>给它发消息（Google的条款只允许自己交互使用，见<a href="deploy.html#harnesses">部署</a>）。</li>
   <li>Codex和Gemini CLI的确认卡片多一个「允许，本会话不再询问」。</li>
   <li>DeepSeek Harness的回复是一步一整段出现的，不会逐字显示；中断时它会重启进程再接着这个会话。换模型或推理强度也要重启：空闲时马上换，正在工作时等这一轮结束。</li>
   <li>没有斜杠命令、子代理列表、分叉和「保持运行」。「复制终端恢复命令」给出的是<code>codex resume</code>、<code>dsh tui --resume</code>或<code>agy --conversation</code>（Gemini CLI没有按会话ID恢复的命令）。</li>

@@ -959,13 +959,7 @@ async def h_context_limits(request: web.Request, hub: Hub, sid: str) -> web.Resp
                   "model": hub.harnesses.summary(sid).get("model"), "source": "live"})
 
 
-# Harnesses whose sessions take only what the user types in the web app (not other sessions, not schedules).
-INTERACTIVE_ONLY = {"antigravity"}
-
-
 async def h_send(request: web.Request, hub: Hub, sid: str) -> web.Response:
-    if hub.harnesses.harness_of(sid) in INTERACTIVE_ONLY and request.headers.get("X-Riesz-Client") == "rieszctl":
-        return _err(409, "Antigravity sessions only take messages typed in the web app")
     body = await _body(request)
     text, attachments, message_uuid = _prompt(request, body)
     model = body.get("model") or None
@@ -978,8 +972,6 @@ async def h_send(request: web.Request, hub: Hub, sid: str) -> web.Response:
 
 
 async def h_resume(request: web.Request, hub: Hub, sid: str) -> web.Response:
-    if hub.harnesses.harness_of(sid) in INTERACTIVE_ONLY and request.headers.get("X-Riesz-Client") == "rieszctl":
-        return _err(409, "Antigravity sessions only take messages typed in the web app")
     result = await request.app[DELIVERY].send(sid, RESUME_TEXT, [], str(uuidlib.uuid4()))
     return _json({**result, "state": hub.harnesses.state(sid)})
 
