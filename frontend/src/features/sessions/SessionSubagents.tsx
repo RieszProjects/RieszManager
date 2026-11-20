@@ -3,12 +3,13 @@
  * Shown: the running subagents and those that finished in the last 10 minutes ("active"); older ones are
  * folded into one line. The number on the row's button is how many are active, and the list opens by
  * itself while there are any, unless the user opened or closed it. */
-import { Bot, ChevronRight, LoaderCircle } from "lucide-react";
+import { Bot, ChevronRight, Globe, LoaderCircle, Workflow } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 import { api } from "@/api/client";
 import type { LiveInfo, SessionSummary } from "@/api/types";
 import { relativeTime } from "@/lib/format";
+import { harnessLabel } from "@/lib/harnesses";
 import { useNowSeconds, useTick } from "@/lib/useNow";
 import { useUi } from "@/store/ui";
 
@@ -23,6 +24,16 @@ export interface SubagentEntry {
   /** A session started as this one's subagent (a browser task): opened as a session. */
   sessionId?: string;
   running?: boolean;
+  /** How it was started: the harness's own subagent (absent), Riesz Manager's subagent_start, or a browser task. */
+  via?: "riesz" | "browser";
+  harness?: string;
+}
+
+/** The icon for how a subagent was started. */
+function ViaIcon({ a }: { a: SubagentEntry }) {
+  if (a.via === "browser") return <Globe size={12} />;
+  if (a.via === "riesz") return <Workflow size={12} />;
+  return <Bot size={12} />;
 }
 
 /** A finished subagent stays in the list this long (seconds). */
@@ -139,8 +150,9 @@ export function SessionSubagents({ session, live }: { session: SessionSummary; l
           : openSubagent({ sessionId, toolUseId: a.toolUseId, agentId: a.agentId, title: a.description,
             cwd: session.cwd, projectId: session.project })}
       >
-        {active ? <LoaderCircle size={12} className="spin" /> : <Bot size={12} />}
+        {active ? <LoaderCircle size={12} className="spin" /> : <ViaIcon a={a} />}
         <span className="rz-subagent-row-title clamp-1">{a.description || a.agentType || "子代理"}</span>
+        {a.via === "riesz" && a.harness && <span className={`rz-tag harness-${a.harness} rz-subagent-tag`}>{harnessLabel(a.harness)}</span>}
         <span className="rz-subagent-row-time">{active ? "运行中" : relativeTime(a.mtime)}</span>
       </button>
     );

@@ -230,7 +230,8 @@ rieszctl session schedule pause ID       # 暂停；resume 重新打开，run �
 <p>Riesz Manager托管的会话，不管用的是Claude Code、Codex、DeepSeek Harness、Gemini CLI还是Antigravity，都有同一组Riesz Manager工具（名字以<code>mcp__riesz__</code>开头），会话可以自己调用：</p>
 <div class="wrap"><table style="--first-col: 10em">
 <tr><th>工具</th><th>作用</th></tr>
-<tr><td><code>browser_task</code></td><td>让一个开着Claude in Chrome的Claude Code会话，在你自己的浏览器里（带着你的登录状态）替它完成任务，再把结果交回来。这个代办会话不单独出现在会话列表里，而是挂在发起它的会话下面，和子代理一样，点开可以看它做了什么。它用「逐项确认」模式：浏览器操作本身直接做（Claude in Chrome对网站的授权照常生效），其他操作照常问你；提交、发送、付款、删除这类要你本人决定的事它不做，会在结果里说明。最多等8分钟，超过的话做完后结果作为一条消息发回去。</td></tr>
+<tr><td><code>subagent_start</code>、<code>subagent_send</code></td><td>开一个子代理：用指定的工具（Claude Code、Codex、DeepSeek Harness、Gemini CLI、Antigravity都行）开一个会话替它做事，等这一轮做完把回复交回来；之后可以接着跟它说话。子代理的权限和发起它的会话一样宽松，不单独出现在会话列表里，而是挂在发起会话的子代理列表下（流程图标，带工具名），点开就是这个会话。最多等8分钟，超过的话做完后回复作为一条消息发回去。子代理不能再开子代理。</td></tr>
+<tr><td><code>browser_task</code></td><td>让一个开着Claude in Chrome的Claude Code会话，在你自己的浏览器里（带着你的登录状态）替它完成任务，再把结果交回来。这个代办会话不单独出现在会话列表里，而是挂在发起它的会话下面，和子代理一样，点开可以看它做了什么。它用Opus 5.5（思考强度medium）、「自动」权限模式，在子代理列表里是地球图标；提交、发送、付款、删除这类要你本人决定的事它不做，会在结果里说明。最多等8分钟，超过的话做完后结果作为一条消息发回去。</td></tr>
 <tr><td><code>send_file</code></td><td>把文件发给你：图片直接显示在对话里，其他文件显示成卡片，点开在文件查看器里看，也可以下载。发出的是一份副本，原文件后来改了或删了也不影响。</td></tr>
 <tr><td><code>schedule_add</code></td><td>给自己（或别的会话）加一个<a href="#schedules">定时唤醒</a>，和网页上的定时是同一套，网页上能看到、能改。</td></tr>
 <tr><td><code>schedule_list</code>、<code>schedule_change</code></td><td>列出定时；暂停、恢复、立即发送一次、删除。</td></tr>

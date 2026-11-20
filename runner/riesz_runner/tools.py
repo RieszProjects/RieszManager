@@ -350,21 +350,35 @@ def _size(n: int) -> str:
 
 # ---- browser tasks -----------------------------------------------------------------------------------
 
-BROWSER_WAIT = 8 * 60          # answered within the call up to this long (the harnesses' MCP timeouts allow ~10 min)
+# ---- subagents: sessions of any harness started for this one -------------------------------------------
+
+WAIT = 8 * 60                  # answered within the call up to this long (the harnesses' MCP timeouts allow ~10 min)
+HARNESS_IDS = ("claude", "codex", "dsh", "gemini", "antigravity")
+SUBAGENT_PREFACE = ("[子任务，来自 {name} 会话 {caller}；这条消息是另一个 agent 发的，不是用户本人。"
+                    "做完后在最后一条回复里写清结果]\n\n{task}")
+FOLLOW_UP = "[来自 {name} 会话 {caller}（你是它的子代理）]\n\n{text}"
 BROWSER_PREFACE = ("[浏览器任务，来自 {name} 会话 {caller}；这条消息是另一个 agent 发的，不是用户本人]\n"
                    "用 Claude in Chrome 在用户的浏览器里完成下面的任务。需要用户本人决定的操作（提交表单、发消息或邮件、"
                    "付款、删除、修改账号设置、输入密码等）不要做，在回复里写清需要用户确认什么。"
                    "做完后在最后一条回复里写清结果，要的数据原样给出。\n\n任务：{task}")
+BROWSER_MODEL, BROWSER_EFFORT, BROWSER_MODE = "claude-opus-5-5", "medium", "auto"     # the user's choice (11-20)
 _background: set[asyncio.Task[Any]] = set()
+
+
+def _keep(job: asyncio.Task[Any]) -> None:
+    _background.add(job)
+    job.add_done_callback(_background.discard)
 
 
 def _announce(hub: Hub, sid: str) -> None:
     """Tell the web app a session's summary changed (its subagent list)."""
     summary = hub.harnesses.summary(sid) if hub.harnesses.has(sid) else hub.session_summary(sid)
-    task = asyncio.get_running_loop().create_task(
-        hub.broadcast_global({"ev": "sessions", "sessions": [summary], "removed": []}))
-    _background.add(task)
-    task.add_done_callback(_background.discard)
+    _keep(asyncio.get_running_loop().create_task(hub.broadcast_global({"ev": "sessions", "sessions": [summary], "removed": []})))
+
+
+def _harness_name(hub: Hub, sid: str) -> str:
+    harness = hub.harnesses.harness_of(sid) or "claude"
+    return "Claude Code" if harness == "claude" else HARNESSES[harness].name
 
 
 async def _until_done(hub: Hub, sid: str, seconds: float) -> bool:
@@ -372,60 +386,132 @@ async def _until_done(hub: Hub, sid: str, seconds: float) -> bool:
     start = time.time()
     seen_work = False
     while time.time() - start < seconds:
-        proc = hub.get_hosted(sid)
-        if proc is None or not proc.alive:
+        working = hub.session_working(sid)
+        if working is None:                      # not running (any more)
             return True
-        working = bool(proc.busy or proc.queue or proc.permissions)
         if working:
             seen_work = True
-        elif seen_work or time.time() - start > 30:
+        elif seen_work or time.time() - start > 120:
             return True
         await asyncio.sleep(1.5)
     return False
 
 
-async def _finish(call: Call, child: str) -> str:
-    reply = await _last_reply(call, child)
-    with contextlib.suppress(ToolError):
-        await call.api("POST", f"/v1/sessions/{child}/stop", {})
-    _announce(call.hub, call.session_id)
-    return reply or "（它没有给出回复）"
-
-
-async def browser_task(call: Call, a: dict[str, Any]) -> str:
+async def _reply_when_done(call: Call, child: str, wait: bool, label: str, stop_after: bool = False) -> str:
+    """The child's reply once its turn ends: within the call (up to WAIT), or later as a message to the caller."""
     hub = call.hub
-    task = str(a.get("task") or "").strip()
-    if not task:
-        raise ToolError("task 不能为空")
-    if (hub.prefs.get(call.session_id) or {}).get("subagentOf"):
-        raise ToolError("浏览器任务里不能再开浏览器任务")
-    harness = hub.harnesses.harness_of(call.session_id) or "claude"
-    name = {"claude": "Claude Code"}.get(harness) or HARNESSES[harness].name
-    proc = await hub.create_session(call.cwd() or str(hub.cfg.workspace_root), permission_mode="default", browser=True)
-    child = proc.session_id
-    hub.prefs.remember(child, startedBy=call.session_id, subagentOf=call.session_id, subagentTask=task[:200])
-    with contextlib.suppress(ToolError):
-        await call.api("POST", f"/v1/sessions/{child}/rename", {"title": "浏览器任务：" + task[:40]})
-    text = BROWSER_PREFACE.format(name=name, caller=call.session_id[:8], task=task)
-    await hub.delivery.send_new(proc, text, [], str(uuidlib.uuid4()))
-    _announce(hub, call.session_id)
-    if await _until_done(hub, child, BROWSER_WAIT):
-        return await _finish(call, child)
+
+    async def reply() -> str:
+        text = await _last_reply(call, child)
+        if stop_after:
+            with contextlib.suppress(ToolError):
+                await call.api("POST", f"/v1/sessions/{child}/stop", {})
+        _announce(hub, call.session_id)
+        return text or "（它没有给出回复）"
+
+    if wait and await _until_done(hub, child, WAIT):
+        return await reply()
 
     async def later() -> None:
         await _until_done(hub, child, 6 * 3600)
-        reply = await _finish(call, child)
-        await hub.delivery.send(call.session_id, f"[浏览器任务 {child[:8]} 做完了，结果如下]\n\n{reply}", [], str(uuidlib.uuid4()))
-    job = asyncio.get_running_loop().create_task(later())
-    _background.add(job)
-    job.add_done_callback(_background.discard)
-    return (f"浏览器任务还在进行（可能在等用户批准），代办会话 {child[:8]}。"
-            "做完后结果会作为一条消息发给你，不用反复查。")
+        text = await reply()
+        await hub.delivery.send(call.session_id, f"[{label} {child[:8]} 这一轮做完了，回复如下]\n\n{text}", [], str(uuidlib.uuid4()))
+    _keep(asyncio.get_running_loop().create_task(later()))
+    return (f"{label} {child[:8]} 还在做（可能在等用户批准）。做完后它的回复会作为一条消息发给你，不用反复查。")
+
+
+async def _start_child(call: Call, harness: str, text: str, label: str, *, mode: str | None, model: str | None = None,
+                       effort: str | None = None, directory: str | None = None, browser: bool = False) -> str:
+    hub = call.hub
+    if (hub.prefs.get(call.session_id) or {}).get("subagentOf"):
+        raise ToolError("子代理里不能再开子代理")
+    cwd = os.path.realpath(os.path.expanduser(str(directory or call.cwd() or hub.cfg.workspace_root)))
+    if not os.path.isdir(cwd):
+        raise ToolError(f"目录不存在：{cwd}")
+    try:
+        if harness == "claude":
+            proc = await hub.create_session(cwd, model=model, permission_mode=mode, effort=effort, browser=browser)
+            child = proc.session_id
+        else:
+            child = str((await hub.harnesses.create(harness, cwd, model=model, mode=mode)).session_id)
+    except Exception as exc:  # noqa: BLE001 - why the harness could not start, for the agent
+        raise ToolError(f"{harness} 没能启动：{exc}") from None
+    hub.prefs.remember(child, startedBy=call.session_id, subagentOf=call.session_id, subagentTask=label[:200],
+                       browser="1" if browser else None)
+    with contextlib.suppress(ToolError):
+        await call.api("POST", f"/v1/sessions/{child}/rename", {"title": label[:60]})
+    if harness == "claude":
+        await hub.delivery.send_new(proc, text, [], str(uuidlib.uuid4()))
+    else:
+        await hub.delivery.send(child, text, [], str(uuidlib.uuid4()))
+    _announce(hub, call.session_id)
+    return child
+
+
+async def subagent_start(call: Call, a: dict[str, Any]) -> str:
+    hub = call.hub
+    task = str(a.get("task") or "").strip()
+    harness = str(a.get("harness") or "claude")
+    if not task:
+        raise ToolError("task 不能为空")
+    if harness != "claude" and harness not in HARNESSES:
+        raise ToolError(f"harness 是 {'、'.join(HARNESS_IDS)} 之一")
+    # As permissive as the caller: its mode's tier, in the target harness's own mode for that tier.
+    caller = call.session_id
+    if hub.harnesses.has(caller):
+        summary = hub.harnesses.summary(caller)
+    else:                                       # Claude Code: its mode now is in the running process's state
+        summary = {**hub.session_summary(caller), "permissionMode": (hub.session_state(caller) or {}).get("permissionMode")}
+    mode = hub._closest_mode(harness, hub._mode_tier(caller, summary))
+    text = SUBAGENT_PREFACE.format(name=_harness_name(hub, caller), caller=caller[:8], task=task)
+    child = await _start_child(call, harness, text, task, mode=mode, model=a.get("model") or None,
+                               directory=a.get("directory"))
+    reply = await _reply_when_done(call, child, a.get("wait", True) is not False, "子代理")
+    return f"子代理 {child[:8]}（{_harness_name(hub, child)}）：\n\n{reply}\n\n（接着跟它说话用 subagent_send，agent_id={child[:8]}）"
+
+
+async def subagent_send(call: Call, a: dict[str, Any]) -> str:
+    hub = call.hub
+    child = await call.resolve(a.get("agent_id"))
+    if (hub.prefs.get(child) or {}).get("subagentOf") != call.session_id:
+        raise ToolError("这不是你开的子代理（用 subagent_start 开的才行）")
+    text = str(a.get("message") or "").strip()
+    if not text:
+        raise ToolError("message 不能为空")
+    await hub.delivery.send(child, FOLLOW_UP.format(name=_harness_name(hub, call.session_id), caller=call.session_id[:8], text=text),
+                            [], str(uuidlib.uuid4()))
+    _announce(hub, call.session_id)
+    reply = await _reply_when_done(call, child, a.get("wait", True) is not False, "子代理")
+    return f"子代理 {child[:8]}（{_harness_name(hub, child)}）：\n\n{reply}"
+
+
+async def browser_task(call: Call, a: dict[str, Any]) -> str:
+    task = str(a.get("task") or "").strip()
+    if not task:
+        raise ToolError("task 不能为空")
+    text = BROWSER_PREFACE.format(name=_harness_name(call.hub, call.session_id), caller=call.session_id[:8], task=task)
+    child = await _start_child(call, "claude", text, "浏览器任务：" + task, mode=BROWSER_MODE, model=BROWSER_MODEL,
+                               effort=BROWSER_EFFORT, browser=True)
+    return await _reply_when_done(call, child, True, "浏览器任务", stop_after=True)
 
 
 _SESSION_ID = {"type": "string", "description": "会话 ID（可以只写前 8 位）"}
 
 TOOLS: list[Tool] = [
+    Tool("subagent_start",
+         "开一个子代理：用指定的工具（claude=Claude Code、codex、dsh=DeepSeek Harness、gemini=Gemini CLI、antigravity）"
+         "开一个会话替你做一件事，等它这一轮做完把回复交给你。它显示在你的子代理列表里，权限和你一样宽松。"
+         "之后用 subagent_send 接着跟它说话。最多等 8 分钟；超过或 wait=false 时先返回，做完后它的回复作为一条消息发给你。",
+         {"task": {"type": "string", "description": "交给它的事，写清楚背景、要求和要交回什么"},
+          "harness": {"type": "string", "enum": list(HARNESS_IDS), "description": "用哪个工具（默认 claude）"},
+          "model": {"type": "string", "description": "模型（不写就用该工具的默认）"},
+          "directory": {"type": "string", "description": "工作目录（默认是你的）"},
+          "wait": {"type": "boolean", "description": "是否等它做完（默认 true）"}},
+         subagent_start, required=("task",)),
+    Tool("subagent_send", "给你用 subagent_start 开的子代理发一条消息（接着交流），等它这一轮做完把回复交给你（规则同 subagent_start）。",
+         {"agent_id": {"type": "string", "description": "subagent_start 返回的 agent_id"},
+          "message": {"type": "string"}, "wait": {"type": "boolean", "description": "是否等它做完（默认 true）"}},
+         subagent_send, required=("agent_id", "message")),
     Tool("browser_task",
          "让一个开着 Claude in Chrome 的 Claude Code 会话，在用户自己的浏览器里（带用户的登录状态）替你完成任务，"
          "并把结果返回给你：查网页、读需要登录的页面、抄数据、截图等。它会出现在你的子代理列表里；"
@@ -465,7 +551,8 @@ TOOLS: list[Tool] = [
          {"session_id": _SESSION_ID, "message": {"type": "string"}}, session_send, required=("session_id", "message")),
     Tool("session_reply", "查看另一个会话的状态和它最后一条回复。",
          {"session_id": _SESSION_ID}, session_reply, required=("session_id",), read_only=True),
-    Tool("session_new", "开一个由 Riesz Manager 托管的新会话（和用户在网页上开的一样），发给它第一条消息。",
+    Tool("session_new", "开一个独立的新会话（和用户在网页上开的一样，显示在会话列表里，不是你的子代理），发给它第一条消息。"
+                        "要别的工具替你做事并把结果交回来，用 subagent_start。",
          {"message": {"type": "string", "description": "第一条消息"},
           "directory": {"type": "string", "description": "工作目录（默认是你自己的）"},
           "harness": {"type": "string", "enum": ["claude", "codex", "dsh", "gemini", "antigravity"],

@@ -198,6 +198,27 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res["project"], f"@shared/{me}")
         self.assertEqual((await self.api("GET", f"files/content?project=@shared/{me}&path={res['path']}"))["file"]["content"], "计划")
 
+    async def test_subagents(self):
+        me = await self.session("one")
+        self.app[HUB].harnesses.drivers[me].fake_pid = os.getpid()
+        relay = await self.relay()
+        text, error = await relay.call("subagent_start", task="查一下", harness="fake")
+        self.assertFalse(error, text)
+        self.assertIn("echo: [子任务，来自 Fake 会话", text)           # its reply, the task marked as from an agent
+        child = text.split("子代理 ")[1][:8]
+        [entry] = (await self.api("GET", f"sessions/{me}/subagents"))["subagents"]
+        self.assertEqual((entry["sessionId"][:8], entry["via"], entry["harness"], entry["description"]), (child, "riesz", "fake", "查一下"))
+        listed = [s for s in (await self.api("GET", "sessions"))["sessions"] if s["sessionId"].startswith(child)]
+        self.assertEqual(listed[0]["subagentOf"], me)                  # the web app lists it under `me` only
+        text, error = await relay.call("subagent_send", agent_id=child, message="再说一次")
+        self.assertFalse(error, text)
+        self.assertIn("再说一次", text)
+        other = await self.session("two")                              # not started by `me`
+        text, error = await relay.call("subagent_send", agent_id=other, message="x")
+        self.assertTrue(error)
+        text, error = await relay.call("subagent_start", task="x", harness="nope")
+        self.assertTrue(error)
+
     async def test_a_process_outside_hosted_sessions_is_refused(self):
         await self.session("one")                                      # claims no process
         relay = await self.relay()                                     # the list is for anyone (a harness asks while it starts)

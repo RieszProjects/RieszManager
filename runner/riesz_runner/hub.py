@@ -683,16 +683,32 @@ class Hub:
 
     # ---- model APIs (routes.py) ---------------------------------------------------
 
+    def session_working(self, session_id: str) -> bool | None:
+        """Whether a hosted session of any harness is busy (a turn, queued messages, a prompt); None: not running."""
+        if self.harnesses.has(session_id):
+            driver = self.harnesses.drivers.get(session_id)
+            if driver is None or not driver.alive:
+                return None
+            return bool(driver.busy or driver.permissions or getattr(driver, "_queue", None))
+        proc = self.get_hosted(session_id)
+        if proc is None or not proc.alive:
+            return None
+        return bool(proc.busy or proc.queue or proc.permissions)
+
     def child_entries(self, parent: str) -> list[dict[str, Any]]:
-        """The sessions started as `parent`'s subagents (browser tasks), as entries of its subagent list;
-        `sessionId` makes the web app open them as sessions (their permission prompts are answered there)."""
+        """The sessions started as `parent`'s subagents (tools.py: subagent_start, browser_task), as entries of
+        its subagent list. `sessionId` makes the web app open them as sessions (prompts are answered there);
+        `via` and `harness` say how they were started and what runs them."""
         out = []
         for sid in self.prefs.children(parent):
             pref = self.prefs.get(sid) or {}
-            proc = self.get_hosted(sid)
-            running = bool(proc is not None and proc.alive and (proc.busy or proc.queue or proc.permissions))
+            harness = self.harnesses.harness_of(sid) or "claude"
+            running = bool(self.session_working(sid))
+            browser = bool(pref.get("browser"))
             out.append({"agentId": f"rz-{sid}", "sessionId": sid, "toolUseId": None,
-                        "description": pref.get("subagentTask") or "", "agentType": "浏览器任务", "background": True,
+                        "description": pref.get("subagentTask") or "",
+                        "agentType": "浏览器任务" if browser else (HARNESSES[harness].name if harness in HARNESSES else "Claude Code"),
+                        "via": "browser" if browser else "riesz", "harness": harness, "background": True,
                         "finished": not running, "running": running, "size": 0, "mtime": pref.get("time") or 0})
         return out
 
