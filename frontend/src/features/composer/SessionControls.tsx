@@ -1,6 +1,6 @@
 /** Harness, model and permission-mode pickers shown in the composer toolbar. */
 import { ListItemText, ListSubheader, Menu, MenuItem } from "@mui/material";
-import { Bot, Check, ChevronDown, Cpu, Shield } from "lucide-react";
+import { Bot, Check, ChevronDown, Cpu, LoaderCircle, Shield } from "lucide-react";
 import { useState } from "react";
 import type { ApiRoute, HarnessInfo, HarnessMode, ModelInfo } from "@/api/types";
 import { modelLabel, PERMISSION_MODES, permissionLabel } from "@/lib/format";
@@ -59,29 +59,43 @@ export function cycleMode(current: string | null | undefined, allowBypass: boole
 interface HarnessProps {
   value: string;
   harnesses: HarnessInfo[];
-  onChange: (harness: string) => void;
+  /** A new session: the harness it will run on. An existing one (`moving`): hand it over (may take a while). */
+  onChange: (harness: string) => void | Promise<void>;
+  moving?: boolean;
 }
 
-/** Which harness a new session runs on: Claude Code, or one of the others the runner offers. */
-export function HarnessPicker({ value, harnesses, onChange }: HarnessProps) {
+/** Which harness runs the session: picked for a new one, or the one an existing session moves to. */
+export function HarnessPicker({ value, harnesses, onChange, moving }: HarnessProps) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const [pending, setPending] = useState<string | null>(null);
   const options = harnesses.some((h) => h.id === "claude")
     ? harnesses
     : [{ id: "claude", name: "Claude Code", available: true, reason: null as string | null }, ...harnesses];
+  const pick = async (id: string) => {
+    setAnchor(null);
+    if (moving && id === value) return;
+    setPending(id);
+    try {
+      await onChange(id);
+    } finally {
+      setPending(null);
+    }
+  };
   return (
     <>
-      <button type="button" className={`rz-chip harness-${value}`} onClick={(e) => setAnchor(e.currentTarget)} title="用哪个工具运行这个会话">
-        <Bot size={13} />
-        <span>{harnessLabel(value)}</span>
+      <button type="button" className={`rz-chip harness-${value}`} onClick={(e) => setAnchor(e.currentTarget)} disabled={Boolean(pending)}
+        title={moving ? "转到其他工具继续这个会话" : "用哪个工具运行这个会话"}>
+        {pending && moving ? <LoaderCircle size={13} className="spin" /> : <Bot size={13} />}
+        <span>{pending && moving ? `正在转到 ${harnessLabel(pending)}` : harnessLabel(value)}</span>
         <ChevronDown size={12} />
       </button>
       <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => setAnchor(null)}
         anchorOrigin={{ vertical: "top", horizontal: "left" }} transformOrigin={{ vertical: "bottom", horizontal: "left" }}>
         {options.map((h) => (
           <MenuItem key={h.id} selected={h.id === value} disabled={!h.available}
-            onClick={() => { setAnchor(null); onChange(h.id); }}>
-            <ListItemText primary={h.name} secondary={h.available ? undefined : h.reason}
-              slotProps={{ secondary: { sx: { fontSize: 12 } } }} />
+            onClick={() => void pick(h.id)}>
+            <ListItemText primary={moving && h.id !== value ? `转到 ${h.name} 继续` : h.name}
+              secondary={h.available ? undefined : h.reason} slotProps={{ secondary: { sx: { fontSize: 12 } } }} />
             {h.id === value && <Check size={15} />}
           </MenuItem>
         ))}

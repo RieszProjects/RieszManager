@@ -13,6 +13,7 @@ import { Mascot } from "@/components/Mascot";
 import { StatusDot } from "@/components/StatusDot";
 import { copyText } from "@/lib/clipboard";
 import { clockTime } from "@/lib/format";
+import { handOff } from "@/lib/handoff";
 import { harnessLabel, resumeCommand, routeTag, useHarnesses } from "@/lib/harnesses";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { sessionTitle, useApp } from "@/store/app";
@@ -55,16 +56,14 @@ function QueueBar({ sessionId, queue }: { sessionId: string; queue: QueueEntry[]
 
 /** "Continue in another tool": the conversation, without thinking, rewritten in that tool's own history. */
 function HandoffMenu({ sessionId, harness, anchor, onClose }: { sessionId: string; harness: string; anchor: HTMLElement | null; onClose: () => void }) {
-  const navigate = useUi((s) => s.navigate);
   const harnesses = useHarnesses();
   const [busy, setBusy] = useState<string | null>(null);
   const targets = harnesses.filter((h) => h.id !== harness);
   const go = async (target: string) => {
     setBusy(target);
     try {
-      const res = await api<{ sessionId: string }>(`sessions/${sessionId}/handoff`, { body: { harness: target } });
+      await handOff(sessionId, target);
       onClose();
-      navigate({ view: "session", sessionId: res.sessionId }, true);
     } catch (err) {
       toast((err as Error).message, "error");
     } finally {

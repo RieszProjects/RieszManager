@@ -223,6 +223,10 @@
 .rz-doll-balances { display: grid; gap: 5px; }
 .rz-doll-quotas { display: grid; gap: 9px; }
 .rz-doll-quota .rz-doll-usage { margin-top: 5px; gap: 6px; }
+.rz-doll-minor { display: flex; justify-content: space-between; gap: 12px; font-size: 11.5px; color: var(--text3); }
+.rz-doll-minor .mono { font-size: 11px; color: var(--text2); }
+.rz-doll-minor.mid .mono { color: var(--amber); }
+.rz-doll-minor.high .mono { color: var(--danger); }
 .rz-doll-tag {
   margin-left: 6px; padding: 0 5px; border: 1px solid var(--sage); border-radius: 6px;
   color: var(--sage-strong); font-size: 10.5px; line-height: 15px; vertical-align: 1px;

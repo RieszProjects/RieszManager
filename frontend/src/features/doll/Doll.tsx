@@ -90,10 +90,19 @@ function randomReaction(): Expression {
   return lastReaction;
 }
 
+/** The models a window is for ("Fable", "Gemini 模型"), or null for the plan's general one. */
+function scopeOf(w: UsageWindow): string | null {
+  const scope = /\(([^)]+)\)/.exec(w.label)?.[1];
+  return scope && !/all models/i.test(scope) ? scope : null;
+}
+
+/** The main models' windows (the first window's) get a meter; the others one short line each. */
 function WindowRows({ windows }: { windows: UsageWindow[] }) {
+  const main = scopeOf(windows[0]);
+  const minor = windows.filter((w) => scopeOf(w) !== main);
   return (
     <div className="rz-doll-usage">
-      {windows.map((w) => {
+      {windows.filter((w) => scopeOf(w) === main).map((w) => {
         const level = w.percent >= 90 ? "high" : w.percent >= 80 ? "mid" : "";
         const reset = resetLabel(w.resetsAt, w.resetText);
         return (
@@ -104,6 +113,16 @@ function WindowRows({ windows }: { windows: UsageWindow[] }) {
             </div>
             <div className="rz-doll-meter"><span style={{ width: `${Math.min(100, w.percent)}%` }} /></div>
             {reset && <div className="rz-doll-reset dim">{reset} 重置</div>}
+          </div>
+        );
+      })}
+      {minor.map((w) => {
+        const level = w.percent >= 90 ? "high" : w.percent >= 80 ? "mid" : "";
+        const reset = resetLabel(w.resetsAt, w.resetText);
+        return (
+          <div key={w.label} className={`rz-doll-minor ${level}`} title={reset ? `${reset} 重置` : undefined}>
+            <span>{windowName(w)}</span>
+            <span className="mono">{Math.round(w.percent)}%</span>
           </div>
         );
       })}

@@ -15,6 +15,7 @@ import { useIsMobile } from "@/lib/useIsMobile";
 import { uuid4 } from "@/lib/uuid";
 import { useApp } from "@/store/app";
 import { toast } from "@/store/ui";
+import { handOff } from "@/lib/handoff";
 import { ContextMeter } from "./ContextMeter";
 import { invalidateCommands, useCommands } from "./useCommands";
 import { cycleMode, HarnessPicker, ModelPicker, ModePicker } from "./SessionControls";
@@ -53,6 +54,15 @@ function mentionToken(text: string, caret: number): { query: string; start: numb
   const m = before.match(/(^|\s)@([^\s@]*)$/);
   if (!m) return null;
   return { query: m[2], start: caret - m[2].length - 1 };
+}
+
+/** Continue an existing session in another harness (the chip's menu). */
+async function moveTo(sessionId: string, target: string): Promise<void> {
+  try {
+    await handOff(sessionId, target);
+  } catch (err) {
+    toast((err as Error).message, "error");
+  }
 }
 
 export function Composer({ sessionId, projectId, state, defaultModel, defaultMode, onCreated, autoFocus, placeholder, dropRef, harness: knownHarness, api: knownApi }: Props) {
@@ -472,7 +482,9 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
 
   const chips = (
     <>
-      {!sessionId && harnesses.length > 1 && <HarnessPicker value={harness} harnesses={harnesses} onChange={pickHarness} />}
+      {harnesses.length > 1 && (sessionId
+        ? <HarnessPicker value={harness} harnesses={harnesses} moving onChange={(target) => moveTo(sessionId, target)} />
+        : <HarnessPicker value={harness} harnesses={harnesses} onChange={pickHarness} />)}
       <ModePicker value={mode} allowBypass={Boolean(config?.allowBypass)} onChange={changeMode} options={harnessModes} />
       <ModelPicker value={model} effort={effort} models={models} onChange={changeModel} onEffort={changeEffort}
         routes={routes} route={route} routeLocked={routeLocked} />
