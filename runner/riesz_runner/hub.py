@@ -391,6 +391,7 @@ class Hub:
         data["interrupted"] = self.prefs.interrupted(session_id)
         data["subagents"], data["subagentsActive"] = self.subagents.activity(session_id)
         data["api"] = (self.prefs.get(session_id) or {}).get("api")
+        data["handoffFrom"] = (self.prefs.get(session_id) or {}).get("handoffFrom")
         return data
 
     def _live_info(self, session_id: str) -> dict[str, Any] | None:
@@ -695,6 +696,45 @@ class Hub:
             await self.ensure_process(session_id, model=model)
         await self.broadcast_global({"ev": "sessions", "sessions": [self.session_summary(session_id)], "removed": []})
         await self.broadcast_session(session_id, {"ev": "state", "state": self.session_state(session_id)})
+
+    async def handoff(self, session_id: str, target: str, *, api: str | None = None, model: str | None = None,
+                      mode: str | None = None) -> str:
+        """Continue a session's conversation in another harness (handoff.py); returns the new session's id."""
+        from . import handoff
+        if target not in handoff.TARGETS:
+            raise ControlError(f"a conversation cannot be moved to {target} yet")
+        summary = self.session_summary(session_id)
+        source = summary.get("harness") or "claude"
+        if self.harnesses.has(session_id):
+            items = self.harnesses.items(session_id)
+        else:
+            view = await self.catch_up(session_id)
+            items = view.items if view is not None else []
+        cwd = summary.get("cwd")
+        if not cwd or not Path(cwd).is_dir():
+            raise ControlError("the session's working directory no longer exists")
+        msgs = handoff.conversation(items)
+        if not msgs:
+            raise ControlError("the session has no conversation to move")
+        msgs[0] = {**msgs[0], "text": handoff.preface(source, summary.get("model")) + "\n\n" + msgs[0]["text"]}
+        title = summary.get("customTitle") or summary.get("title") or summary.get("firstPrompt")
+        if target == "claude":
+            setup = await self.claude_setup(api)
+            new_id = str(uuidlib.uuid4())
+            records = handoff.claude_records(msgs, new_id, cwd, summary.get("model"), title)
+            await asyncio.to_thread(handoff.write_claude_transcript, self.cfg.projects_dir, cwd, records, new_id)
+            self.store.refresh()
+            self.prefs.remember(new_id, api=setup.route, handoffFrom=session_id)
+            await self.ensure_process(new_id, model=model, permission_mode=mode)
+        else:
+            driver = await self.harnesses.create(target, cwd, model=model, mode=mode, api=api)
+            new_id = str(driver.session_id)
+            await driver.peer.request("thread/inject_items", {"threadId": new_id, "items": handoff.responses_items(msgs)},
+                                      timeout=120)
+            await self.harnesses.set_imported(new_id, handoff.display_items(items, session_id), session_id, title)
+        log.info("moved the conversation of %s (%s) to %s session %s", session_id[:8], source, target, new_id[:8])
+        await self.broadcast_global({"ev": "sessions", "sessions": [self.session_summary(new_id)], "removed": []})
+        return new_id
 
     async def rename(self, session_id: str, title: str) -> None:
         """Set a session's custom title, through its claude process when we host it."""

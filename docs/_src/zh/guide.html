@@ -93,6 +93,9 @@
 <p>新会话默认用第一条可用的线路，也就是有订阅就用订阅。模型菜单按线路分组列出模型，选另一组里的模型就换到那条线路；不是默认线路的会话，标题下方会有「DeepSeek API」这样的标签。已有会话也可以换：Claude Code和DeepSeek Harness的会话会在空闲时重启到新线路，对话接着进行；Codex的会话固定在创建时的线路上（Codex不允许把已有对话换到别的服务商），要换就新开一个会话。</p>
 <p>订阅只在各工具自己的程序里使用：Claude订阅给Claude Code，ChatGPT订阅给Codex，Google AI订阅给Antigravity。DeepSeek Harness虽然也能登录别家的订阅，但在别的软件里用这些订阅违反服务商的条款，所以它只走API key。Gemini CLI的Google账号登录也不用（个人账号已于2026年6月转到Antigravity CLI）。</p>
 
+<h3 id="handoff">转到其他工具继续</h3>
+<p>会话菜单里的「转到其他工具继续」会把这段对话交给另一个工具接着做：目前可以转到Claude Code或Codex。对话被改写成目标工具自己的历史格式（Claude Code的会话记录；Codex通过它的<code>thread/inject_items</code>写入），新工具能直接接着聊。改写时思考过程不转，工具调用和结果只保留文字摘录，所以需要细节时新工具会重新查看文件或运行命令。原会话保持不变；新会话的标题下方有「转自」标签，点一下回到原会话。</p>
+
 <h2 id="prompts">确认和提问</h2>
 <p>当Claude要执行需要许可的操作时，对话底部会出现确认卡片（例如「允许 命令?」），上面有三个按钮：</p>
 <ul>

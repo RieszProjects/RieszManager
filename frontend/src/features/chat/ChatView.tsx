@@ -1,7 +1,7 @@
 /** A conversation: header, transcript, live activity, pending prompts and the composer. */
 import { IconButton, ListItemIcon, Menu, MenuItem } from "@mui/material";
 import {
-  AlarmClock, Archive, ArchiveRestore, Check, Copy, EllipsisVertical, GitFork, Hand, LoaderCircle, MonitorUp, Pencil, Pin, Power, SquareTerminal, TriangleAlert, X,
+  AlarmClock, Archive, ArchiveRestore, ArrowLeftRight, Check, Copy, EllipsisVertical, GitFork, Hand, LoaderCircle, MonitorUp, Pencil, Pin, Power, SquareTerminal, TriangleAlert, X,
 } from "lucide-react";
 import { useSchedules } from "@/features/schedules/store";
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
@@ -13,7 +13,7 @@ import { Mascot } from "@/components/Mascot";
 import { StatusDot } from "@/components/StatusDot";
 import { copyText } from "@/lib/clipboard";
 import { clockTime } from "@/lib/format";
-import { harnessLabel, routeTag } from "@/lib/harnesses";
+import { harnessLabel, routeTag, useHarnesses } from "@/lib/harnesses";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { sessionTitle, useApp } from "@/store/app";
 import { useOrganize } from "@/store/organize";
@@ -62,9 +62,44 @@ function resumeCommand(harness: string | null | undefined, sessionId: string): s
   return `claude --resume ${sessionId}`;
 }
 
+/** Harnesses a conversation can be moved to (runner/riesz_runner/handoff.py). */
+const HANDOFF_TARGETS = ["claude", "codex"];
+
+/** "Continue in another tool": the conversation, without thinking, rewritten in that tool's own history. */
+function HandoffMenu({ sessionId, harness, anchor, onClose }: { sessionId: string; harness: string; anchor: HTMLElement | null; onClose: () => void }) {
+  const navigate = useUi((s) => s.navigate);
+  const harnesses = useHarnesses();
+  const [busy, setBusy] = useState<string | null>(null);
+  const targets = harnesses.filter((h) => HANDOFF_TARGETS.includes(h.id) && h.id !== harness);
+  const go = async (target: string) => {
+    setBusy(target);
+    try {
+      const res = await api<{ sessionId: string }>(`sessions/${sessionId}/handoff`, { body: { harness: target } });
+      onClose();
+      navigate({ view: "session", sessionId: res.sessionId });
+    } catch (err) {
+      toast((err as Error).message, "error");
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={onClose} anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+      transformOrigin={{ vertical: "top", horizontal: "right" }}>
+      {targets.map((h) => (
+        <MenuItem key={h.id} disabled={!h.available || Boolean(busy)} onClick={() => void go(h.id)}>
+          <ListItemIcon>{busy === h.id ? <LoaderCircle size={16} className="spin" /> : <ArrowLeftRight size={16} />}</ListItemIcon>
+          <span className="rz-menu-grow">转到 {h.name} 继续</span>
+        </MenuItem>
+      ))}
+    </Menu>
+  );
+}
+
 function SessionMenu({ sessionId, state, cwd, title, keepAlive, harness }: {
   sessionId: string; state: SessionState | null; cwd: string | null; title: string; keepAlive: boolean; harness?: string;
 }) {
+  const [handoffAnchor, setHandoffAnchor] = useState<HTMLElement | null>(null);
   const setScheduleSession = useUi((s) => s.setScheduleSession);
   const scheduleCount = useSchedules((s) => s.items.filter((x) => x.sessionId === sessionId && x.enabled).length);
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
@@ -136,6 +171,9 @@ function SessionMenu({ sessionId, state, cwd, title, keepAlive, harness }: {
             <ListItemIcon><Hand size={16} /></ListItemIcon>从终端转到这里
           </MenuItem>
         )}
+        <MenuItem onClick={() => { setHandoffAnchor(anchor); close(); }}>
+          <ListItemIcon><ArrowLeftRight size={16} /></ListItemIcon>转到其他工具继续
+        </MenuItem>
         <MenuItem onClick={() => run(async () => {
           if (await copyText(sessionId)) toast("已复制会话 ID", "success");
         })}>
@@ -150,6 +188,7 @@ function SessionMenu({ sessionId, state, cwd, title, keepAlive, harness }: {
           </MenuItem>
         )}
       </Menu>
+      <HandoffMenu sessionId={sessionId} harness={harness ?? "claude"} anchor={handoffAnchor} onClose={() => setHandoffAnchor(null)} />
     </>
   );
 }
@@ -159,6 +198,12 @@ const DRAG_IDLE_MS = 700;
 
 export function ChatView({ sessionId }: { sessionId: string }) {
   const summary = useApp((s) => s.sessions[sessionId]);
+  // The harness of the session this one was moved from (handoff), if any.
+  const fromHarness = useApp((s) => {
+    const from = s.sessions[sessionId]?.handoffFrom;
+    return from ? s.sessions[from]?.harness ?? "claude" : null;
+  });
+  const navigate = useUi((s) => s.navigate);
   const live = useApp((s) => s.live[sessionId]);
   const projects = useApp((s) => s.projects);
   const data = useSessions((s) => s.data[sessionId]);
@@ -282,6 +327,12 @@ export function ChatView({ sessionId }: { sessionId: string }) {
               <StatusDot live={live} size={7} />
               {harness && <span className={`rz-tag harness harness-${harness}`}>{harnessLabel(harness)}</span>}
               {apiTag && <span className="rz-tag harness">{apiTag}</span>}
+              {summary?.handoffFrom && (
+                <button type="button" className="rz-tag harness rz-tag-btn" title="打开原来的会话"
+                  onClick={() => navigate({ view: "session", sessionId: summary.handoffFrom! })}>
+                  转自 {harnessLabel(fromHarness)}
+                </button>
+              )}
               {project && <span className="clamp-1">{project.name}</span>}
               {summary?.gitBranch && <span className="dim mono clamp-1">⎇ {summary.gitBranch}</span>}
               {keepAlive && <span className="rz-tag keep" title="保持运行：空闲时不会被关闭"><Pin size={10} />常驻</span>}

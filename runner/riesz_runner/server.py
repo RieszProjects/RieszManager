@@ -675,6 +675,33 @@ async def set_api(request: web.Request) -> web.Response:
     return _json({"state": hub.session_state(sid)})
 
 
+async def handoff_session(request: web.Request) -> web.Response:
+    """Continue this conversation in another harness (body: harness; api, model, permissionMode for the new session)."""
+    hub = request.app[HUB]
+    sid = _session_id(request)
+    body = await _body(request)
+    target = body.get("harness")
+    if not isinstance(target, str) or target not in ("claude", *HARNESSES):
+        return _err(400, "invalid harness")
+    api = body.get("api") or None
+    if api is not None and not routes.valid(target, api):
+        return _err(400, "invalid api")
+    model = body.get("model") or None
+    if model is not None and not (isinstance(model, str) and re.fullmatch(r"[A-Za-z0-9._:/\[\]-]{1,100}", model)):
+        return _err(400, "invalid model")
+    mode = body.get("permissionMode") or None
+    if target == "claude":
+        mode = _validate_mode(hub.cfg, mode)
+    elif mode is not None and mode not in {m.id for m in HARNESSES[target]["driver"](cwd="/", sink=None).modes()}:
+        return _err(400, "invalid permission mode")
+    new_id = await hub.handoff(sid, target, api=api, model=model, mode=mode)
+    return _json({"sessionId": new_id})
+
+
+async def h_handoff(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    return await handoff_session(request)
+
+
 async def rename_session(request: web.Request) -> web.Response:
     hub = request.app[HUB]
     sid = _session_id(request)
@@ -1191,12 +1218,13 @@ def build_app(cfg: Config) -> web.Application:
     r.add_get("/v1/credentials", credentials)
     r.add_post(r"/v1/credentials/{provider:[a-z]{1,16}}/{action:set|test|clear}", credential_action)
     r.add_post("/v1/sessions/{sid}/api", set_api)
+    r.add_post("/v1/sessions/{sid}/handoff", handoff_session)
     r.add_get(r"/v1/harnesses/{harness:[a-z]{1,16}}/models", harness_models)
     HARNESS_HANDLERS.update({
         session_detail: h_detail, session_items: h_items, session_image: h_image, session_commands: h_commands,
         context_limits: h_context_limits, send_message: h_send, resume_session: h_resume, start_session: h_start,
         stop_session: h_stop, interrupt: h_interrupt, cancel_message: h_cancel, answer_permission: h_permission,
-        set_model: h_model, set_mode: h_mode, set_effort: h_effort, rename_session: h_rename, set_api: h_set_api,
+        set_model: h_model, set_mode: h_mode, set_effort: h_effort, rename_session: h_rename, set_api: h_set_api, handoff_session: h_handoff,
         session_subagents: h_subagents, dismiss_interrupted: h_dismiss,
     })
     return app

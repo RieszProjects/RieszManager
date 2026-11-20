@@ -35,6 +35,8 @@ export interface SessionSummary {
   harness?: string;
   /** The model API it runs on (an ApiRoute id such as "deepseek:key"); absent: the harness's own login. */
   api?: string | null;
+  /** The session whose conversation this one continues in another harness. */
+  handoffFrom?: string | null;
   cwd: string | null;
   gitBranch: string | null;
   title: string | null;

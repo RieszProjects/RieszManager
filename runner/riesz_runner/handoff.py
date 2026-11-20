@@ -1,0 +1,167 @@
+"""Moving a conversation to another harness: its history rewritten in the target harness's own format.
+
+Every harness's conversation is first read into the web app's items (each driver
+and the Claude Code transcript reader already produce them), then turned into a
+plain conversation: the user's messages and the replies, each tool call written
+as a short text (what was run, an excerpt of what came back), thinking left out.
+That conversation is written the way the target harness keeps history:
+
+- Claude Code: a transcript file under ~/.claude/projects, resumed with --resume;
+- Codex: a new thread, the history added with thread/inject_items (Responses API items).
+
+The source session is left as it was; the new one records where it came from.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import time
+import uuid as uuidlib
+from pathlib import Path
+from typing import Any
+
+TOOL_INPUT_CHARS = 400
+TOOL_OUTPUT_CHARS = 1500
+HARNESS_NAMES = {"claude": "Claude Code", "codex": "Codex", "dsh": "DeepSeek Harness", "gemini": "Gemini CLI",
+                 "antigravity": "Antigravity"}
+TARGETS = ("claude", "codex")
+
+
+def _clip(text: str, limit: int) -> str:
+    text = text.strip()
+    return text if len(text) <= limit else text[:limit] + f"…（省略 {len(text) - limit} 字）"
+
+
+def tool_text(block: dict[str, Any]) -> str:
+    """A tool call and an excerpt of its result, as text."""
+    inp = block.get("input") or {}
+    main = next((str(inp[k]) for k in ("command", "file_path", "path", "pattern", "url", "query", "description")
+                 if isinstance(inp, dict) and inp.get(k)), None)
+    if main is None:
+        main = json.dumps(inp, ensure_ascii=False) if inp else ""
+    out = f"【调用工具 {block.get('name')}】{_clip(main, TOOL_INPUT_CHARS)}"
+    result = block.get("result")
+    if result is None:
+        return out + "\n【没有结果（被中断或还在运行）】"
+    text = str(result.get("text") or "")
+    label = "【出错】" if result.get("isError") else "【结果】"
+    return out + ("\n" + label + _clip(text, TOOL_OUTPUT_CHARS) if text.strip() else "\n" + label + "（无输出）")
+
+
+def conversation(items: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """The conversation as alternating {"role", "text"} messages, user first; thinking left out."""
+    msgs: list[dict[str, str]] = []
+
+    def add(role: str, text: str) -> None:
+        text = text.strip()
+        if not text:
+            return
+        if msgs and msgs[-1]["role"] == role:
+            msgs[-1]["text"] += "\n\n" + text
+        else:
+            msgs.append({"role": role, "text": text})
+
+    for it in items:
+        kind = it.get("kind")
+        if kind == "user":
+            text = str(it.get("text") or "")
+            if it.get("images"):
+                text += f"\n[附图 {len(it['images'])} 张，没有转过来]"
+            add("user", text)
+        elif kind == "assistant":
+            parts = []
+            for b in it.get("blocks") or ():
+                if b.get("type") == "text" and (b.get("text") or "").strip():
+                    parts.append(b["text"])
+                elif b.get("type") == "tool":
+                    parts.append(tool_text(b))
+            add("assistant", "\n\n".join(parts))
+        elif kind == "command":
+            add("user", f"{it.get('name') or ''} {it.get('args') or ''}")
+        elif kind == "output":
+            add("assistant", f"【命令输出】{_clip(str(it.get('text') or ''), TOOL_OUTPUT_CHARS)}")
+        elif kind == "compact":
+            summary = str(it.get("summary") or "")
+            add("user", "[之前的对话在这里被压缩了" + (f"，摘要：\n{summary}]" if summary else "]"))
+        elif kind == "interrupted":
+            add("assistant", "[这一轮被用户中断了]")
+    while msgs and msgs[0]["role"] != "user":
+        msgs.pop(0)
+    return msgs
+
+
+def preface(source_harness: str, source_model: str | None) -> str:
+    name = HARNESS_NAMES.get(source_harness, source_harness)
+    model = f"（模型 {source_model}）" if source_model else ""
+    return (f"[以下是从 {name}{model} 会话转过来的历史记录。工具调用和结果只保留了文字摘录，思考过程没有转过来；"
+            "需要细节时请重新查看文件或重新运行命令。]")
+
+
+# ---- Claude Code -----------------------------------------------------------------------------
+
+def claude_project_dir(projects_dir: Path, cwd: str) -> Path:
+    """Where Claude Code keeps the transcripts of sessions started in `cwd`."""
+    return projects_dir / re.sub(r"[^A-Za-z0-9]", "-", cwd)
+
+
+def claude_records(msgs: list[dict[str, str]], session_id: str, cwd: str, model: str | None,
+                   title: str | None) -> list[dict[str, Any]]:
+    """Transcript records for a Claude Code session holding this conversation."""
+    records: list[dict[str, Any]] = []
+    parent = None
+    now = time.time()
+    for i, m in enumerate(msgs):
+        rid = str(uuidlib.uuid4())
+        ts = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now - len(msgs) + i)) + ".000Z"
+        base = {"parentUuid": parent, "isSidechain": False, "userType": "external", "cwd": cwd, "sessionId": session_id,
+                "uuid": rid, "timestamp": ts}
+        if m["role"] == "user":
+            records.append({**base, "type": "user", "message": {"role": "user", "content": m["text"]}})
+        else:
+            records.append({**base, "type": "assistant", "message": {
+                "id": f"msg_handoff_{uuidlib.uuid4().hex[:20]}", "type": "message", "role": "assistant",
+                "model": model or "handoff", "content": [{"type": "text", "text": m["text"]}],
+                "stop_reason": "end_turn", "stop_sequence": None, "usage": {"input_tokens": 0, "output_tokens": 0}}})
+        parent = rid
+    if title:
+        records.append({"type": "custom-title", "customTitle": title, "sessionId": session_id})
+    return records
+
+
+def write_claude_transcript(projects_dir: Path, cwd: str, records: list[dict[str, Any]], session_id: str) -> Path:
+    folder = claude_project_dir(projects_dir, cwd)
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{session_id}.jsonl"
+    with path.open("x", encoding="utf-8") as fh:                  # never overwrite a transcript
+        for rec in records:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return path
+
+
+# ---- Codex -----------------------------------------------------------------------------------
+
+def responses_items(msgs: list[dict[str, str]]) -> list[dict[str, Any]]:
+    """The conversation as Responses API items, for Codex's thread/inject_items."""
+    out = []
+    for m in msgs:
+        kind = "input_text" if m["role"] == "user" else "output_text"
+        out.append({"type": "message", "role": m["role"], "content": [{"type": kind, "text": m["text"]}]})
+    return out
+
+
+def display_items(items: list[dict[str, Any]], source: str) -> list[dict[str, Any]]:
+    """The source's items as shown before the new session's own (thinking left out, keys and seqs of their own)."""
+    out = []
+    shown = [it for it in items if it.get("kind") in ("user", "assistant", "command", "output", "compact", "interrupted")]
+    for n, it in enumerate(shown):
+        it = dict(it)
+        if it.get("kind") == "assistant":
+            it["blocks"] = [b for b in it.get("blocks") or () if b.get("type") != "thinking"]
+            if not it["blocks"]:
+                continue
+        it["key"] = f"handoff:{source[:8]}:{it.get('key')}"
+        it["seq"] = n - len(shown) - 1                        # before the new session's own items (which start at 1)
+        it["imported"] = True
+        out.append(it)
+    return out

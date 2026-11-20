@@ -204,6 +204,26 @@ class Harnesses:
         rec = self.records.get(session_id)
         return rec["harness"] if rec else None
 
+    # ---- a conversation moved here from another session (handoff.py) -------------------
+
+    def _imported(self, session_id: str) -> list[dict[str, Any]]:
+        """The earlier conversation shown before this session's own items (its harness does not list it)."""
+        if not (self.records.get(session_id) or {}).get("handoffFrom"):
+            return []
+        with contextlib.suppress(FileNotFoundError, ValueError, OSError):
+            return json.loads((self.cache_dir / f"{session_id}.imported.json").read_text(encoding="utf-8")).get("items", [])
+        return []
+
+    async def set_imported(self, session_id: str, items: list[dict[str, Any]], source: str, title: str | None) -> None:
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        (self.cache_dir / f"{session_id}.imported.json").write_text(json.dumps({"items": items}, ensure_ascii=False), encoding="utf-8")
+        rec = self.records[session_id]
+        rec["handoffFrom"] = source
+        if title:
+            rec["customTitle"] = title
+        self._save()
+        await self.hub.broadcast_session(session_id, {"ev": "reset", "items": self.items(session_id), "hasMore": False})
+
     def _cached_items(self, session_id: str) -> list[dict[str, Any]]:
         with contextlib.suppress(FileNotFoundError, ValueError, OSError):
             return json.loads((self.cache_dir / f"{session_id}.json").read_text(encoding="utf-8")).get("items", [])
@@ -239,13 +259,13 @@ class Harnesses:
         rec = self.records[session_id]
         return {
             "sessionId": session_id, "harness": rec["harness"], "cwd": rec.get("cwd"), "gitBranch": None,
-            "title": rec.get("title"), "customTitle": rec.get("customTitle"), "firstPrompt": rec.get("firstPrompt"),
+            "title": rec.get("customTitle") or rec.get("title"), "customTitle": rec.get("customTitle"), "firstPrompt": rec.get("firstPrompt"),
             "lastPrompt": rec.get("lastPrompt"), "createdAt": _iso(rec.get("createdAt") or 0), "updatedAt": _iso(rec.get("updatedAt") or 0),
             "promptCount": rec.get("promptCount") or 0, "model": rec.get("model"), "effort": rec.get("effort"),
             "permissionMode": rec.get("mode"), "project": self.hub.projects.project_id_for(rec.get("cwd")),
             "live": self.live_info(session_id), "mtime": rec.get("updatedAt") or 0, "size": 0, "keepAlive": False,
             "startedBy": None, "interrupted": self.hub.prefs.interrupted(session_id), "subagents": 0,
-            "api": rec.get("api"),
+            "api": rec.get("api"), "handoffFrom": rec.get("handoffFrom"),
         }
 
     def summaries(self, project: str | None = None) -> list[dict[str, Any]]:
@@ -270,9 +290,8 @@ class Harnesses:
 
     def items(self, session_id: str) -> list[dict[str, Any]]:
         driver = self.drivers.get(session_id)
-        if driver is not None and driver.items.items:
-            return driver.items.items
-        return self._cached_items(session_id)
+        own = driver.items.items if driver is not None and driver.items.items else self._cached_items(session_id)
+        return self._imported(session_id) + own
 
     async def models(self, session_id: str | None = None, harness: str | None = None,
                      route: str | None = None) -> list[dict[str, Any]]:
@@ -529,6 +548,8 @@ class Harnesses:
         if ev in ("items", "reset"):
             if rec is not None:
                 self._save_items_soon(sid)
+            if ev == "reset" and rec is not None and rec.get("handoffFrom"):
+                event = {**event, "items": self._imported(sid) + list(event.get("items") or [])}
         if ev == "state":
             event = {"ev": "state", "state": self.state(sid) if rec else driver.snapshot()}
             if rec is not None:
