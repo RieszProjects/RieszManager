@@ -17,7 +17,7 @@ import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from .credentials import _output
+from .credentials import _child_env, _output
 from .drivers.codex import CLIENT_INFO
 from .drivers.jsonrpc import JsonRpcPeer
 
@@ -138,7 +138,9 @@ class Limits:
         codex = self.hub.harnesses.bin("codex")
         if not codex:
             raise RuntimeError("codex is not installed")
-        env = dict(os.environ)
+        env = _child_env()
+        # codex is a Node script: its own directory (nvm's) holds the node it needs, which the service's PATH lacks.
+        env["PATH"] = os.path.dirname(codex) + os.pathsep + env.get("PATH", "")
         for var in ("OPENAI_API_KEY", "RUNNER_TOKEN"):
             env.pop(var, None)
         peer = JsonRpcPeer([codex, "app-server"], cwd=str(self.hub.cfg.state_dir), env=env, version=False)
