@@ -126,6 +126,43 @@ class BackgroundTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("paper built", driver.last_assistant_text())
 
 
+class AutonomousTest(unittest.IsolatedAsyncioTestCase):
+    """Work Antigravity starts by itself is a turn: working until its updates stop, then a result."""
+
+    async def until(self, check, what: str, seconds: float = 10) -> None:
+        deadline = time.time() + seconds
+        while not check():
+            self.assertLess(time.time(), deadline, what)
+            await asyncio.sleep(0.02)
+
+    async def test_own_timer_then_waking_up(self):
+        driver = AntigravityDriver(agy=AGENT, cwd=tempfile.mkdtemp(), sink=Events(), env=dict(os.environ))
+        driver.autonomous_quiet = 0.5
+        self.addAsyncCleanup(driver.stop)
+        await driver.start()
+        await driver.send("timer")
+        await self.until(lambda: driver.sink.of("result"), "the turn ends")
+        self.assertFalse(driver.busy)
+        self.assertEqual([t["description"] for t in driver.tasks.values()], ["1 秒后自己接着做"])   # its timer, until it fires
+        await self.until(lambda: driver.busy, "it wakes up and works: shown as working")
+        await self.until(lambda: len(driver.sink.of("result")) == 2, "its own turn ends once it is quiet")
+        self.assertFalse(driver.busy)
+        self.assertEqual(driver.tasks, {}, "the timer fired: no longer a background task")
+        self.assertIn("checked again", driver.last_assistant_text())
+
+    async def test_message_while_it_works_on_its_own_waits_for_it(self):
+        driver = AntigravityDriver(agy=AGENT, cwd=tempfile.mkdtemp(), sink=Events(), env=dict(os.environ))
+        driver.autonomous_quiet = 0.5
+        self.addAsyncCleanup(driver.stop)
+        await driver.start()
+        await driver.send("timer")
+        await self.until(lambda: driver.busy and len(driver.sink.of("result")) == 1 and driver._autonomous, "working on its own")
+        await driver.send("hello")
+        self.assertEqual([q["preview"] for q in driver.snapshot()["queue"]], ["hello"])      # shown as queued
+        await self.until(lambda: len(driver.sink.of("result")) == 3, "then answered")
+        self.assertIn("echo: hello", driver.last_assistant_text())
+
+
 class LateReplayTest(unittest.IsolatedAsyncioTestCase):
     """Antigravity answers session/load before replaying the history: the next message still goes after it."""
 

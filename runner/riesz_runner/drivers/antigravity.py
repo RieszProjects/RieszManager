@@ -40,6 +40,15 @@ class AntigravityDriver(AcpDriver):
         self.api = api or "gemini:subscription"
         self.mode = self.mode or "default"
 
+    def wakeup_after(self, name: str, inp: dict[str, Any]) -> float | None:
+        """Its schedule tool ("Run schedule", DurationSeconds): it wakes itself up after that long."""
+        if "schedule" not in name.lower():
+            return None
+        try:
+            return float(inp.get("DurationSeconds"))
+        except (TypeError, ValueError):
+            return None
+
     def mode_name(self, mode: dict[str, Any]) -> str:
         return MODE_NAMES.get(str(mode.get("id")), super().mode_name(mode))
 

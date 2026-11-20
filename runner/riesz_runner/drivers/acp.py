@@ -88,6 +88,9 @@ class AcpDriver(Driver):
     capabilities = Capabilities(queue=True, approve_for_session=True, user_questions=False, model_switch="next-turn",
                                 effort_switch="none")
     default_modes: list[Mode] = []
+    # Work the agent starts by itself (a background task finished, its own timer fired) counts as a turn of
+    # its own until its updates have stopped for this long.
+    autonomous_quiet = 30.0
 
     def __init__(self, *, argv: list[str] | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -105,6 +108,7 @@ class AcpDriver(Driver):
         self._commands: list[dict[str, Any]] = []   # the agent's own slash commands (available_commands_update)
         self._open: dict[str, float] = {}           # tool calls started and not finished: id -> when
         self._last_update = 0.0                     # when the last session/update came (monotonic)
+        self._autonomous = False                    # working on its own, without a prompt of ours
 
     @property
     def pid(self) -> int | None:
@@ -232,6 +236,7 @@ class AcpDriver(Driver):
         self.exit_code = code
         self._open.clear()
         self.tasks.clear()                              # background calls end with the process
+        self._autonomous = False
         if self.busy:
             self.mark_unfinished_tools("exited")
             self.busy = False
@@ -307,6 +312,40 @@ class AcpDriver(Driver):
         else:
             await self.emit_state()
 
+    def _begin_autonomous(self) -> None:
+        """The agent works without a prompt of ours (Antigravity: a background call finished, its own timer
+        fired): shown as working, and a reload waits, until its updates stop."""
+        self._autonomous = True
+        self._turn += 1
+        self._close_current()
+        self.turn_started()
+        asyncio.get_running_loop().create_task(self._watch_autonomous())
+
+    async def _watch_autonomous(self) -> None:
+        await self.emit_state()
+        while self._autonomous and self.alive:
+            await asyncio.sleep(min(2.0, self.autonomous_quiet / 2))
+            if time.monotonic() - self._last_update >= self.autonomous_quiet:
+                break
+        if not self._autonomous:
+            return                                      # a prompt of ours took over, or the process ended
+        self._autonomous = False
+        self._close_current()
+        self._to_background()
+        result = self.turn_finished("success", stop_reason="end_turn")
+        await self.flush()
+        await self.emit({"ev": "result", "result": result, "text": self.last_assistant_text()[:400]})
+        if self._queue:
+            text, images, uuid = self._queue.pop(0)
+            self._start_turn(text, images, uuid)
+        else:
+            await self.emit_state()
+
+    def wakeup_after(self, name: str, inp: dict[str, Any]) -> float | None:
+        """Seconds after which the agent wakes itself up, when this call is its own timer (a harness's built-in
+        schedule tool, which stays open until it fires): its background task says so."""
+        return None
+
     def _to_background(self) -> None:
         """Calls still running when the turn ends go on in the background (Antigravity's long commands and
         subagents report later, and the agent carries on by itself): shown as background tasks, not as
@@ -317,7 +356,9 @@ class AcpDriver(Driver):
                 self._open.pop(tid, None)
                 continue
             block = found[1]
-            summary = str(block["input"].get("command") or block["input"].get("title") or block["input"].get("description") or "")
+            wake = self.wakeup_after(block["name"], block["input"])
+            summary = (f"{wake:.0f} 秒后自己接着做" if wake else
+                       str(block["input"].get("command") or block["input"].get("title") or block["input"].get("description") or ""))
             self.tasks[tid] = {"id": tid, "description": (summary or block["name"])[:120], "type": "tool", "background": True,
                                "toolUseId": tid, "startedAt": started}
 
@@ -422,6 +463,9 @@ class AcpDriver(Driver):
         self._last_update = time.monotonic()
         u = (params or {}).get("update") or {}
         kind = u.get("sessionUpdate")
+        if (kind in ("agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update", "plan")
+                and not self._loading and self.ready and not self.busy):
+            self._begin_autonomous()
         if kind == "agent_message_chunk":
             self._chunk("text", _text(u.get("content")))
         elif kind == "agent_thought_chunk":

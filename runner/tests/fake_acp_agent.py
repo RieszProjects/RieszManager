@@ -75,6 +75,19 @@ def prompt(rid, p):
             update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "paper built"}})
         threading.Thread(target=later, daemon=True).start()
         return
+    elif text == "timer":
+        # Like Antigravity's schedule tool: it sets its own timer, ends the turn, then wakes up and works.
+        # (The call stays in progress until the timer fires, as Antigravity's does.)
+        update(sid, {"sessionUpdate": "tool_call", "toolCallId": "t4", "title": "Run schedule", "kind": "other", "status": "in_progress",
+                     "rawInput": {"DurationSeconds": 1, "Prompt": "check again"}})
+        send({"id": rid, "result": {"stopReason": "end_turn"}})
+
+        def wake():
+            cancelled.wait(1.0)
+            update(sid, {"sessionUpdate": "tool_call_update", "toolCallId": "t4", "status": "completed"})
+            update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "checked again"}})
+        threading.Thread(target=wake, daemon=True).start()
+        return
     elif text == "wait":
         update(sid, {"sessionUpdate": "tool_call", "toolCallId": "t2", "title": "sleep 60", "kind": "execute", "status": "in_progress"})
         cancelled.wait(30)
