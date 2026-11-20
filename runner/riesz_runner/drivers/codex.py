@@ -27,6 +27,7 @@ import uuid as uuidlib
 from typing import Any
 
 from .base import (
+    ToolServer,
     Capabilities,
     Driver,
     Mode,
@@ -185,12 +186,20 @@ class CodexDriver(Driver):
     def modes(self) -> list[Mode]:
         return MODES
 
+    def mount_tools(self, server: ToolServer) -> list[str]:
+        """`-c` overrides adding the server to Codex's mcp_servers (its config.toml table, TOML values)."""
+        key = f"mcp_servers.{server.name}"
+        return ["-c", f"{key}.command={json.dumps(server.command)}",
+                "-c", f"{key}.args={json.dumps(list(server.args))}"]
+
     # ---- lifecycle --------------------------------------------------------------------
 
     async def start(self) -> None:
         env = dict(self.env if self.env is not None else os.environ)
         env.pop("RUNNER_TOKEN", None)
         provider, extra = codex_provider(self.api)
+        if self.tools is not None:
+            extra = [*extra, *self.mount_tools(self.tools)]
         self.peer = JsonRpcPeer([self.codex, "app-server", *extra], cwd=self.cwd, env=env, version=False,
                                 on_notification=self._notification, on_request=self._request, on_exit=self._exited)
         await self.peer.start()

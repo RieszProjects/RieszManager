@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from .config import Config
 from .live import LiveProcess, scan_live
 from .process import ClaudeProcess, ControlError
+from .tools import server as tools_server
 from .projects import ProjectResolver
 from .session_prefs import SessionPrefs
 from .balances import BalanceMonitor
@@ -80,6 +81,7 @@ class Hub:
         self.credentials = Credentials(cfg)
         self.balances.credentials = self.credentials
         # Sessions of other harnesses (Codex, DeepSeek Harness): see harnesses.py.
+        self.tool_server = tools_server(cfg)       # Riesz Manager's own tools, for every harness (tools.py)
         self.harnesses = Harnesses(self)
 
     # ---- lifecycle ----------------------------------------------------------
@@ -588,6 +590,7 @@ class Hub:
                 permission_mode=permission_mode or last_mode or self.cfg.default_permission_mode,
                 effort=effort or last_effort,
                 sink=self._sink,
+                tools=self.tool_server,
                 api=await self.claude_setup(route),
             )
             self.hosted[session_id] = proc
@@ -623,6 +626,7 @@ class Hub:
             permission_mode=permission_mode,
             effort=effort,
             sink=self._sink,
+            tools=self.tool_server,
             api=setup,
         )
         self.hosted[session_id] = proc
@@ -655,6 +659,7 @@ class Hub:
             permission_mode=permission_mode or self.resume_settings(session_id)[1],
             effort=self.resume_effort(session_id),
             sink=self._sink,
+            tools=self.tool_server,
             api=setup,
         )
         self.hosted[new_id] = proc

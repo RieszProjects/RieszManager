@@ -29,6 +29,7 @@ from .hub import Hub
 from .probe import CapabilityProbe
 from .process import ControlError
 from .schedules import ScheduleError, system_timezone
+from . import tools as tools_mod
 from .projects import ROOT_ID
 from .transcript import resolve_image
 from .uploads import UploadStore
@@ -42,6 +43,7 @@ PERMISSION_MODES = {"default", "acceptEdits", "plan", "auto", "bypassPermissions
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 HUB = web.AppKey("hub", Hub)
+TOOL_SESSION = web.RequestKey("toolSession", str)      # the hosted session calling Riesz Manager's tools
 CFG = web.AppKey("cfg", Config)
 UPLOADS = web.AppKey("uploads", UploadStore)
 HISTORY = web.AppKey("history", PromptHistory)
@@ -65,7 +67,17 @@ async def auth_middleware(request: web.Request, handler: Any) -> web.StreamRespo
     header = request.headers.get("Authorization", "")
     supplied = header[7:] if header.startswith("Bearer ") else ""
     if not hmac.compare_digest(supplied.encode(), cfg.token.encode()):
-        return _err(401, "unauthorized")
+        # Riesz Manager's tools (tools.py) are called by the tool server a hosted session's harness started:
+        # the session is the one that process descends from, and no token is needed. The list itself is
+        # the same for everyone (and is asked for while a harness starts, before its session is known).
+        pid = tools_mod.peer_pid(request.transport) if request.path in ("/v1/tools", "/v1/tools/call") else None
+        if pid is None:
+            return _err(401, "unauthorized")
+        if request.path == "/v1/tools/call":
+            caller = tools_mod.caller_session(request.app[HUB], pid)
+            if caller is None:
+                return _err(401, "Riesz Manager 的工具只能在它托管的会话里使用")
+            request[TOOL_SESSION] = caller
     try:
         return await handler(request)
     except ControlError as exc:
@@ -486,10 +498,14 @@ async def _create_harness_session(request: web.Request, cwd: str, harness: str, 
         return _err(400, "invalid api")
     driver = await hub.harnesses.create(harness, cwd, model=model, effort=_harness_effort(body.get("effort")), mode=mode, api=api)
     sid = str(driver.session_id)
+    if body.get("startedBy"):
+        hub.prefs.remember(sid, startedBy=body["startedBy"])
     message_uuid = None
     if body.get("text") or body.get("attachments"):
         text, attachments, message_uuid = _prompt(request, body)
         await request.app[DELIVERY].send(sid, text, attachments, message_uuid)
+    if body.get("keepAlive"):
+        await hub.harnesses.set_keep_alive(sid, True)
     return _json({"sessionId": sid, "uuid": message_uuid, "state": hub.harnesses.state(sid)})
 
 
@@ -517,6 +533,18 @@ def _schedule_view(hub: Any, s: dict[str, Any]) -> dict[str, Any]:
     out = {k: v for k, v in s.items() if k not in ("lastUuid", "nextBase", "lastBase")}
     out["rule"] = describe(s)
     return out
+
+
+async def list_tools(request: web.Request) -> web.Response:
+    return _json(tools_mod.listing())
+
+
+async def call_tool(request: web.Request) -> web.Response:
+    body = await _body(request)
+    sid = request.get(TOOL_SESSION) or body.get("sessionId")       # a token-holder (tests, rieszctl) names the session
+    if not isinstance(sid, str) or not _UUID_RE.match(sid):
+        return _err(400, "which session is calling is unknown")
+    return _json(await tools_mod.run(request.app[HUB], sid, str(body.get("name") or ""), body.get("arguments") or {}))
 
 
 async def list_schedules(request: web.Request) -> web.Response:
@@ -1207,6 +1235,8 @@ def build_app(cfg: Config) -> web.Application:
     r.add_post("/v1/sessions/{sid}/stop", stop_session)
     r.add_post("/v1/sessions/{sid}/keep-alive", keep_alive)
     r.add_post("/v1/sessions/{sid}/resume", resume_session)
+    r.add_get("/v1/tools", list_tools)
+    r.add_post("/v1/tools/call", call_tool)
     r.add_get("/v1/schedules", list_schedules)
     r.add_post("/v1/schedules", create_schedule)
     r.add_post(r"/v1/schedules/{id:[0-9a-f]{1,32}}/{action:update|run|delete}", schedule_action)

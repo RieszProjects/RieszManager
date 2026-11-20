@@ -13,6 +13,8 @@ import threading
 # FAKE_ACP_AUTH=signed-in: session/new needs `authenticate` first, which succeeds;
 # FAKE_ACP_AUTH=signed-out: it needs it and `authenticate` fails (no cached sign-in).
 AUTH = os.environ.get("FAKE_ACP_AUTH")
+# FAKE_ACP_RECORD=<file>: session/new and session/load parameters are appended to it, one JSON per line.
+RECORD = os.environ.get("FAKE_ACP_RECORD")
 authenticated = [AUTH is None]
 
 lock = threading.Lock()
@@ -87,6 +89,9 @@ for line in sys.stdin:
             slot[0].set()
         continue
     method, rid, p = msg["method"], msg.get("id"), msg.get("params") or {}
+    if RECORD and method in ("session/new", "session/load"):
+        with open(RECORD, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"method": method, "params": p}) + "\n")
     if method == "initialize":
         send({"id": rid, "result": {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}, "authMethods": []}})
     elif method == "authenticate":

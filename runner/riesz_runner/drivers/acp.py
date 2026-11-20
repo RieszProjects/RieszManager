@@ -23,7 +23,7 @@ import uuid as uuidlib
 from pathlib import Path
 from typing import Any
 
-from .base import Capabilities, Driver, Mode, assistant_item, command, interrupted_item, notice_item, tool_block, tool_result, user_item
+from .base import Capabilities, Driver, Mode, ToolServer, assistant_item, command, interrupted_item, notice_item, tool_block, tool_result, user_item
 from .jsonrpc import JsonRpcError, JsonRpcPeer, PeerClosed
 
 log = logging.getLogger(__name__)
@@ -116,6 +116,13 @@ class AcpDriver(Driver):
         env.pop("RUNNER_TOKEN", None)
         return env
 
+    def mount_tools(self, server: ToolServer) -> list[dict[str, Any]]:
+        """The ACP mcpServers entry (a stdio server) for session/new and session/load."""
+        return [{"name": server.name, **server.stdio(), "env": []}]
+
+    def _mcp_servers(self) -> list[dict[str, Any]]:
+        return self.mount_tools(self.tools) if self.tools is not None else []
+
     # ---- lifecycle --------------------------------------------------------------------
 
     async def start(self) -> None:
@@ -132,7 +139,7 @@ class AcpDriver(Driver):
                 self._loading = True
                 self.items.clear()
                 try:
-                    res = await self.peer.request("session/load", {"sessionId": self.session_id, "cwd": self.cwd, "mcpServers": []},
+                    res = await self.peer.request("session/load", {"sessionId": self.session_id, "cwd": self.cwd, "mcpServers": self._mcp_servers()},
                                                   timeout=180)
                 finally:
                     self._loading = False
@@ -140,11 +147,11 @@ class AcpDriver(Driver):
                 await self.reset()
             else:
                 try:
-                    res = await self.peer.request("session/new", {"cwd": self.cwd, "mcpServers": []}, timeout=180)
+                    res = await self.peer.request("session/new", {"cwd": self.cwd, "mcpServers": self._mcp_servers()}, timeout=180)
                 except JsonRpcError as exc:
                     if not await self.authenticate(exc):
                         raise
-                    res = await self.peer.request("session/new", {"cwd": self.cwd, "mcpServers": []}, timeout=180)
+                    res = await self.peer.request("session/new", {"cwd": self.cwd, "mcpServers": self._mcp_servers()}, timeout=180)
                 self.session_id = res.get("sessionId") or self.session_id
             await self._adopt(res or {})
         except Exception:

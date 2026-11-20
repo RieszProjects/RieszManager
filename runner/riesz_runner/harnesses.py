@@ -70,6 +70,7 @@ class HarnessSpec:
     fork: str                 # "native" (the harness forks itself) or "copy" (a new session with the history rewritten)
     commands: dict[str, str]  # each of drivers.base.UNIVERSAL_COMMANDS -> how this harness does it (forms listed there)
     modes: dict[str, str]     # each of modes.TIERS -> the mode of this harness to use for it
+    tools: str                # Riesz Manager's own tools (tools.py): "mcp" (Driver.mount_tools) or "none:<reason>"
 
     def __post_init__(self) -> None:
         if set(self.commands) != set(UNIVERSAL_COMMANDS):
@@ -89,10 +90,15 @@ class HarnessSpec:
             raise TypeError(f"{self.id}: handoff {self.handoff!r} is not one of {sorted(STRATEGIES)} (handoff.py)")
         if self.fork not in ("native", "copy"):
             raise TypeError(f"{self.id}: fork must be native or copy")
+        if self.tools == "mcp":
+            if self.driver.mount_tools is Driver.mount_tools:
+                raise TypeError(f"{self.id}: tools='mcp' but {self.driver.__name__} does not implement mount_tools")
+        elif not self.tools.startswith("none:") or len(self.tools) <= 5:
+            raise TypeError(f"{self.id}: tools must be 'mcp' or 'none:<reason>'")
 
     def meta(self) -> dict[str, Any]:
         return {"id": self.id, "name": self.name, "label": self.label, "nativeProvider": self.native_provider,
-                "resumeCommand": self.resume_command, "handoff": self.handoff, "fork": self.fork}
+                "resumeCommand": self.resume_command, "handoff": self.handoff, "fork": self.fork, "tools": self.tools}
 
 
 HARNESSES: dict[str, HarnessSpec] = {s.id: s for s in (
@@ -102,6 +108,7 @@ HARNESSES: dict[str, HarnessSpec] = {s.id: s for s in (
         commands={"compact": "method:compact_thread"},                     # thread/compact/start (checked 11-20)
         # No mode asks before every edit: read-only (asks before writing) is the nearest careful one.
         modes={"readonly": "read-only", "ask": "read-only", "edits": "auto", "auto": "auto", "full": "full-access"},
+        tools="mcp",
     ),
     HarnessSpec(
         id="dsh", name="DeepSeek Harness", label="DeepSeek", bin="dsh", driver=DshDriver, arg="dsh", native_provider="deepseek",
@@ -109,6 +116,7 @@ HARNESSES: dict[str, HarnessSpec] = {s.id: s for s in (
         commands={"compact": "/compact"},                                   # its SDK runs bare /compact natively
         modes={"readonly": "read-only", "ask": "read-only", "edits": "workspace-write", "auto": "workspace-write",
                "full": "danger-full-access"},
+        tools="mcp",
     ),
     HarnessSpec(
         id="gemini", name="Gemini CLI", label="Gemini", bin="gemini", driver=GeminiDriver, arg="gemini", native_provider="gemini",
@@ -116,6 +124,7 @@ HARNESSES: dict[str, HarnessSpec] = {s.id: s for s in (
         # Its ACP mode offers only memory, extensions, init, restore, about and help: /compress is not among them.
         commands={"compact": "none:Gemini CLI 在 ACP 模式下没有压缩命令（上下文快满时它会自己压缩）"},
         modes={"readonly": "plan", "ask": "default", "edits": "autoEdit", "auto": "autoEdit", "full": "yolo"},
+        tools="mcp",
     ),
     HarnessSpec(
         id="antigravity", name="Antigravity", label="Antigravity", bin="agy", driver=AntigravityDriver, arg="agy",
@@ -123,12 +132,13 @@ HARNESSES: dict[str, HarnessSpec] = {s.id: s for s in (
         commands={"compact": "offered:/compact"},     # agy has /compact; used when its ACP command list offers it
         # No mode never asks (only the --dangerously-skip-permissions flag): auto is the nearest.
         modes={"readonly": "plan", "ask": "default", "edits": "accept-edits", "auto": "auto", "full": "auto"},
+        tools="mcp",
     ),
 )}
 
 # Claude Code runs through process.py rather than a driver; the same facts about it.
 CLAUDE_META = {"id": "claude", "name": "Claude Code", "label": "Claude Code", "nativeProvider": "anthropic",
-               "resumeCommand": "claude --resume {id}", "handoff": "claude", "fork": "native"}
+               "resumeCommand": "claude --resume {id}", "handoff": "claude", "fork": "native", "tools": "mcp"}
 CLAUDE_COMMANDS = {"compact": "/compact"}       # Claude Code's own; its whole command list comes from the process
 
 
@@ -382,7 +392,7 @@ class Harnesses:
             "promptCount": rec.get("promptCount") or 0, "model": rec.get("model"), "effort": rec.get("effort"),
             "permissionMode": rec.get("mode"), "project": self.hub.projects.project_id_for(rec.get("cwd")),
             "live": self.live_info(session_id), "mtime": rec.get("updatedAt") or 0, "size": 0, "keepAlive": bool(rec.get("keepAlive")),
-            "startedBy": None, "interrupted": self.hub.prefs.interrupted(session_id), "subagents": 0,
+            "startedBy": (self.hub.prefs.get(session_id) or {}).get("startedBy"), "interrupted": self.hub.prefs.interrupted(session_id), "subagents": 0,
             "api": rec.get("api"), "handoffFrom": rec.get("handoffFrom"), "handedOffTo": rec.get("handedOffTo"),
         }
 
@@ -467,6 +477,8 @@ class Harnesses:
             extra["patch"] = await self._patch(harness, session_id, route)
         elif harness == "gemini":
             extra["settings"] = settings_file(self.cfg.state_dir)
+        if spec.tools == "mcp":
+            extra["tools"] = self.hub.tool_server
         return spec.driver(cwd=cwd, sink=self._sink, session_id=session_id, model=model, effort=effort, mode=mode,
                               env=await self._env(harness, route), **extra)
 

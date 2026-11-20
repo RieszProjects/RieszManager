@@ -29,7 +29,7 @@
     <div class="toc-title">文档</div>
     <ul class="toc-site"><li><a href="index.html">前言</a></li><li><a href="quickstart.html">快速上手</a></li><li><a href="guide.html" class="current">使用指南</a></li><li><a href="deploy.html">部署教程</a></li></ul>
     <div class="toc-title">本页</div>
-    <ul class="toc-page"><li class="l2"><a href="#layout">界面总览</a></li><li class="l2"><a href="#conversation">对话</a></li><li class="l2"><a href="#composer">输入框</a></li><li class="l2"><a href="#modes">权限模式和模型</a></li><li class="l2"><a href="#harnesses">Codex、DeepSeek Harness、Gemini CLI 与 Antigravity</a></li><li class="l2"><a href="#apis">模型API与订阅</a></li><li class="l3"><a href="#handoff">转到其他工具继续</a></li><li class="l2"><a href="#prompts">确认和提问</a></li><li class="l2"><a href="#context">上下文用量</a></li><li class="l2"><a href="#sessions">会话管理</a></li><li class="l2"><a href="#terminal">终端里的会话</a></li><li class="l2"><a href="#spawn">让会话开新会话</a></li><li class="l2"><a href="#schedules">定时唤醒</a></li><li class="l2"><a href="#files">项目文件</a></li><li class="l2"><a href="#push">推送通知</a></li><li class="l2"><a href="#doll">莉思玩偶</a></li><li class="l2"><a href="#mobile">在手机上用</a></li><li class="l2"><a href="#settings">设置页</a></li><li class="l2"><a href="#shortcuts">快捷键</a></li><li class="l2"><a href="#faq">常见问题</a></li></ul>
+    <ul class="toc-page"><li class="l2"><a href="#layout">界面总览</a></li><li class="l2"><a href="#conversation">对话</a></li><li class="l2"><a href="#composer">输入框</a></li><li class="l2"><a href="#modes">权限模式和模型</a></li><li class="l2"><a href="#harnesses">Codex、DeepSeek Harness、Gemini CLI 与 Antigravity</a></li><li class="l2"><a href="#apis">模型API与订阅</a></li><li class="l3"><a href="#handoff">转到其他工具继续</a></li><li class="l2"><a href="#prompts">确认和提问</a></li><li class="l2"><a href="#context">上下文用量</a></li><li class="l2"><a href="#sessions">会话管理</a></li><li class="l2"><a href="#terminal">终端里的会话</a></li><li class="l2"><a href="#spawn">让会话开新会话</a></li><li class="l2"><a href="#schedules">定时唤醒</a></li><li class="l2"><a href="#tools">会话自带的工具</a></li><li class="l2"><a href="#files">项目文件</a></li><li class="l2"><a href="#push">推送通知</a></li><li class="l2"><a href="#doll">莉思玩偶</a></li><li class="l2"><a href="#mobile">在手机上用</a></li><li class="l2"><a href="#settings">设置页</a></li><li class="l2"><a href="#shortcuts">快捷键</a></li><li class="l2"><a href="#faq">常见问题</a></li></ul>
   </aside>
   <article>
 <h1>使用指南</h1>
@@ -224,6 +224,18 @@ rieszctl session schedule add --every 2h "看看测试跑完没有"
 rieszctl session schedule list           # 当前会话的定时（--all 列出全部）
 rieszctl session schedule pause ID       # 暂停；resume 重新打开，run 立即发送，remove 删除</code></pre>
 <p>不加<code>--session</code>时，定时属于运行这条命令的会话。完整用法见<code>rieszctl session schedule --help</code>。</p>
+
+<h2 id="tools">会话自带的工具</h2>
+<p>Riesz Manager托管的会话，不管用的是Claude Code、Codex、DeepSeek Harness、Gemini CLI还是Antigravity，都有同一组Riesz Manager工具（名字以<code>mcp__riesz__</code>开头），会话可以自己调用：</p>
+<div class="wrap"><table style="--first-col: 10em">
+<tr><th>工具</th><th>作用</th></tr>
+<tr><td><code>schedule_add</code></td><td>给自己（或别的会话）加一个<a href="#schedules">定时唤醒</a>，和网页上的定时是同一套，网页上能看到、能改。</td></tr>
+<tr><td><code>schedule_list</code>、<code>schedule_change</code></td><td>列出定时；暂停、恢复、立即发送一次、删除。</td></tr>
+<tr><td><code>session_list</code></td><td>列出正在运行和保持运行的会话，以及各自用的工具。</td></tr>
+<tr><td><code>session_send</code>、<code>session_reply</code></td><td>给另一个会话发消息；查看它的状态和最后一条回复。</td></tr>
+<tr><td><code>session_new</code></td><td>开一个由Riesz Manager托管的新会话，可以指定用哪个工具。</td></tr>
+</table></div>
+<p>它们做的事和<code>rieszctl session</code>一样，只是不经过命令行。调用时要不要你确认，由各工具自己的权限模式决定。DeepSeek Harness自己也带定时工具，那种定时不经过Riesz Manager，会话进程关掉后不会触发；要长期使用，请让它用<code>mcp__riesz__schedule_add</code>。</p>
 
 <h2 id="files">项目文件</h2>
 <p>右边面板的「文件」标签展示当前项目的文件树（只读），修改、新增等文件带有git状态标记，被git忽略的文件和文件夹显示为灰色。点任意文件可以打开预览窗口：</p>

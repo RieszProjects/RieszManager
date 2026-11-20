@@ -197,6 +197,25 @@ def output_item(key: str, text: str, *, error: bool = False) -> dict[str, Any]:
     return {"kind": "output", "key": key, "seq": 0, "ts": iso(), "uuid": None, "text": text, "isError": error}
 
 
+# ---- Riesz Manager's own tools --------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ToolServer:
+    """Riesz Manager's own tools (tools.py), offered to every harness as a stdio MCP server.
+
+    Each driver mounts it through its harness's official MCP configuration (`Driver.mount_tools`),
+    so the harness starts the server itself and lists the tools with its own.
+    """
+    name: str                       # the MCP server's name: tools show as mcp__<name>__<tool>
+    command: str
+    args: tuple[str, ...] = ()
+    config_dir: str | None = None   # where a driver may write a config file its harness reads (dsh's --patch)
+
+    def stdio(self) -> dict[str, Any]:
+        """The usual stdio description: {"command", "args"}."""
+        return {"command": self.command, "args": list(self.args)}
+
+
 # ---- the driver -----------------------------------------------------------------------------
 
 @dataclass
@@ -212,8 +231,10 @@ class Driver:
     capabilities = Capabilities()
 
     def __init__(self, *, cwd: str, sink: Sink, session_id: str | None = None, model: str | None = None,
-                 effort: str | None = None, mode: str | None = None, env: dict[str, str] | None = None) -> None:
+                 effort: str | None = None, mode: str | None = None, env: dict[str, str] | None = None,
+                 tools: ToolServer | None = None) -> None:
         self.cwd = cwd
+        self.tools = tools              # Riesz Manager's tools, mounted in start() through mount_tools()
         self.sink = sink
         self.session_id = session_id
         self.model = model
@@ -337,6 +358,12 @@ class Driver:
     @property
     def pid(self) -> int | None:
         return None
+
+    def mount_tools(self, server: ToolServer) -> Any:
+        """What start() adds to the harness's launch so it starts `server` as an MCP server (its own
+        configuration format: arguments, a config entry, session parameters). Every driver must
+        implement it unless its HarnessSpec says tools="none:<reason>"."""
+        raise NotImplementedError
 
     async def emit(self, event: dict[str, Any]) -> None:
         await self.sink(self, event)

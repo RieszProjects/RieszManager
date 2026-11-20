@@ -14,6 +14,7 @@ from collections import deque
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from .autoapprove import auto_approvable
+from .drivers.base import ToolServer
 from .claude_settings import chrome_enabled_by_default
 from .config import Config
 from .procs import running_commands
@@ -40,6 +41,11 @@ class ControlError(RuntimeError):
     pass
 
 
+def claude_mcp_config(server: ToolServer) -> dict[str, Any]:
+    """Claude Code's --mcp-config for Riesz Manager's tools (added to the user's own MCP servers)."""
+    return {"mcpServers": {server.name: {"type": "stdio", **server.stdio()}}}
+
+
 class ClaudeProcess:
     """Owns one `claude -p --input-format stream-json` process for one session."""
 
@@ -56,8 +62,10 @@ class ClaudeProcess:
         effort: str | None = None,
         sink: EventSink,
         api: ClaudeSetup | None = None,
+        tools: ToolServer | None = None,
     ) -> None:
         self.cfg = cfg
+        self.tools = tools              # Riesz Manager's own tools (tools.py), as an MCP server
         # Which model API the process uses (routes.py); None: whatever Claude Code is logged in to.
         self.api = api
         self.session_id = session_id
@@ -130,6 +138,8 @@ class ClaudeProcess:
         flags = self.flag_settings()
         if flags:
             args += ["--settings", json.dumps(flags)]
+        if self.tools is not None:
+            args += ["--mcp-config", json.dumps(claude_mcp_config(self.tools))]
         args += self.cfg.extra_args
         if self.cfg.login_shell:
             shell = os.environ.get("SHELL") or "/bin/bash"

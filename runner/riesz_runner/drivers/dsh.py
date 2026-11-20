@@ -25,6 +25,7 @@ import contextlib
 import json
 import logging
 import os
+import tempfile
 import time
 import urllib.request
 import uuid as uuidlib
@@ -32,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from .base import (
+    ToolServer,
     Capabilities,
     command,
     Driver,
@@ -249,6 +251,24 @@ class DshDriver(Driver):
         env.pop("RUNNER_TOKEN", None)
         return env
 
+    def mount_tools(self, server: ToolServer) -> str:
+        """A patch list adding an entry of dsh's MCP client plugin (dsh-mcp-client) for the server.
+        (A patch without `insert` only changes an entry the profile already has.)"""
+        entry = {"id": f"mcp-{server.name}", "name": "@deepseek-ai/dsh-mcp-client",
+                 "config": {"serverName": server.name, "transport": "stdio", **server.stdio()}}
+        return "- insert: " + json.dumps([entry], ensure_ascii=False) + "\n"        # JSON is YAML
+
+    def _tools_patch(self, server: ToolServer) -> str:
+        folder = Path(server.config_dir or tempfile.gettempdir())
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"dsh-{server.name}.yml"
+        text = self.mount_tools(server)
+        if not path.exists() or path.read_text(encoding="utf-8") != text:
+            tmp = path.with_suffix(f".{os.getpid()}.tmp")
+            tmp.write_text(text, encoding="utf-8")
+            tmp.replace(path)
+        return str(path)
+
     async def start(self) -> None:
         resume = bool(self.session_id) and self.log_path() is not None
         self.session_id = self.session_id or f"rz-{uuidlib.uuid4()}"
@@ -262,6 +282,8 @@ class DshDriver(Driver):
 
     async def _spawn(self, *, resume: bool) -> None:
         argv = [self.dsh, "--profile", "sdk", *(["--patch", self.patch] if self.patch else [])]
+        if self.tools is not None:
+            argv += ["--patch", self._tools_patch(self.tools)]
         self.peer = JsonRpcPeer(argv, cwd=self.cwd, env=self._env(), version=True,
                                 on_notification=self._notification, on_request=self._request, on_exit=self._exited)
         await self.peer.start()

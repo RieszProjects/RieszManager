@@ -22,7 +22,7 @@ Riesz Manager 用同一个网页界面驱动多种编程 agent（Claude Code、C
 ### 1. 选接口
 优先用 agent 官方的程序化接口：JSON-RPC app-server（Codex）、SDK 协议（dsh）、ACP（Gemini CLI、Antigravity，
 可直接继承 `drivers/acp.py` 的 `AcpDriver`）。不要解析它的终端输出，也不要改它的代码或私有文件
-（交接历史时写入它**自己会读**的记录格式除外，见第 8 步）。
+（交接历史时写入它**自己会读**的记录格式除外，见第 6 步）。
 
 ### 2. 写驱动 `drivers/<id>.py`
 - 设 `harness = "<id>"`（必须等于登记项的 id），声明 `capabilities = Capabilities(...)`：它不能做的事情
@@ -69,28 +69,38 @@ Riesz Manager 用同一个网页界面驱动多种编程 agent（Claude Code、C
 - `fork`：`native`（它自己能分叉，在 `Harnesses.fork()` 里实现）或 `copy`（复制历史开新会话，走交接的流程）。
 - `resume_command`：终端里按会话 ID 接着用的命令（`{id}` 代表会话 ID），没有就填 `None`。
 
-### 7. 登记
-在 `harnesses.py` 的 `HARNESSES` 里加一个 `HarnessSpec`，在 `handoff.TARGETS` 里加上 id。
-`HarnessSpec` 构造时会检查两张表（commands、modes）、方法是否存在、交接方式是否已知。
+### 7. Riesz Manager 的工具
+Riesz Manager 自己的工具（定时唤醒、给别的会话发消息、开新会话……）写在 `tools.py`，每个 harness 都要能用。
+runner 把它们做成一个 stdio MCP 服务器（`tool_server.py`，只做转发），由 harness **自己**按它官方的 MCP 配置启动。
+工具在 runner 里执行；是哪个会话在调用，runner 从调用方的进程往上找到它启动的 harness 进程来确定，不用给 harness 传会话 ID 或密钥。
+- 登记项的 `tools` 填 `"mcp"`，驱动实现 `mount_tools(server)`：返回它启动时要加的东西（参数、配置条目、会话参数），
+  并在 `start()` 里用上 `self.tools`。实在挂不上才填 `"none:<原因>"`。
+- 实测确认：它能列出 `mcp__riesz__*` 工具、调用后定时记在**它自己的**会话上（`tests/test_tools.py` 有各家的挂法检查）。
+  注意它自己的同类工具（比如 dsh 自带定时）不会经过 Riesz Manager。
+- 以后加工具：在 `tools.TOOLS` 加一个 `Tool(...)`，所有 harness 自动都有。
 
-### 8. 测试
+### 8. 登记
+在 `harnesses.py` 的 `HARNESSES` 里加一个 `HarnessSpec`，在 `handoff.TARGETS` 里加上 id。
+`HarnessSpec` 构造时会检查两张表（commands、modes）、方法是否存在、交接方式是否已知、工具是否挂上。
+
+### 9. 测试
 - 驱动单元测试：用录下来的真实协议样本（`tests/tools/record.py` 录、`scrub.py` 去掉隐私）或脚本化的假 agent
   （参考 `tests/fake_rpc_server.py`、`tests/fake_acp_agent.py`），覆盖：一轮对话、工具调用、权限（允许、拒绝、本会话）、
   中断、恢复历史、换模式。测试模块里要出现驱动类名（一致性测试据此确认有测试）。
 - 需要真账号的端到端测试放进 `tests/test_live.py`，默认跳过。
 - 运行全部测试：`cd runner && .venv/bin/python -m unittest discover -s tests -t .`，`test_conformance` 必须通过。
 
-### 9. 文档
+### 10. 文档
 - 使用指南 `docs/_src/{zh,en}/guide.html`：在「其他工具」一节写上它的名字、权限模式、和 Claude Code 的不同之处。
 - 部署文档 `docs/_src/{zh,en}/deploy.html`：怎么安装（出现它的可执行文件名）、怎么登录、要注意的条款或系统设置。
 - 改完运行 `python3 docs/_src/build.py` 生成网页。一致性测试会检查这两个文档里有没有提到它。
 
 ## 现有 harness 速查
 
-| id | 接口 | 交接方式 | 分叉 | /compact |
-|---|---|---|---|---|
-| claude | stream-json（process.py） | 写 Claude Code 会话记录 | 原生 | 原生 /compact |
-| codex | `codex app-server`（JSON-RPC） | `thread/inject_items` | 原生 `thread/fork`（在临时进程里分叉） | `thread/compact/start` |
-| dsh | `dsh --profile sdk`（SDK 协议） | 第一条消息前 | 复制 | SDK 原生 /compact |
-| gemini | `gemini --acp`（ACP） | 第一条消息前 | 复制 | 不支持（ACP 模式没有） |
-| antigravity | `agy acp`（ACP） | 第一条消息前 | 复制 | `/compact`（它报告了才用） |
+| id | 接口 | 交接方式 | 分叉 | /compact | Riesz 工具怎么挂 |
+|---|---|---|---|---|---|
+| claude | stream-json（process.py） | 写 Claude Code 会话记录 | 原生 | 原生 /compact | `--mcp-config` |
+| codex | `codex app-server`（JSON-RPC） | `thread/inject_items` | 原生 `thread/fork`（在临时进程里分叉） | `thread/compact/start` | `-c mcp_servers.riesz.*` |
+| dsh | `dsh --profile sdk`（SDK 协议） | 第一条消息前 | 复制 | SDK 原生 /compact | `--patch`（`insert` 一条 dsh-mcp-client） |
+| gemini | `gemini --acp`（ACP） | 第一条消息前 | 复制 | 不支持（ACP 模式没有） | `session/new` 的 `mcpServers` |
+| antigravity | `agy acp`（ACP） | 第一条消息前 | 复制 | `/compact`（它报告了才用） | `session/new` 的 `mcpServers` |

@@ -9,13 +9,14 @@ harness that skips a step fails here, naming the step.
 from __future__ import annotations
 
 import inspect
+import json
 import re
 import unittest
 from pathlib import Path
 
 from riesz_runner import routes
 from riesz_runner.credentials import PROVIDERS
-from riesz_runner.drivers.base import UNIVERSAL_COMMANDS, Capabilities, Driver, Mode
+from riesz_runner.drivers.base import UNIVERSAL_COMMANDS, Capabilities, Driver, Mode, ToolServer
 from riesz_runner.harnesses import HARNESSES, HarnessSpec
 from riesz_runner.handoff import STRATEGIES, TARGETS
 from riesz_runner.modes import CLAUDE_MODE_TABLE, CLAUDE_TIERS, TIERS
@@ -82,6 +83,20 @@ class ConformanceTest(unittest.TestCase):
                 self.assertIn(spec.fork, ("native", "copy"))
                 if spec.resume_command is not None:
                     self.assertIn("{id}", spec.resume_command)
+
+    def test_riesz_tools_mounted(self):
+        server = ToolServer(name="riesz", command="/usr/bin/python3", args=("-I", "/x/tool_server.py", "--socket", "/x/r.sock"))
+        for spec in self.specs():
+            with self.subTest(harness=spec.id):
+                if spec.tools.startswith("none:"):
+                    continue
+                self.assertEqual(spec.tools, "mcp")
+                self.assertIsNot(spec.driver.mount_tools, Driver.mount_tools, "the driver mounts Riesz Manager's tools")
+                mounted = json.dumps(spec.driver(cwd="/", sink=None).mount_tools(server))
+                for part in (server.name, server.command, *server.args):
+                    self.assertIn(json.dumps(part)[1:-1], mounted, "the mount names the server, its command and arguments")
+                source = "".join(inspect.getsource(c) for c in spec.driver.__mro__ if issubclass(c, Driver) and c is not Driver)
+                self.assertIn("self.tools", source, "start() uses the mount (tests/test_tools.py checks how)")
 
     def test_tests_and_docs(self):
         guide = {lang: (ROOT / f"docs/_src/{lang}/guide.html").read_text(encoding="utf-8") for lang in ("zh", "en")}

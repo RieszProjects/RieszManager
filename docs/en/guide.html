@@ -29,7 +29,7 @@
     <div class="toc-title">Docs</div>
     <ul class="toc-site"><li><a href="index.html">Introduction</a></li><li><a href="quickstart.html">Quickstart</a></li><li><a href="guide.html" class="current">User Guide</a></li><li><a href="deploy.html">Deployment</a></li></ul>
     <div class="toc-title">On this page</div>
-    <ul class="toc-page"><li class="l2"><a href="#layout">Interface overview</a></li><li class="l2"><a href="#conversation">Conversation</a></li><li class="l2"><a href="#composer">Composer</a></li><li class="l2"><a href="#modes">Permission modes and models</a></li><li class="l2"><a href="#harnesses">Codex, DeepSeek Harness, Gemini CLI and Antigravity</a></li><li class="l2"><a href="#apis">Model APIs and subscriptions</a></li><li class="l3"><a href="#handoff">Continue in another tool</a></li><li class="l2"><a href="#prompts">Approvals and questions</a></li><li class="l2"><a href="#context">Context usage</a></li><li class="l2"><a href="#sessions">Managing sessions</a></li><li class="l2"><a href="#terminal">Terminal sessions</a></li><li class="l2"><a href="#spawn">Starting sessions from other sessions</a></li><li class="l2"><a href="#schedules">Scheduled wake-ups</a></li><li class="l2"><a href="#files">Project files</a></li><li class="l2"><a href="#push">Push notifications</a></li><li class="l2"><a href="#doll">Riesz doll</a></li><li class="l2"><a href="#mobile">Using on mobile</a></li><li class="l2"><a href="#settings">Settings</a></li><li class="l2"><a href="#shortcuts">Keyboard shortcuts</a></li><li class="l2"><a href="#faq">FAQ</a></li></ul>
+    <ul class="toc-page"><li class="l2"><a href="#layout">Interface overview</a></li><li class="l2"><a href="#conversation">Conversation</a></li><li class="l2"><a href="#composer">Composer</a></li><li class="l2"><a href="#modes">Permission modes and models</a></li><li class="l2"><a href="#harnesses">Codex, DeepSeek Harness, Gemini CLI and Antigravity</a></li><li class="l2"><a href="#apis">Model APIs and subscriptions</a></li><li class="l3"><a href="#handoff">Continue in another tool</a></li><li class="l2"><a href="#prompts">Approvals and questions</a></li><li class="l2"><a href="#context">Context usage</a></li><li class="l2"><a href="#sessions">Managing sessions</a></li><li class="l2"><a href="#terminal">Terminal sessions</a></li><li class="l2"><a href="#spawn">Starting sessions from other sessions</a></li><li class="l2"><a href="#schedules">Scheduled wake-ups</a></li><li class="l2"><a href="#tools">Tools every session has</a></li><li class="l2"><a href="#files">Project files</a></li><li class="l2"><a href="#push">Push notifications</a></li><li class="l2"><a href="#doll">Riesz doll</a></li><li class="l2"><a href="#mobile">Using on mobile</a></li><li class="l2"><a href="#settings">Settings</a></li><li class="l2"><a href="#shortcuts">Keyboard shortcuts</a></li><li class="l2"><a href="#faq">FAQ</a></li></ul>
   </aside>
   <article>
 <h1>User Guide</h1>
@@ -225,6 +225,18 @@ rieszctl session schedule add --every 2h "See whether the tests have finished"
 rieszctl session schedule list           # this session's schedules (--all for every one)
 rieszctl session schedule pause ID       # resume turns it back on, run sends now, remove deletes</code></pre>
 <p>Without <code>--session</code>, the schedule belongs to the session running the command. Run <code>rieszctl session schedule --help</code> for the full usage.</p>
+
+<h2 id="tools">Tools every session has</h2>
+<p>Every session Riesz Manager hosts, whether it runs Claude Code, Codex, DeepSeek Harness, Gemini CLI or Antigravity, has the same set of Riesz Manager tools (named <code>mcp__riesz__…</code>) it can call itself:</p>
+<div class="wrap"><table style="--first-col: 10em">
+<tr><th>Tool</th><th>What it does</th></tr>
+<tr><td><code>schedule_add</code></td><td>Adds a <a href="#schedules">scheduled wake-up</a> for the session itself (or another one). These are the same schedules as in the web app, where they can be seen and changed.</td></tr>
+<tr><td><code>schedule_list</code>, <code>schedule_change</code></td><td>Lists schedules; pauses, resumes, runs one now or removes one.</td></tr>
+<tr><td><code>session_list</code></td><td>Lists the running and kept-running sessions, and the tool each one uses.</td></tr>
+<tr><td><code>session_send</code>, <code>session_reply</code></td><td>Sends another session a message; shows its state and latest reply.</td></tr>
+<tr><td><code>session_new</code></td><td>Starts a new session hosted by Riesz Manager, in a tool of its choice.</td></tr>
+</table></div>
+<p>They do what <code>rieszctl session</code> does, without going through the shell. Whether a call needs your approval follows each tool's own permission mode. DeepSeek Harness also has a schedule tool of its own; its schedules do not go through Riesz Manager and do not fire once the session's process has stopped, so for lasting schedules ask it to use <code>mcp__riesz__schedule_add</code>.</p>
 
 <h2 id="files">Project files</h2>
 <p>The “Files” (文件) tab in the right panel shows a read-only file tree of the current project, with git status badges on modified and untracked files; files and folders ignored by git are shown greyed out. Click any file to open the preview modal:</p>

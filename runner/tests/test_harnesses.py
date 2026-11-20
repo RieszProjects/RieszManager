@@ -31,6 +31,14 @@ class FakeDriver(Driver):
 
     def __init__(self, *, fake_bin: str | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
+        self.fake_pid: int | None = None          # the process the runner takes as this session's harness
+
+    @property
+    def pid(self) -> int | None:
+        return self.fake_pid
+
+    def mount_tools(self, server: Any) -> list[str]:
+        return [server.command, *server.args]
 
     async def compact(self, args: str) -> None:
         FakeDriver.compacted.append(args)
@@ -87,7 +95,7 @@ class HarnessRoutesTest(unittest.IsolatedAsyncioTestCase):
         harnesses_mod.HARNESSES["fake"] = harnesses_mod.HarnessSpec(
             id="fake", name="Fake", label="Fake", bin="sh", driver=FakeDriver, arg="fake_bin", native_provider="deepseek",
             resume_command=None, handoff="first-message", fork="copy", commands={"compact": "method:compact"},
-            modes={"readonly": "ask", "ask": "ask", "edits": "ask", "auto": "go", "full": "go"})
+            modes={"readonly": "ask", "ask": "ask", "edits": "ask", "auto": "go", "full": "go"}, tools="mcp")
         self.addCleanup(harnesses_mod.HARNESSES.pop, "fake", None)
         self.cfg = Config(workspace_root=self.tmp, claude_home=self.tmp / "claude", claude_bin="claude",
                           state_dir=self.tmp / "state", socket_path=self.tmp / "runner.sock", token=TOKEN)
