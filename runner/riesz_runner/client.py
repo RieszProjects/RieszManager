@@ -1,10 +1,10 @@
 """`rieszctl session ...`: start and drive hosted sessions from the command line.
 
-Meant for other Claude Code sessions on the same machine, so they can open a
-session that RieszManager hosts exactly like one opened in the web UI (Claude in
-Chrome, cross-session messages, permission prompts in the web, keep running,
-push notifications), instead of a plain `claude` process that RieszManager can
-only watch.
+For scripts, timers and terminals on this machine: start sessions hosted by
+RieszManager (exactly like ones opened in the web UI), send them messages, wait
+for their replies and schedule wake-ups. Sessions RieszManager hosts do not need
+it: they have the same functions as tools (mcp__riesz__*: session_new,
+session_send, session_reply, schedule_add, ...), whichever harness runs them.
 
 It talks to the runner's Unix socket with the token from .env, so the token is
 never passed on a command line or printed. Standard library only: it runs with
@@ -497,10 +497,27 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
+def hosted_hint(runner: Runner) -> None:
+    """Run by an agent in a session RieszManager hosts: point it to its tools."""
+    me = own_session()
+    if not me:
+        return
+    try:
+        live = (runner.call("GET", f"/v1/sessions/{me}", timeout=10).get("state") or {})
+    except CliError:
+        return
+    if live.get("hosted"):
+        print("rieszctl session: this session is hosted by RieszManager and has these functions as tools "
+              "(mcp__riesz__session_new, session_send, session_reply, schedule_add, ...); use them instead. "
+              "rieszctl is for scripts and terminals.", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
-        args.func(Runner(Path(args.env_file)), args)
+        runner = Runner(Path(args.env_file))
+        hosted_hint(runner)
+        args.func(runner, args)
     except CliError as exc:
         print(f"rieszctl session: {exc}", file=sys.stderr)
         return 1

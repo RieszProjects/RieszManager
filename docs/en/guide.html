@@ -186,7 +186,8 @@
 
 <h2 id="spawn">Starting sessions from other sessions</h2>
 <p>A session can open new sessions for Riesz Manager to host, for example to hand a separate task to another session. A session started this way is exactly like one you open with “New session” in the web app: Claude in Chrome is connected automatically, it can message other sessions, its approvals show up in the web app (and as push notifications if you enabled them), and it can be kept running. Running <code>claude</code> directly from a session's terminal only gives you a plain terminal session without any of this.</p>
-<p>The tool is <code>rieszctl session</code>. A session just runs it from its Bash tool; no token is needed, and none is printed:</p>
+<p>Sessions do this with <a href="#tools">the tools every session has</a>: <code>session_new</code> starts a session (in the tool and directory of their choice), <code>session_send</code> sends it a message, <code>session_reply</code> shows its state and latest reply, <code>session_list</code> lists sessions. The new session records which session started it.</p>
+<p>Scripts, timers and terminals do the same with the command line <code>rieszctl session</code> (hosted sessions do not need it; run there, it points them to the tools). No token is needed, and none is printed:</p>
 <pre><code># start a session in the current directory with a first message (-C picks another directory)
 /path/to/RieszManager/rieszctl session new "Fix the typos in docs/ and tell me which files you changed"
 
@@ -212,7 +213,7 @@ rieszctl session stop 1a2b3c4d   # stop its process when done</code></pre>
 <tr><td>Message</td><td>“Message” (发送内容): what to send. <code>{now}</code> in it becomes the time it is sent.</td></tr>
 </table></div>
 <p>Sessions with a schedule show an alarm clock next to their title in the session lists, and “Scheduled” (定时) in the conversation header; hover over it to see the next run, click it to open the schedules. If the message from the previous run is still queued, the run is skipped, so messages do not pile up.</p>
-<p>Claude Code's own timers (<code>/loop</code>, <code>CronCreate</code> and the like) live inside the session's process and are gone when it stops; use scheduled wake-ups for anything that should keep running. A session can also set them up from its Bash tool:</p>
+<p>Claude Code's own timers (<code>/loop</code>, <code>CronCreate</code> and the like) live inside the session's process and are gone when it stops; use scheduled wake-ups for anything that should keep running. A session sets them up itself with the <code>schedule_add</code> tool, and checks or changes them with <code>schedule_list</code> and <code>schedule_change</code>. Scripts and terminals use the command line:</p>
 <pre><code># every day at 13:00 and 22:30, up to 20 minutes late
 rieszctl session schedule add --at 13:00,22:30 --jitter 20m "Routine check ({now})"
 
@@ -224,7 +225,7 @@ rieszctl session schedule add --every 2h "See whether the tests have finished"
 
 rieszctl session schedule list           # this session's schedules (--all for every one)
 rieszctl session schedule pause ID       # resume turns it back on, run sends now, remove deletes</code></pre>
-<p>Without <code>--session</code>, the schedule belongs to the session running the command. Run <code>rieszctl session schedule --help</code> for the full usage.</p>
+<p>On the command line, without <code>--session</code> the schedule belongs to the Claude Code session running the command. Run <code>rieszctl session schedule --help</code> for the full usage.</p>
 
 <h2 id="tools">Tools every session has</h2>
 <p>Every session Riesz Manager hosts, whether it runs Claude Code, Codex, DeepSeek Harness, Gemini CLI or Antigravity, has the same set of Riesz Manager tools (named <code>mcp__riesz__…</code>) it can call itself:</p>
