@@ -103,6 +103,7 @@ class AcpDriver(Driver):
         self._prompt_task: asyncio.Task[Any] | None = None
         self._kinds: dict[str, str] = {}          # tool call id -> its ACP kind (updates may leave it out)
         self._commands: list[dict[str, Any]] = []   # the agent's own slash commands (available_commands_update)
+        self._open: dict[str, float] = {}           # tool calls started and not finished: id -> when
 
     @property
     def pid(self) -> int | None:
@@ -225,6 +226,8 @@ class AcpDriver(Driver):
         self.alive = False
         self.ready = False
         self.exit_code = code
+        self._open.clear()
+        self.tasks.clear()                              # background calls end with the process
         if self.busy:
             self.mark_unfinished_tools("exited")
             self.busy = False
@@ -278,16 +281,19 @@ class AcpDriver(Driver):
             return                                      # _exited reports it
         self._close_current()
         if stop_reason == "cancelled":
+            self._open.clear()
             self.mark_unfinished_tools("interrupted")
             self.items.put(interrupted_item(f"a:t:{self._turn}:end"))
             result = self.turn_finished("interrupted", stop_reason="interrupted")
         elif error:
+            self._open.clear()
             self.mark_unfinished_tools("error")
             self.items.put(notice_item(f"a:t:{self._turn}:end", f"{self.harness} 这一轮没有完成：{error}", level="error"))
             result = self.turn_finished("error", error=True, stop_reason="error")
         else:
             if stop_reason in ("max_tokens", "max_turn_requests", "refusal"):
                 self.items.put(notice_item(f"a:t:{self._turn}:end", f"这一轮停止了：{stop_reason}", level="warning"))
+            self._to_background()
             result = self.turn_finished("success", stop_reason=stop_reason)
         await self.flush()
         await self.emit({"ev": "result", "result": result, "text": self.last_assistant_text()[:400]})
@@ -296,6 +302,20 @@ class AcpDriver(Driver):
             self._start_turn(text, images, uuid)
         else:
             await self.emit_state()
+
+    def _to_background(self) -> None:
+        """Calls still running when the turn ends go on in the background (Antigravity's long commands and
+        subagents report later, and the agent carries on by itself): shown as background tasks, not as
+        cut off, until they report."""
+        for tid, started in list(self._open.items()):
+            found = self.items.tool_block(tid)
+            if found is None or found[1].get("result") is not None:
+                self._open.pop(tid, None)
+                continue
+            block = found[1]
+            summary = str(block["input"].get("command") or block["input"].get("title") or block["input"].get("description") or "")
+            self.tasks[tid] = {"id": tid, "description": (summary or block["name"])[:120], "type": "tool", "background": True,
+                               "toolUseId": tid, "startedAt": started}
 
     async def interrupt(self) -> None:
         if self.peer is None or not self.busy:
@@ -364,6 +384,11 @@ class AcpDriver(Driver):
         status = call.get("status")
         if status in ("completed", "failed"):
             block["result"] = tool_result(tool_output(call), error=status == "failed")
+            self._open.pop(tid, None)
+            if self.tasks.pop(tid, None) is not None:
+                asyncio.get_running_loop().create_task(self.emit_state())    # a background call finished
+        elif not self._loading and block.get("result") is None:
+            self._open.setdefault(tid, time.time())
         self.items.touch(item["key"])
 
     def _user_chunk(self, content: Any) -> None:

@@ -63,6 +63,18 @@ def prompt(rid, p):
                      "status": "completed" if chosen.startswith("proceed") else "failed",
                      "content": [{"type": "content", "content": {"type": "text", "text": f"chose {chosen}"}}]})
         update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": f"done {chosen}"}})
+    elif text == "bg":
+        # Like Antigravity: a long command goes on after the turn has ended, then reports.
+        update(sid, {"sessionUpdate": "tool_call", "toolCallId": "t3", "title": "make paper", "kind": "execute", "status": "in_progress"})
+        send({"id": rid, "result": {"stopReason": "end_turn"}})
+
+        def later():
+            cancelled.wait(0.6)
+            update(sid, {"sessionUpdate": "tool_call_update", "toolCallId": "t3", "status": "completed",
+                         "content": [{"type": "content", "content": {"type": "text", "text": "built"}}]})
+            update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "paper built"}})
+        threading.Thread(target=later, daemon=True).start()
+        return
     elif text == "wait":
         update(sid, {"sessionUpdate": "tool_call", "toolCallId": "t2", "title": "sleep 60", "kind": "execute", "status": "in_progress"})
         cancelled.wait(30)

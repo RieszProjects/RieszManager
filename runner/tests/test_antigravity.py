@@ -103,6 +103,29 @@ class BypassTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await task, "done proceed_once")
 
 
+class BackgroundTest(unittest.IsolatedAsyncioTestCase):
+    """A call still running when the turn ends is a background task until it reports, not a cut-off call."""
+
+    async def test_call_finishing_after_the_turn(self):
+        driver = AntigravityDriver(agy=AGENT, cwd=tempfile.mkdtemp(), sink=Events(), env=dict(os.environ))
+        self.addAsyncCleanup(driver.stop)
+        await driver.start()
+        await driver.send("bg")
+        deadline = time.time() + 10
+        while not driver.sink.of("result"):
+            self.assertLess(time.time(), deadline)
+            await asyncio.sleep(0.02)
+        self.assertEqual([(t["id"], t["background"], t["description"]) for t in driver.snapshot()["tasks"]], [("t3", True, "make paper")])
+        self.assertFalse(driver.busy)
+        while driver.tasks:
+            self.assertLess(time.time(), deadline, "the task goes when the call reports")
+            await asyncio.sleep(0.02)
+        await driver.flush()
+        [block] = [b for i in driver.items.items for b in i.get("blocks") or () if b.get("type") == "tool"]
+        self.assertEqual(block["result"]["text"], "built")
+        self.assertIn("paper built", driver.last_assistant_text())
+
+
 class ModelsTest(unittest.TestCase):
     def test_signed_out(self):
         self.assertEqual(agy_models("Fetching available models...\nError: Please sign in to view available models."), [])
