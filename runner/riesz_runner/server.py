@@ -479,7 +479,7 @@ async def _create_harness_session(request: web.Request, cwd: str, harness: str, 
     if model is not None and not (isinstance(model, str) and re.fullmatch(r"[A-Za-z0-9._:/-]{1,100}", model)):
         return _err(400, "invalid model")
     mode = body.get("permissionMode") or None
-    if mode is not None and mode not in {m.id for m in HARNESSES[harness]["driver"](cwd="/", sink=None).modes()}:
+    if mode is not None and mode not in {m.id for m in HARNESSES[harness].driver(cwd="/", sink=None).modes()}:
         return _err(400, "invalid permission mode")
     api = body.get("api") or None
     if api is not None and not routes.valid(harness, api):
@@ -693,10 +693,20 @@ async def handoff_session(request: web.Request) -> web.Response:
     mode = body.get("permissionMode") or None
     if target == "claude":
         mode = _validate_mode(hub.cfg, mode)
-    elif mode is not None and mode not in {m.id for m in HARNESSES[target]["driver"](cwd="/", sink=None).modes()}:
+    elif mode is not None and mode not in {m.id for m in HARNESSES[target].driver(cwd="/", sink=None).modes()}:
         return _err(400, "invalid permission mode")
     new_id = await hub.handoff(sid, target, api=api, model=model, mode=mode)
     return _json({"sessionId": new_id})
+
+
+async def h_fork(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    return _json({"sessionId": await hub.harnesses.fork(sid), "uuid": None})
+
+
+async def h_keep_alive(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    on = bool((await _body(request)).get("on"))
+    await hub.harnesses.set_keep_alive(sid, on)
+    return _json({"keepAlive": on, "note": None, "state": hub.harnesses.state(sid)})
 
 
 async def h_handoff(request: web.Request, hub: Hub, sid: str) -> web.Response:
@@ -967,6 +977,7 @@ async def h_image(request: web.Request, hub: Hub, sid: str) -> web.StreamRespons
 
 async def h_commands(request: web.Request, hub: Hub, sid: str) -> web.Response:
     harness = hub.harnesses.harness_of(sid) or ""
+    commands = hub.harnesses.commands(sid)
     found = await _routes_with_models(hub, harness, session_id=sid) if harness in routes.ROUTES else []
     route = hub.harnesses.records[sid].get("api")
     current = next((r for r in found if r["id"] == route), None)
@@ -977,7 +988,7 @@ async def h_commands(request: web.Request, hub: Hub, sid: str) -> web.Response:
             models = await hub.harnesses.models(sid)
         except ControlError:
             models = []
-    return _json({"commands": [], "models": models, "source": "session", "defaults": {}, "routes": found})
+    return _json({"commands": commands, "models": models, "source": "session", "defaults": {}, "routes": found})
 
 
 async def h_context_limits(request: web.Request, hub: Hub, sid: str) -> web.Response:
@@ -1011,7 +1022,8 @@ async def h_start(request: web.Request, hub: Hub, sid: str) -> web.Response:
 
 
 async def h_stop(request: web.Request, hub: Hub, sid: str) -> web.Response:
-    return _json({"stopped": await hub.harnesses.stop(sid), "keepAliveCleared": False})
+    kept = bool(hub.harnesses.records[sid].get("keepAlive"))
+    return _json({"stopped": await hub.harnesses.stop(sid, by_user=True), "keepAliveCleared": kept})
 
 
 async def h_interrupt(request: web.Request, hub: Hub, sid: str) -> web.Response:
@@ -1227,6 +1239,7 @@ def build_app(cfg: Config) -> web.Application:
         context_limits: h_context_limits, send_message: h_send, resume_session: h_resume, start_session: h_start,
         stop_session: h_stop, interrupt: h_interrupt, cancel_message: h_cancel, answer_permission: h_permission,
         set_model: h_model, set_mode: h_mode, set_effort: h_effort, rename_session: h_rename, set_api: h_set_api, handoff_session: h_handoff,
+        fork_session: h_fork, keep_alive: h_keep_alive,
         session_subagents: h_subagents, dismiss_interrupted: h_dismiss,
     })
     return app

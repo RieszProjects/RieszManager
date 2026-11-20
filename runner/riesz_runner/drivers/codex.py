@@ -46,9 +46,9 @@ log = logging.getLogger(__name__)
 CLIENT_INFO = {"name": "riesz-manager", "title": "Riesz Manager", "version": "1"}
 
 MODES = [
-    Mode("read-only", "只读", "只能读文件；改文件或联网要先问你"),
-    Mode("auto", "自动", "可以改工作区里的文件、运行命令；越出工作区或要联网时先问你"),
-    Mode("full-access", "完全访问", "不受沙箱限制，也不再询问"),
+    Mode("read-only", "只读", "readonly", "只能读文件；改文件或联网要先问你"),
+    Mode("auto", "自动", "auto", "可以改工作区里的文件、运行命令；越出工作区或要联网时先问你"),
+    Mode("full-access", "完全访问", "full", "不受沙箱限制，也不再询问"),
 ]
 DEFAULT_MODE = "auto"
 
@@ -283,6 +283,12 @@ class CodexDriver(Driver):
         with contextlib.suppress(JsonRpcError, PeerClosed):
             await self.peer.request("turn/interrupt", {"threadId": self.session_id, "turnId": self.turn_id}, timeout=30)
 
+    async def compact_thread(self, args: str) -> None:
+        """/compact: thread/compact/start runs a compaction turn (a contextCompaction item)."""
+        if self.peer is None or self.busy:
+            raise ValueError("Codex is working; compact when this turn is over")
+        await self.peer.request("thread/compact/start", {"threadId": self.session_id}, timeout=60)
+
     async def set_mode(self, mode: str) -> None:
         if mode not in _POLICY:
             raise ValueError(f"unknown mode {mode}")
@@ -513,3 +519,20 @@ async def probe_models(codex: str, cwd: str, env: dict[str, str]) -> list[dict[s
         return await driver.models()
     finally:
         await driver.peer.stop()
+
+
+async def fork_thread(codex: str, cwd: str, env: dict[str, str], thread_id: str, api: str | None) -> str:
+    """A copy of a thread (thread/fork) as a new thread; returns its id.
+
+    Forked in a short-lived app-server: the process that forks keeps the new thread as its own, and
+    another process can open it only after that one has exited (unsubscribing does not release it)."""
+    provider, extra = codex_provider(api)
+    peer = JsonRpcPeer([codex, "app-server", *extra], cwd=cwd, env=env, version=False)
+    await peer.start()
+    try:
+        await peer.request("initialize", {"clientInfo": CLIENT_INFO, "capabilities": None}, timeout=60)
+        await peer.notify("initialized")
+        res = await peer.request("thread/fork", {"threadId": thread_id, "modelProvider": provider}, timeout=60)
+    finally:
+        await peer.stop()
+    return str((res.get("thread") or {}).get("id"))

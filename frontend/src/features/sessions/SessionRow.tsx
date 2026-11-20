@@ -49,20 +49,18 @@ function SessionActions({ session, archived }: { session: SessionSummary; archiv
           <ListItemIcon>{archived ? <ArchiveRestore size={15} /> : <Archive size={15} />}</ListItemIcon>
           {archived ? "取消归档" : "归档"}
         </MenuItem>
-        {!session.harness && (
-          <MenuItem onClick={async () => {
-            close();
-            try {
-              await setKeepAlive(session.sessionId, !session.keepAlive);
-            } catch (err) {
-              toast((err as Error).message, "error");
-            }
-          }}>
-            <ListItemIcon><Pin size={15} /></ListItemIcon>
-            <span className="rz-menu-grow">保持运行</span>
-            {session.keepAlive && <Check size={14} className="rz-menu-check" />}
-          </MenuItem>
-        )}
+        <MenuItem onClick={async () => {
+          close();
+          try {
+            await setKeepAlive(session.sessionId, !session.keepAlive);
+          } catch (err) {
+            toast((err as Error).message, "error");
+          }
+        }}>
+          <ListItemIcon><Pin size={15} /></ListItemIcon>
+          <span className="rz-menu-grow">保持运行</span>
+          {session.keepAlive && <Check size={14} className="rz-menu-check" />}
+        </MenuItem>
         <MenuItem onClick={async () => { close(); if (await copyText(session.sessionId)) toast("已复制会话 ID", "success"); }}>
           <ListItemIcon><Copy size={15} /></ListItemIcon>复制会话 ID
         </MenuItem>

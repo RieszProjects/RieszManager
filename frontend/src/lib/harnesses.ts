@@ -3,11 +3,24 @@ import { useEffect, useState } from "react";
 import { api } from "@/api/client";
 import type { ApiRoute, HarnessInfo, ModelInfo } from "@/api/types";
 
-const SHORT: Record<string, string> = { claude: "Claude Code", codex: "Codex", dsh: "DeepSeek", gemini: "Gemini", antigravity: "Antigravity" };
+/** What the runner said about each harness (runner/riesz_runner/harnesses.py: HarnessSpec), by id. */
+const known = new Map<string, HarnessInfo>();
+
+/** The harness as the runner described it (undefined until the list has arrived). */
+export function harnessMeta(id: string | null | undefined): HarnessInfo | undefined {
+  return known.get(id ?? "claude");
+}
 
 /** A short name for tags and placeholders. */
 export function harnessLabel(id: string | null | undefined): string {
-  return SHORT[id ?? "claude"] ?? id ?? "Claude Code";
+  const meta = known.get(id ?? "claude");
+  return meta?.label ?? meta?.name ?? (id && id !== "claude" ? id : "Claude Code");
+}
+
+/** The terminal command that continues a session, or null when the harness has none by session id. */
+export function resumeCommand(harness: string | null | undefined, sessionId: string): string | null {
+  const template = known.get(harness ?? "claude")?.resumeCommand ?? (harness ? null : "claude --resume {id}");
+  return template ? template.replace("{id}", sessionId) : null;
 }
 
 const TTL = 5 * 60 * 1000;
@@ -18,7 +31,10 @@ const listeners = new Set<(list: HarnessInfo[]) => void>();
 function fetchHarnesses(force = false): Promise<HarnessInfo[]> {
   if (force || !listed || Date.now() - listedAt > TTL) {
     listedAt = Date.now();
-    listed = api<{ harnesses: HarnessInfo[] }>("harnesses").then((r) => r.harnesses ?? []).catch(() => {
+    listed = api<{ harnesses: HarnessInfo[] }>("harnesses").then((r) => {
+      for (const h of r.harnesses ?? []) known.set(h.id, h);
+      return r.harnesses ?? [];
+    }).catch(() => {
       listed = null;
       return [];
     });
@@ -87,6 +103,6 @@ const PROVIDER_NAMES: Record<string, string> = { anthropic: "Anthropic", openai:
 export function routeTag(route: string | null | undefined, harness?: string | null): string | null {
   if (!route || route.endsWith(":subscription")) return null;
   const provider = route.split(":")[0];
-  if ((harness === "dsh" && provider === "deepseek") || (harness === "gemini" && provider === "gemini")) return null;
+  if (known.get(harness ?? "claude")?.routes?.[0]?.id === route) return null;   // the harness's own default route
   return `${PROVIDER_NAMES[provider] ?? provider} API`;
 }

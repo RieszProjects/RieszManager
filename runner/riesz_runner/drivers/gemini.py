@@ -18,10 +18,10 @@ from .acp import AcpDriver
 from .base import Capabilities, Mode
 
 MODES = [
-    Mode("default", "逐项确认", "编辑文件和运行命令前都先问你"),
-    Mode("autoEdit", "自动接受编辑", "编辑文件自动通过，命令仍需确认"),
-    Mode("yolo", "全部自动", "不再询问任何操作"),
-    Mode("plan", "计划模式", "只读，先给出计划"),
+    Mode("default", "逐项确认", "ask", "编辑文件和运行命令前都先问你"),
+    Mode("autoEdit", "自动接受编辑", "edits", "编辑文件自动通过，命令仍需确认"),
+    Mode("yolo", "全部自动", "full", "不再询问任何操作"),
+    Mode("plan", "计划模式", "readonly", "只读，先给出计划"),
 ]
 MODE_NAMES = {m.id: m.name for m in MODES}
 DEFAULT_MODE = "default"

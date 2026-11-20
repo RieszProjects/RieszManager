@@ -23,7 +23,7 @@ import uuid as uuidlib
 from pathlib import Path
 from typing import Any
 
-from .base import Capabilities, Driver, Mode, assistant_item, interrupted_item, notice_item, tool_block, tool_result, user_item
+from .base import Capabilities, Driver, Mode, assistant_item, command, interrupted_item, notice_item, tool_block, tool_result, user_item
 from .jsonrpc import JsonRpcError, JsonRpcPeer, PeerClosed
 
 log = logging.getLogger(__name__)
@@ -102,6 +102,7 @@ class AcpDriver(Driver):
         self._loading = False                    # history is being replayed by session/load
         self._prompt_task: asyncio.Task[Any] | None = None
         self._kinds: dict[str, str] = {}          # tool call id -> its ACP kind (updates may leave it out)
+        self._commands: list[dict[str, Any]] = []   # the agent's own slash commands (available_commands_update)
 
     @property
     def pid(self) -> int | None:
@@ -156,7 +157,8 @@ class AcpDriver(Driver):
         """Modes and models from session/new or session/load; then the ones this session should use."""
         modes = res.get("modes") or {}
         if modes.get("availableModes"):
-            self._modes = [Mode(m.get("id"), self.mode_name(m), m.get("description") or "") for m in modes["availableModes"]]
+            self._modes = [Mode(m.get("id"), self.mode_name(m), self.mode_tier(m), m.get("description") or "")
+                           for m in modes["availableModes"]]
         models = res.get("models") or {}
         if models.get("availableModels"):
             self._models = [{"value": m.get("modelId"), "displayName": m.get("name") or m.get("modelId"),
@@ -175,6 +177,19 @@ class AcpDriver(Driver):
 
     def mode_name(self, mode: dict[str, Any]) -> str:
         return str(mode.get("name") or mode.get("id"))
+
+    def mode_tier(self, mode: dict[str, Any]) -> str:
+        """The tier (modes.py) of a mode the agent reported; its known modes first, then a guess from the id."""
+        known = {m.id: m.tier for m in self.default_modes}
+        mode_id = str(mode.get("id") or "")
+        if mode_id in known:
+            return known[mode_id]
+        lowered = mode_id.lower()
+        for words, tier in ((("plan", "read"), "readonly"), (("yolo", "bypass", "full", "danger"), "full"),
+                            (("edit",), "edits"), (("auto",), "auto")):
+            if any(w in lowered for w in words):
+                return tier
+        return "ask"
 
     async def authenticate(self, error: JsonRpcError) -> bool:
         """session/new was refused: sign in (`authenticate`) if this agent knows how, then it is tried once more."""
@@ -283,6 +298,12 @@ class AcpDriver(Driver):
     async def models(self) -> list[dict[str, Any]]:
         return list(self._models)
 
+    def native_commands(self) -> list[dict[str, Any]]:
+        return [command(str(c.get("name")), str(c.get("description") or ""), str((c.get("input") or {}).get("hint") or ""))
+                for c in self._commands if c.get("name")]
+
+
+
     # ---- what the agent reports ---------------------------------------------------------
 
     def _assistant(self) -> dict[str, Any]:
@@ -364,6 +385,9 @@ class AcpDriver(Driver):
             return
         elif kind == "session_info_update":
             self.title = u.get("title") or self.title
+            return
+        elif kind == "available_commands_update":
+            self._commands = [c for c in u.get("availableCommands") or () if isinstance(c, dict)]
             return
         else:
             return

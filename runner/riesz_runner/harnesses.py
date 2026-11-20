@@ -20,15 +20,18 @@ import glob
 import json
 import logging
 import os
+import re
 import shutil
 import time
 import uuid as uuidlib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .drivers.antigravity import AntigravityDriver
-from .drivers.base import Driver
-from .drivers.codex import CodexDriver, probe_models
+from .drivers.base import UNIVERSAL_COMMANDS, Driver, universal_commands
+from .modes import TIERS
+from .drivers.codex import CodexDriver, fork_thread, probe_models
 from .drivers.dsh import EFFORTS, DshDriver
 from .drivers.gemini import GeminiDriver, settings_file
 from .drivers.jsonrpc import JsonRpcError
@@ -47,13 +50,86 @@ REAP_INTERVAL = 60.0
 
 MODELS_TTL = 600.0
 
-HARNESSES: dict[str, dict[str, Any]] = {
-    # "arg": the driver's keyword for the executable's path.
-    "codex": {"name": "Codex", "bin": "codex", "arg": "codex", "driver": CodexDriver},
-    "dsh": {"name": "DeepSeek Harness", "bin": "dsh", "arg": "dsh", "driver": DshDriver},
-    "gemini": {"name": "Gemini CLI", "bin": "gemini", "arg": "gemini", "driver": GeminiDriver},
-    "antigravity": {"name": "Antigravity", "bin": "agy", "arg": "agy", "driver": AntigravityDriver},
-}
+COMMAND_FORMS = re.compile(r"^(/\S+|offered:/\S+|method:\w+|none:.+)$")
+
+
+@dataclass(frozen=True)
+class HarnessSpec:
+    """Everything the runner and the web app need to know about a harness. Every field is required, and the
+    tables are checked here: adding a harness means deciding each entry (drivers/README.md lists them all,
+    tests/test_conformance.py checks what can only be checked once the harness is registered)."""
+    id: str
+    name: str                 # full name, e.g. "DeepSeek Harness"
+    label: str                # short name for tags, e.g. "DeepSeek"
+    bin: str                  # executable looked up on PATH, in nvm's Node versions and in ~/.local/bin
+    driver: type[Driver]
+    arg: str                  # the driver's keyword for the executable's path
+    native_provider: str      # the provider of its own route (credentials.PROVIDERS), e.g. "openai" for Codex
+    resume_command: str | None   # terminal command to continue a session, "{id}" for its id; None: none by id
+    handoff: str              # how a conversation moved here is given to it: one of handoff.STRATEGIES
+    fork: str                 # "native" (the harness forks itself) or "copy" (a new session with the history rewritten)
+    commands: dict[str, str]  # each of drivers.base.UNIVERSAL_COMMANDS -> how this harness does it (forms listed there)
+    modes: dict[str, str]     # each of modes.TIERS -> the mode of this harness to use for it
+
+    def __post_init__(self) -> None:
+        if set(self.commands) != set(UNIVERSAL_COMMANDS):
+            raise TypeError(f"{self.id}: commands must cover exactly {sorted(UNIVERSAL_COMMANDS)}, got {sorted(self.commands)}")
+        for name, how in self.commands.items():
+            if not COMMAND_FORMS.match(how):
+                raise TypeError(f"{self.id}: /{name} -> {how!r} is not one of /cmd, offered:/cmd, method:name, none:reason")
+            if how.startswith("method:") and not callable(getattr(self.driver, how[7:], None)):
+                raise TypeError(f"{self.id}: /{name} -> {how}: {self.driver.__name__} has no such method")
+        if set(self.modes) != set(TIERS):
+            raise TypeError(f"{self.id}: modes must name a mode for each of {TIERS}, got {sorted(self.modes)}")
+        known = {m.id for m in self.driver(cwd="/", sink=None).modes()}
+        if known and not set(self.modes.values()) <= known:
+            raise TypeError(f"{self.id}: modes names {sorted(set(self.modes.values()) - known)}, not modes of {self.driver.__name__}")
+        from .handoff import STRATEGIES
+        if self.handoff not in STRATEGIES:
+            raise TypeError(f"{self.id}: handoff {self.handoff!r} is not one of {sorted(STRATEGIES)} (handoff.py)")
+        if self.fork not in ("native", "copy"):
+            raise TypeError(f"{self.id}: fork must be native or copy")
+
+    def meta(self) -> dict[str, Any]:
+        return {"id": self.id, "name": self.name, "label": self.label, "nativeProvider": self.native_provider,
+                "resumeCommand": self.resume_command, "handoff": self.handoff, "fork": self.fork}
+
+
+HARNESSES: dict[str, HarnessSpec] = {s.id: s for s in (
+    HarnessSpec(
+        id="codex", name="Codex", label="Codex", bin="codex", driver=CodexDriver, arg="codex", native_provider="openai",
+        resume_command="codex resume {id}", handoff="inject-responses", fork="native",
+        commands={"compact": "method:compact_thread"},                     # thread/compact/start (checked 11-20)
+        # No mode asks before every edit: read-only (asks before writing) is the nearest careful one.
+        modes={"readonly": "read-only", "ask": "read-only", "edits": "auto", "auto": "auto", "full": "full-access"},
+    ),
+    HarnessSpec(
+        id="dsh", name="DeepSeek Harness", label="DeepSeek", bin="dsh", driver=DshDriver, arg="dsh", native_provider="deepseek",
+        resume_command="dsh tui --resume {id}", handoff="first-message", fork="copy",
+        commands={"compact": "/compact"},                                   # its SDK runs bare /compact natively
+        modes={"readonly": "read-only", "ask": "read-only", "edits": "workspace-write", "auto": "workspace-write",
+               "full": "danger-full-access"},
+    ),
+    HarnessSpec(
+        id="gemini", name="Gemini CLI", label="Gemini", bin="gemini", driver=GeminiDriver, arg="gemini", native_provider="gemini",
+        resume_command=None, handoff="first-message", fork="copy",
+        # Its ACP mode offers only memory, extensions, init, restore, about and help: /compress is not among them.
+        commands={"compact": "none:Gemini CLI 在 ACP 模式下没有压缩命令（上下文快满时它会自己压缩）"},
+        modes={"readonly": "plan", "ask": "default", "edits": "autoEdit", "auto": "autoEdit", "full": "yolo"},
+    ),
+    HarnessSpec(
+        id="antigravity", name="Antigravity", label="Antigravity", bin="agy", driver=AntigravityDriver, arg="agy",
+        native_provider="gemini", resume_command="agy --conversation {id}", handoff="first-message", fork="copy",
+        commands={"compact": "offered:/compact"},     # agy has /compact; used when its ACP command list offers it
+        # No mode never asks (only the --dangerously-skip-permissions flag): auto is the nearest.
+        modes={"readonly": "plan", "ask": "default", "edits": "accept-edits", "auto": "auto", "full": "auto"},
+    ),
+)}
+
+# Claude Code runs through process.py rather than a driver; the same facts about it.
+CLAUDE_META = {"id": "claude", "name": "Claude Code", "label": "Claude Code", "nativeProvider": "anthropic",
+               "resumeCommand": "claude --resume {id}", "handoff": "claude", "fork": "native"}
+CLAUDE_COMMANDS = {"compact": "/compact"}       # Claude Code's own; its whole command list comes from the process
 
 
 def find_bin(name: str, configured: str | None) -> str | None:
@@ -91,26 +167,63 @@ class Harnesses:
     def bin(self, harness: str) -> str | None:
         configured = {"codex": self.cfg.codex_bin, "dsh": self.cfg.dsh_bin, "gemini": self.cfg.gemini_bin,
                       "antigravity": self.cfg.agy_bin}.get(harness)
-        return find_bin(HARNESSES[harness]["bin"], configured or None)
+        return find_bin(HARNESSES[harness].bin, configured or None)
+
+    def commands(self, session_id: str | None = None, harness: str | None = None) -> list[dict[str, Any]]:
+        """The composer's slash commands for a session (or a harness, before one exists): the universal commands
+        the harness can do (HarnessSpec.commands), then its own."""
+        harness = harness or self.harness_of(session_id or "")
+        spec = HARNESSES[harness]
+        driver = self.drivers.get(session_id or "")
+        own = driver.native_commands() if driver is not None and driver.alive else []
+        offered = {c["name"] for c in own}
+        out = []
+        for cmd in universal_commands():
+            how = spec.commands[cmd["name"]]
+            if how.startswith("none:") or (how.startswith("offered:") and driver is not None and driver.alive
+                                           and how.split("/", 1)[1] not in offered):
+                continue
+            out.append(cmd)
+        return out + [c for c in own if c["name"] not in UNIVERSAL_COMMANDS]
+
+    async def run_universal(self, session_id: str, name: str, args: str, message_uuid: str) -> None:
+        """A universal command, the way HarnessSpec.commands says this harness does it."""
+        rec = self.records[session_id]
+        spec = HARNESSES[rec["harness"]]
+        how = spec.commands[name]
+        if how.startswith("none:"):
+            raise ControlError(how[5:])
+        driver = await self.ensure(session_id)
+        try:
+            if how.startswith("method:"):
+                await getattr(driver, how[7:])(args)
+                return
+            native = how.split(":", 1)[1] if how.startswith("offered:") else how
+            if how.startswith("offered:") and native[1:] not in {c["name"] for c in driver.native_commands()}:
+                raise ControlError(f"{spec.name} does not offer {native} in this session")
+            await driver.send(native + (f" {args}" if args else ""), [], message_uuid)
+        except (ValueError, JsonRpcError) as exc:
+            raise ControlError(getattr(exc, "message", None) or str(exc)) from None
 
     async def available(self) -> list[dict[str, Any]]:
-        """Every harness (Claude Code first) with its routes, and whether a session of it can be started."""
+        """Every harness (Claude Code first): what it is (HarnessSpec.meta), its routes, modes and commands,
+        and whether a session of it can be started."""
         bins = self.hub.bins()
-        out: list[dict[str, Any]] = [{"id": "claude", "name": "Claude Code", "available": True, "reason": None,
+        out: list[dict[str, Any]] = [{**CLAUDE_META, "available": True, "reason": None,
                                       "routes": await routes.describe("claude", self.hub.credentials, bins)}]
         for hid, spec in HARNESSES.items():
             path = self.bin(hid)
-            driver_cls = spec["driver"]
-            sample = driver_cls(cwd="/", sink=_nowhere)
-            described = await routes.describe(hid, self.hub.credentials, bins) if path and hid in routes.ROUTES else []
+            sample = spec.driver(cwd="/", sink=_nowhere)
+            described = await routes.describe(hid, self.hub.credentials, bins) if path else []
             reason = None
             if path is None:
-                reason = f"{spec['bin']} 没有安装"
-            elif hid in routes.ROUTES and not any(r["available"] for r in described):
+                reason = f"{spec.bin} 没有安装"
+            elif hid in routes.ROUTES and not any(r["available"] for r in described):   # (test harnesses have no routes)
                 reason = described[0]["reason"] if len(described) == 1 else "没有可用的订阅或 API key"
-            out.append({"id": hid, "name": spec["name"], "available": reason is None, "reason": reason, "routes": described,
+            out.append({**spec.meta(), "available": reason is None, "reason": reason, "routes": described,
                         "modes": [m.__dict__ for m in sample.modes()], "defaultMode": sample.mode,
-                        "defaultModel": sample.model, "capabilities": driver_cls.capabilities.as_dict()})
+                        "defaultModel": sample.model, "capabilities": spec.driver.capabilities.as_dict(),
+                        "commands": self.commands(harness=hid)})
         if not any(r["available"] for r in out[0]["routes"]):
             out[0]["available"] = False
             out[0]["reason"] = "没有登录 claude.ai，也没有设置 API key"
@@ -122,18 +235,18 @@ class Harnesses:
             return route or ""
         if route:
             if not routes.valid(harness, route):
-                raise ControlError(f"{HARNESSES[harness]['name']} cannot use {route}")
+                raise ControlError(f"{HARNESSES[harness].name} cannot use {route}")
             return route
         found = await routes.default(harness, self.hub.credentials, self.hub.bins())
         if found is None:
-            raise ControlError(f"no subscription or API key is set up for {HARNESSES[harness]['name']}")
+            raise ControlError(f"no subscription or API key is set up for {HARNESSES[harness].name}")
         return found
 
     async def _env(self, harness: str, route: str) -> dict[str, str]:
         env = ClaudeProcess._child_env()
         path = self.bin(harness)
         if path is None:
-            raise ControlError(f"{HARNESSES[harness]['bin']} is not installed")
+            raise ControlError(f"{HARNESSES[harness].bin} is not installed")
         env["PATH"] = os.path.dirname(path) + os.pathsep + env.get("PATH", "")   # node lives next to it
         for name in (p.env for p in PROVIDERS.values()):
             env.pop(name, None)                       # only the key the route needs
@@ -268,7 +381,7 @@ class Harnesses:
             "lastPrompt": rec.get("lastPrompt"), "createdAt": _iso(rec.get("createdAt") or 0), "updatedAt": _iso(rec.get("updatedAt") or 0),
             "promptCount": rec.get("promptCount") or 0, "model": rec.get("model"), "effort": rec.get("effort"),
             "permissionMode": rec.get("mode"), "project": self.hub.projects.project_id_for(rec.get("cwd")),
-            "live": self.live_info(session_id), "mtime": rec.get("updatedAt") or 0, "size": 0, "keepAlive": False,
+            "live": self.live_info(session_id), "mtime": rec.get("updatedAt") or 0, "size": 0, "keepAlive": bool(rec.get("keepAlive")),
             "startedBy": None, "interrupted": self.hub.prefs.interrupted(session_id), "subagents": 0,
             "api": rec.get("api"), "handoffFrom": rec.get("handoffFrom"), "handedOffTo": rec.get("handedOffTo"),
         }
@@ -280,7 +393,7 @@ class Harnesses:
     def state(self, session_id: str) -> dict[str, Any]:
         driver = self.drivers.get(session_id)
         rec = self.records[session_id]
-        cls = HARNESSES[rec["harness"]]["driver"]
+        cls = HARNESSES[rec["harness"]].driver
         if driver is not None and driver.alive:
             state = driver.snapshot()
         else:
@@ -345,7 +458,7 @@ class Harnesses:
     async def _make(self, harness: str, *, cwd: str, session_id: str | None, route: str, model: str | None,
                     effort: str | None, mode: str | None) -> Driver:
         spec = HARNESSES[harness]
-        extra: dict[str, Any] = {spec["arg"]: self.bin(harness)} if spec.get("arg") else {}
+        extra: dict[str, Any] = {spec.arg: self.bin(harness)}
         model = model or await self._default_model(harness, route)
         if harness in ("codex", "antigravity"):
             extra["api"] = route
@@ -354,7 +467,7 @@ class Harnesses:
             extra["patch"] = await self._patch(harness, session_id, route)
         elif harness == "gemini":
             extra["settings"] = settings_file(self.cfg.state_dir)
-        return spec["driver"](cwd=cwd, sink=self._sink, session_id=session_id, model=model, effort=effort, mode=mode,
+        return spec.driver(cwd=cwd, sink=self._sink, session_id=session_id, model=model, effort=effort, mode=mode,
                               env=await self._env(harness, route), **extra)
 
     async def create(self, harness: str, cwd: str, *, model: str | None = None, effort: str | None = None,
@@ -372,7 +485,7 @@ class Harnesses:
         try:
             await driver.start()
         except JsonRpcError as exc:                 # the harness refused (not signed in, ...): say why
-            raise ControlError(f"{HARNESSES[harness]['name']}: {exc.message}") from None
+            raise ControlError(f"{HARNESSES[harness].name}: {exc.message}") from None
         sid = str(driver.session_id)
         now = time.time()
         self.records[sid] = {"id": sid, "harness": harness, "cwd": cwd, "createdAt": now, "updatedAt": now, "promptCount": 0,
@@ -405,7 +518,7 @@ class Harnesses:
                 await driver.start()
             except JsonRpcError as exc:             # the harness refused: say why
                 self.drivers.pop(session_id, None)
-                raise ControlError(f"{HARNESSES[rec['harness']]['name']}: {exc.message}") from None
+                raise ControlError(f"{HARNESSES[rec['harness']].name}: {exc.message}") from None
             except Exception:
                 self.drivers.pop(session_id, None)
                 raise
@@ -416,7 +529,14 @@ class Harnesses:
 
     async def send(self, session_id: str, text: str, attachments: list[dict[str, Any]], message_uuid: str, *,
                    model: str | None = None, mode: str | None = None, effort: str | None = None) -> dict[str, Any]:
-        """Send a message, starting the session if needed; `model`, `mode`, `effort`: chosen while it was not running."""
+        """Send a message, starting the session if needed; `model`, `mode`, `effort`: chosen while it was not running.
+        A universal slash command (UNIVERSAL_COMMANDS) is run the harness's own way instead."""
+        stripped = text.strip()
+        if stripped.startswith("/") and not attachments:
+            name, _, args = stripped[1:].partition(" ")
+            if name in UNIVERSAL_COMMANDS:
+                await self.run_universal(session_id, name, args.strip(), message_uuid)
+                return {"uuid": message_uuid, "held": False}
         running = self.drivers.get(session_id)
         if running is None or not running.alive:
             rec = self.records[session_id]
@@ -470,13 +590,46 @@ class Harnesses:
         self._active[session_id] = time.time()
         return driver.answer_permission(request_id, allow=allow, scope=scope, message=body.get("message"), answers=answers)
 
+    async def fork(self, session_id: str) -> str:
+        """A new session continuing from this one, which goes on as it was (HarnessSpec.fork says how)."""
+        rec = self.records[session_id]
+        spec = HARNESSES[rec["harness"]]
+        if spec.fork != "native":
+            return await self.hub.handoff(session_id, rec["harness"], fork=True)
+        route = rec.get("api") or await self._route(rec["harness"], None)
+        try:
+            new_id = await fork_thread(self.bin(rec["harness"]) or spec.bin, rec["cwd"], await self._env(rec["harness"], route),
+                                       session_id, route)
+        except JsonRpcError as exc:
+            raise ControlError(f"{spec.name}: {exc.message}") from None
+        now = time.time()
+        self.records[new_id] = {**{k: rec.get(k) for k in ("harness", "cwd", "api", "model", "effort", "mode", "customTitle",
+                                                           "title", "firstPrompt", "lastPrompt", "promptCount", "handoffFrom")},
+                                "id": new_id, "createdAt": now, "updatedAt": now, "forkedFrom": session_id}
+        imported = self.cache_dir / f"{session_id}.imported.json"
+        if imported.is_file():                         # the conversation it continued, shown first as before
+            (self.cache_dir / f"{new_id}.imported.json").write_bytes(imported.read_bytes())
+        self._save()
+        await self.ensure(new_id)
+        await self.hub.broadcast_global({"ev": "sessions", "sessions": [self.summary(new_id)], "removed": []})
+        return new_id
+
+    async def set_keep_alive(self, session_id: str, on: bool) -> None:
+        """Keep the session's process running: not stopped when idle, started again when it ends."""
+        rec = self.records[session_id]
+        rec["keepAlive"] = on
+        self._save()
+        if on:
+            await self.ensure(session_id)
+        await self.hub.broadcast_global({"ev": "sessions", "sessions": [self.summary(session_id)], "removed": []})
+
     async def set_api(self, session_id: str, route: str, model: str | None = None) -> None:
         """Move a session to another route: its process restarts on it (when idle) and picks the history up."""
         rec = self.records[session_id]
         route = await self._route(rec["harness"], route)
-        if route != rec.get("api") and not HARNESSES[rec["harness"]]["driver"].capabilities.api_switch:
+        if route != rec.get("api") and not HARNESSES[rec["harness"]].driver.capabilities.api_switch:
             # Codex keeps each thread on the provider it started with.
-            raise ControlError(f"a {HARNESSES[rec['harness']]['name']} session stays on the API it started with; start a new session")
+            raise ControlError(f"a {HARNESSES[rec['harness']].name} session stays on the API it started with; start a new session")
         driver = self.drivers.get(session_id)
         if driver is not None and driver.alive and (driver.busy or driver.permissions or driver.tasks):
             raise ControlError("the session is working; switch when this turn is over")
@@ -509,7 +662,11 @@ class Harnesses:
         self._save()
         await self.hub.broadcast_global({"ev": "sessions", "sessions": [self.summary(session_id)], "removed": []})
 
-    async def stop(self, session_id: str) -> bool:
+    async def stop(self, session_id: str, by_user: bool = False) -> bool:
+        """`by_user`: stopping it by hand also ends "keep running" (it would come straight back)."""
+        if by_user and self.records.get(session_id, {}).get("keepAlive"):
+            self.records[session_id]["keepAlive"] = False
+            self._save()
         driver = self.drivers.get(session_id)
         if driver is None or not driver.alive:
             return False
@@ -534,17 +691,35 @@ class Harnesses:
         await asyncio.gather(*(d.stop() for d in self.drivers.values() if d.alive), return_exceptions=True)
 
     async def loop(self) -> None:
-        """Stop drivers that have been idle for the runner's idle timeout, like Claude Code processes."""
+        """Stop drivers idle for the runner's idle timeout (like Claude Code processes); start the ones kept running."""
+        failures: dict[str, tuple[float, int]] = {}
         while True:
             await asyncio.sleep(REAP_INTERVAL)
             now = time.time()
             for sid, driver in list(self.drivers.items()):
-                if not driver.alive or driver.busy or driver.permissions or driver.tasks:
+                rec = self.records.get(sid) or {}
+                if not driver.alive or driver.busy or driver.permissions or driver.tasks or rec.get("keepAlive"):
                     continue
                 if now - self._active.get(sid, now) > self.cfg.idle_timeout:
                     log.info("stopping idle %s session %s", driver.harness, sid[:8])
                     with contextlib.suppress(Exception):
                         await self.stop(sid)
+            if self.hub.reload_ready.is_set():
+                continue
+            for sid, rec in list(self.records.items()):
+                driver = self.drivers.get(sid)
+                if not rec.get("keepAlive") or rec.get("handedOffTo") or (driver is not None and driver.alive):
+                    continue
+                last, count = failures.get(sid, (0.0, 0))
+                if now - last < min(60 * 2 ** count, 1800):
+                    continue                            # it keeps failing: back off
+                try:
+                    await self.ensure(sid)
+                    failures.pop(sid, None)
+                    log.info("keep-alive: started %s session %s", rec["harness"], sid[:8])
+                except Exception as exc:  # noqa: BLE001
+                    failures[sid] = (now, count + 1)
+                    log.info("keep-alive: could not start %s: %s", sid[:8], exc)
 
     # ---- what drivers report ------------------------------------------------------------
 

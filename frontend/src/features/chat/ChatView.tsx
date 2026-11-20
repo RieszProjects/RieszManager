@@ -13,7 +13,7 @@ import { Mascot } from "@/components/Mascot";
 import { StatusDot } from "@/components/StatusDot";
 import { copyText } from "@/lib/clipboard";
 import { clockTime } from "@/lib/format";
-import { harnessLabel, routeTag, useHarnesses } from "@/lib/harnesses";
+import { harnessLabel, resumeCommand, routeTag, useHarnesses } from "@/lib/harnesses";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { sessionTitle, useApp } from "@/store/app";
 import { useOrganize } from "@/store/organize";
@@ -53,24 +53,12 @@ function QueueBar({ sessionId, queue }: { sessionId: string; queue: QueueEntry[]
   );
 }
 
-/** How to continue a session in a terminal, by harness. */
-function resumeCommand(harness: string | null | undefined, sessionId: string): string | null {
-  if (harness === "codex") return `codex resume ${sessionId}`;
-  if (harness === "dsh") return `dsh tui --resume ${sessionId}`;
-  if (harness === "gemini") return null;       // its --resume takes a list position, not the session id
-  if (harness === "antigravity") return `agy --conversation ${sessionId}`;
-  return `claude --resume ${sessionId}`;
-}
-
-/** Harnesses a conversation can be moved to (runner/riesz_runner/handoff.py). */
-const HANDOFF_TARGETS = ["claude", "codex", "dsh", "gemini", "antigravity"];
-
 /** "Continue in another tool": the conversation, without thinking, rewritten in that tool's own history. */
 function HandoffMenu({ sessionId, harness, anchor, onClose }: { sessionId: string; harness: string; anchor: HTMLElement | null; onClose: () => void }) {
   const navigate = useUi((s) => s.navigate);
   const harnesses = useHarnesses();
   const [busy, setBusy] = useState<string | null>(null);
-  const targets = harnesses.filter((h) => HANDOFF_TARGETS.includes(h.id) && h.id !== harness);
+  const targets = harnesses.filter((h) => h.id !== harness);
   const go = async (target: string) => {
     setBusy(target);
     try {
@@ -128,26 +116,22 @@ function SessionMenu({ sessionId, state, cwd, title, keepAlive, harness }: {
           <ListItemIcon>{archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}</ListItemIcon>
           {archived ? "取消归档" : "归档"}
         </MenuItem>
-        {!harness && (
-          <MenuItem onClick={() => run(async () => {
-            const res = await api<{ sessionId: string }>(`sessions/${sessionId}/fork`, { body: {} });
-            navigate({ view: "session", sessionId: res.sessionId });
-          })}>
-            <ListItemIcon><GitFork size={16} /></ListItemIcon>分叉为新会话
-          </MenuItem>
-        )}
+        <MenuItem onClick={() => run(async () => {
+          const res = await api<{ sessionId: string }>(`sessions/${sessionId}/fork`, { body: {} });
+          navigate({ view: "session", sessionId: res.sessionId });
+        })}>
+          <ListItemIcon><GitFork size={16} /></ListItemIcon>分叉为新会话
+        </MenuItem>
         <MenuItem onClick={() => { close(); setScheduleSession(sessionId); }}>
           <ListItemIcon><AlarmClock size={16} /></ListItemIcon>
           <span className="rz-menu-grow">定时唤醒</span>
           {scheduleCount > 0 && <span className="dim">{scheduleCount}</span>}
         </MenuItem>
-        {!harness && (
-          <MenuItem onClick={() => run(() => setKeepAlive(sessionId, !keepAlive))}>
-            <ListItemIcon><Pin size={16} /></ListItemIcon>
-            <span className="rz-menu-grow">保持运行</span>
-            {keepAlive && <Check size={15} className="rz-menu-check" />}
-          </MenuItem>
-        )}
+        <MenuItem onClick={() => run(() => setKeepAlive(sessionId, !keepAlive))}>
+          <ListItemIcon><Pin size={16} /></ListItemIcon>
+          <span className="rz-menu-grow">保持运行</span>
+          {keepAlive && <Check size={15} className="rz-menu-check" />}
+        </MenuItem>
         {state?.hosted && state.alive && (
           <MenuItem onClick={() => run(async () => {
             const res = await api<{ keepAliveCleared?: boolean }>(`sessions/${sessionId}/stop`, { body: {} });

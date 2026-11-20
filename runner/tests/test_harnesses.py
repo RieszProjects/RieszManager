@@ -27,9 +27,16 @@ class FakeDriver(Driver):
     harness = "fake"
     capabilities = Capabilities(steer=True, approve_for_session=True, user_questions=True)
     started = 0
+    compacted: list[str] = []
+
+    def __init__(self, *, fake_bin: str | None = None, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+
+    async def compact(self, args: str) -> None:
+        FakeDriver.compacted.append(args)
 
     def modes(self) -> list[Mode]:
-        return [Mode("ask", "问"), Mode("go", "不问")]
+        return [Mode("ask", "问", "ask"), Mode("go", "不问", "full")]
 
     async def start(self) -> None:
         FakeDriver.started += 1
@@ -77,7 +84,10 @@ class HarnessRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="rz-harness-"))
         self.workspace = self.tmp / "work"
         self.workspace.mkdir()
-        harnesses_mod.HARNESSES["fake"] = {"name": "Fake", "bin": "sh", "driver": FakeDriver}
+        harnesses_mod.HARNESSES["fake"] = harnesses_mod.HarnessSpec(
+            id="fake", name="Fake", label="Fake", bin="sh", driver=FakeDriver, arg="fake_bin", native_provider="deepseek",
+            resume_command=None, handoff="first-message", fork="copy", commands={"compact": "method:compact"},
+            modes={"readonly": "ask", "ask": "ask", "edits": "ask", "auto": "go", "full": "go"})
         self.addCleanup(harnesses_mod.HARNESSES.pop, "fake", None)
         self.cfg = Config(workspace_root=self.tmp, claude_home=self.tmp / "claude", claude_bin="claude",
                           state_dir=self.tmp / "state", socket_path=self.tmp / "runner.sock", token=TOKEN)
@@ -215,6 +225,26 @@ class HarnessRoutesTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("旧回答", reply)
         self.assertEqual((await self.call("GET", f"sessions/{other}"))["session"]["title"], "原标题")
         self.assertFalse(hub.harnesses.records[other].get("pendingHandoff"))
+
+    async def test_mode_tables(self):
+        from riesz_runner.server import HUB
+        hub = self.client.server.app[HUB]
+        self.assertEqual(hub._closest_mode("codex", "ask"), "read-only")
+        self.assertEqual(hub._closest_mode("dsh", "full"), "danger-full-access")
+        self.assertEqual(hub._closest_mode("gemini", "edits"), "autoEdit")
+        self.assertEqual(hub._closest_mode("claude", "full"), "auto")          # bypass is not allowed on this runner
+        sid = await self.new_session()
+        await self.call("POST", f"sessions/{sid}/mode", {"mode": "go"})
+        self.assertEqual(hub._mode_tier(sid, hub.session_summary(sid)), "full")
+
+    async def test_universal_command_runs_the_harness_way(self):
+        sid = await self.new_session()
+        await self.until(lambda: self._has_text(sid, "echo: hi"), "first reply")
+        FakeDriver.compacted.clear()
+        await self.call("POST", f"sessions/{sid}/messages", {"text": "/compact 留下要点"})
+        self.assertEqual(FakeDriver.compacted, ["留下要点"])
+        names = [c["name"] for c in (await self.call("GET", f"sessions/{sid}/commands"))["commands"]]
+        self.assertEqual(names[0], "compact")
 
     async def test_credentials_never_come_back(self):
         from riesz_runner.server import HUB

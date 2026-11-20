@@ -8,10 +8,9 @@ That conversation is written the way the target harness keeps history:
 
 - Claude Code: a transcript file under ~/.claude/projects, resumed with --resume;
 - Codex: a new thread, the history added with thread/inject_items (Responses API items);
-- DeepSeek Harness: a session log holding the history as its first user message
-  (dsh accepts no hand-written replies: they need its own stream records);
-- Gemini CLI, Antigravity (nothing to write into): the history goes in front of
-  the first message the user sends there.
+- DeepSeek Harness, Gemini CLI, Antigravity: the history goes in front of the
+  first message the user sends there. (A hand-written dsh log is read once but
+  breaks later: dsh needs its own system message as the first entry of a log.)
 
 For the user it stays one session: the source is hidden and points to the new
 one, which shows the source's items first (with a divider) and keeps the
@@ -34,6 +33,11 @@ TOOL_OUTPUT_CHARS = 1500
 HARNESS_NAMES = {"claude": "Claude Code", "codex": "Codex", "dsh": "DeepSeek Harness", "gemini": "Gemini CLI",
                  "antigravity": "Antigravity"}
 TARGETS = ("claude", "codex", "dsh", "gemini", "antigravity")
+# How a conversation is given to a harness (HarnessSpec.handoff; Claude Code always gets a transcript):
+STRATEGIES = {
+    "inject-responses": "a new thread, the history added as Responses API items (Codex's thread/inject_items)",
+    "first-message": "the history in front of the first message sent there (nothing to write into)",
+}
 PREFACE_START = "[以下是从 "
 HISTORY_END = "[以上是之前的对话记录]"
 BUDGET_CHARS = 240_000          # about 60–80k tokens of history; more is cut (or compacted first)
@@ -210,52 +214,15 @@ def responses_items(msgs: list[dict[str, str]]) -> list[dict[str, Any]]:
     return out
 
 
-def display_items(items: list[dict[str, Any]], source: str, target: str) -> list[dict[str, Any]]:
+def display_items(items: list[dict[str, Any]], source: str, target: str, fork: bool = False) -> list[dict[str, Any]]:
     """The source's items as shown before the new session's own, then a divider (keys and seqs of their own)."""
     kinds = ("user", "assistant", "command", "output", "compact", "interrupted", "notice")
     shown = [dict(it) for it in items if it.get("kind") in kinds]
     shown.append({"kind": "notice", "level": "info", "subtype": "handoff", "ts": None, "uuid": None,
-                  "text": f"从这里起改用 {HARNESS_NAMES.get(target, target)} 继续"})
+                  "text": "从这里分叉" if fork else f"从这里起改用 {HARNESS_NAMES.get(target, target)} 继续"})
     for n, it in enumerate(shown):
         if not str(it.get("key") or "").startswith("handoff:"):
             it["key"] = f"handoff:{source[:8]}:{it.get('key') or n}"
         it["seq"] = n - len(shown)                            # before the new session's own items (which start at 1)
         it["imported"] = True
     return shown
-
-
-# ---- DeepSeek Harness -------------------------------------------------------------------------
-
-def dsh_session_dir(home: Path, cwd: str, session_id: str) -> Path:
-    """Where dsh keeps a session's log (its project folder name is the cwd with / as -, between dashes)."""
-    return home / "sessions" / ("-" + cwd.replace("/", "-") + "--") / session_id
-
-
-def write_dsh_seed(home: Path, cwd: str, session_id: str, text: str) -> Path:
-    """A dsh session log (format v4) whose one finished turn is a user message holding the history."""
-    import subprocess
-
-    now = int(time.time() * 1000)
-    header = {"type": "session", "version": 4, "id": session_id, "createdAt": now, "cwd": cwd, "isSeeded": False,
-              "delegationDepth": 0}
-    events = []
-
-    def ev(kind: str, data: dict[str, Any], **extra: Any) -> None:
-        events.append({"type": kind, "seq": len(events), "time": now + len(events), "data": data, **extra})
-
-    ev("turn/start", {"turn": 1})
-    ev("step/start", {"turn": 1, "step": 1})
-    ev("user/message", {"content": [{"type": "text", "text": text}], "source": {"kind": "user"}, "role": "user",
-                        "id": str(uuidlib.uuid4())}, surfaceOp="append")
-    ev("step/end", {"turn": 1, "step": 1})
-    ev("turn/end", {"turn": 1, "reason": {"kind": "completed"}})
-
-    def frame(lines: list[dict[str, Any]]) -> bytes:
-        raw = "".join(json.dumps(x, ensure_ascii=False) + "\n" for x in lines).encode()
-        return subprocess.run(["zstd", "-q", "-c", "--check"], input=raw, capture_output=True, check=True).stdout
-
-    folder = dsh_session_dir(home, cwd, session_id)
-    folder.mkdir(parents=True, exist_ok=False)
-    path = folder / "session.v4.jsonl.zstd"
-    path.write_bytes(frame([header]) + frame(events))         # the header alone in the first frame, as dsh requires
-    return path

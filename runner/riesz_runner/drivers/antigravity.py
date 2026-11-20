@@ -15,10 +15,10 @@ from .base import Capabilities, Mode
 from .jsonrpc import JsonRpcError
 
 MODES = [
-    Mode("default", "逐项确认", "编辑文件和运行命令前都先问你"),
-    Mode("accept-edits", "自动接受编辑", "编辑文件自动通过，命令仍需确认"),
-    Mode("auto", "自动", "由 Antigravity 判断，安全的操作自动执行"),
-    Mode("plan", "计划模式", "只读，先给出计划"),
+    Mode("default", "逐项确认", "ask", "编辑文件和运行命令前都先问你"),
+    Mode("accept-edits", "自动接受编辑", "edits", "编辑文件自动通过，命令仍需确认"),
+    Mode("auto", "自动", "auto", "由 Antigravity 判断，安全的操作自动执行"),
+    Mode("plan", "计划模式", "readonly", "只读，先给出计划"),
 ]
 MODE_NAMES = {m.id: m.name for m in MODES} | {"accept_edits": "自动接受编辑", "acceptEdits": "自动接受编辑"}
 
@@ -31,6 +31,7 @@ class AntigravityDriver(AcpDriver):
     def __init__(self, *, agy: str = "agy", api: str | None = None, **kwargs: Any) -> None:
         super().__init__(argv=[agy, "acp", "--disable-telemetry"], **kwargs)
         self.api = api or "gemini:subscription"
+        self.mode = self.mode or "default"
 
     def mode_name(self, mode: dict[str, Any]) -> str:
         return MODE_NAMES.get(str(mode.get("id")), super().mode_name(mode))

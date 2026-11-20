@@ -112,7 +112,7 @@
   <li>A message sent while Codex works joins the turn in progress; DeepSeek Harness, Gemini CLI and Antigravity take it after the turn ends.</li>
   <li>Codex's and Gemini CLI's permission cards have one more button, "Allow for this session".</li>
   <li>DeepSeek Harness replies appear a step at a time rather than word by word, and interrupting restarts its process on the same session. Changing its model or reasoning effort restarts it too: right away when idle, after the turn when working.</li>
-  <li>There are no slash commands, subagent lists, forking or "Keep running". "Copy terminal resume command" gives <code>codex resume</code>, <code>dsh tui --resume</code> or <code>agy --conversation</code> (Gemini CLI has no command to resume by session id).</li>
+  <li>Slash commands: <code>/compact</code> compacts the conversation in every tool, each its own way (Gemini CLI has no compaction command in this mode and says so); typing <code>/</code> also lists the tool's own commands. Forking and "Keep running" work too; only Claude Code has subagent lists. "Copy terminal resume command" gives <code>codex resume</code>, <code>dsh tui --resume</code> or <code>agy --conversation</code> (Gemini CLI has no command to resume by session id).</li>
 </ul>
 
 <h2 id="apis">Model APIs and subscriptions</h2>
@@ -131,8 +131,9 @@
 <h3 id="handoff">Continue in another tool</h3>
 <p>"转到其他工具继续" in the session menu hands the conversation to another tool while it stays one session in the web app: the earlier conversation is still shown, then a "从这里起改用 … 继续" line, then the new tool's replies; the session list keeps one entry, and the old link leads here. The new tool gets a rewritten history: thinking is not carried over, and tool calls and results are kept as text excerpts, so it looks files up or reruns commands when it needs details.</p>
 <ul>
-  <li>Claude Code, Codex, DeepSeek Harness: the history is written into their own records (a Claude Code transcript, Codex's <code>thread/inject_items</code>, a DeepSeek Harness session log) and the conversation simply goes on.</li>
-  <li>Gemini CLI, Antigravity: there is nothing to write into, so the history goes in front of the first message you send there.</li>
+  <li>Claude Code, Codex: the history is written into their own records (a Claude Code transcript, Codex's <code>thread/inject_items</code>) and the conversation simply goes on.</li>
+  <li>DeepSeek Harness, Gemini CLI, Antigravity: the history goes in front of the first message you send there.</li>
+  <li>Permission modes map by tier (read only, ask each time, accept edits, auto, never ask): the new session takes the target tool's mode of the same tier (or the nearest, more careful one).</li>
   <li>For a long conversation only what follows its last compaction is handed over (the summary and what came after); if that is still too long and it was a Claude Code session, it is compacted first. If it still does not fit, only the latest part goes, with the location of the full record.</li>
 </ul>
 

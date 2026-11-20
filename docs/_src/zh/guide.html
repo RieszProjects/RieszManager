@@ -77,7 +77,7 @@
   <li>Codex工作时发出的消息会并入正在进行的这一轮；DeepSeek Harness、Gemini CLI和Antigravity则排到这一轮结束之后。</li>
   <li>Codex和Gemini CLI的确认卡片多一个「允许，本会话不再询问」。</li>
   <li>DeepSeek Harness的回复是一步一整段出现的，不会逐字显示；中断时它会重启进程再接着这个会话。换模型或推理强度也要重启：空闲时马上换，正在工作时等这一轮结束。</li>
-  <li>没有斜杠命令、子代理列表、分叉和「保持运行」。「复制终端恢复命令」给出的是<code>codex resume</code>、<code>dsh tui --resume</code>或<code>agy --conversation</code>（Gemini CLI没有按会话ID恢复的命令）。</li>
+  <li>斜杠命令：<code>/compact</code>在所有工具里都表示压缩对话，各用各的压缩方式（Gemini CLI在这种模式下没有压缩命令，会提示）；输入<code>/</code>还会列出这个工具自己的命令。分叉、「保持运行」也都能用；子代理列表只有Claude Code有。「复制终端恢复命令」给出的是<code>codex resume</code>、<code>dsh tui --resume</code>或<code>agy --conversation</code>（Gemini CLI没有按会话ID恢复的命令）。</li>
 </ul>
 
 <h2 id="apis">模型API与订阅</h2>
@@ -96,8 +96,9 @@
 <h3 id="handoff">转到其他工具继续</h3>
 <p>会话菜单里的「转到其他工具继续」把这段对话交给另一个工具接着做，界面上还是同一个会话：原来的对话照常显示，中间一条「从这里起改用 …… 继续」，后面接着新工具的回复；会话列表里只留一个，打开旧链接也会跳到这里。交给新工具的是改写过的历史：思考过程不转，工具调用和结果只保留文字摘录，需要细节时新工具会重新查看文件或运行命令。</p>
 <ul>
-  <li>Claude Code、Codex、DeepSeek Harness：历史写进它们自己的记录（Claude Code的会话记录、Codex的<code>thread/inject_items</code>、DeepSeek Harness的会话日志），之后照常接着聊。</li>
-  <li>Gemini CLI、Antigravity：没有可以写入的地方，历史放在你转过去后发的第一条消息前面一起交给它。</li>
+  <li>Claude Code、Codex：历史写进它们自己的记录（Claude Code的会话记录、Codex的<code>thread/inject_items</code>），之后照常接着聊。</li>
+  <li>DeepSeek Harness、Gemini CLI、Antigravity：历史放在你转过去后发的第一条消息前面一起交给它。</li>
+  <li>权限模式按「档位」对应：只读、每次都问、自动接受编辑、自动、完全不问，转过去后用目标工具里同一档的模式（没有完全对应的，取最接近而偏保守的那个）。</li>
   <li>对话很长时，只交接最后一次压缩之后的部分（压缩摘要加之后的对话）；还是太长、而原来是Claude Code会话的话，会先让它压缩一次。再放不下就只交最近的部分，并告诉新工具完整记录文件的位置。</li>
 </ul>
 

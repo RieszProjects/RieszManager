@@ -24,6 +24,7 @@ from .subagents import SubagentStore
 from .usage import UsageMonitor
 from .attention import LONG_TURN_SECONDS, describe_request, session_title
 from .store import SessionStore
+from .harnesses import HARNESSES
 from .harnesses import Harnesses
 from .credentials import CredentialError, Credentials
 from . import routes
@@ -734,16 +735,38 @@ class Hub:
                 return
         raise ControlError("compacting the conversation took too long; try again later")
 
+    def _mode_tier(self, session_id: str, summary: dict[str, Any]) -> str:
+        """The tier (modes.py) of the mode a session uses now."""
+        from .modes import CLAUDE_TIERS
+        if not self.harnesses.has(session_id):
+            return CLAUDE_TIERS.get(summary.get("permissionMode") or "default", "ask")
+        driver = self.harnesses.drivers.get(session_id)
+        rec = self.harnesses.records[session_id]
+        listed = driver.modes() if driver is not None and driver.alive else \
+            HARNESSES[rec["harness"]].driver(cwd="/", sink=None).modes()
+        return next((m.tier for m in listed if m.id == rec.get("mode")), "ask")
+
+    def _closest_mode(self, target: str, tier: str) -> str | None:
+        """The mode of `target` its table names for this tier (Claude Code's bypass only where allowed)."""
+        from .modes import CLAUDE_MODE_TABLE
+        if target != "claude":
+            return HARNESSES[target].modes.get(tier)
+        mode = CLAUDE_MODE_TABLE.get(tier)
+        return CLAUDE_MODE_TABLE["auto"] if mode == "bypassPermissions" and not self.cfg.allow_bypass else mode
+
     async def handoff(self, session_id: str, target: str, *, api: str | None = None, model: str | None = None,
-                      mode: str | None = None) -> str:
-        """Continue a session in another harness (handoff.py); returns the session that now carries it on."""
+                      mode: str | None = None, fork: bool = False) -> str:
+        """Continue a session in another harness (handoff.py); returns the session that now carries it on.
+        `fork`: a copy in the same harness instead, the source going on as it was."""
         from . import handoff
         if target not in handoff.TARGETS:
             raise ControlError(f"a conversation cannot be moved to {target}")
         summary = self.session_summary(session_id)
         source = summary.get("harness") or "claude"
-        if source == target:
+        if source == target and not fork:
             raise ControlError("the session already runs there")
+        if mode is None:                                  # the nearest to the mode it had (modes.py tables)
+            mode = self._closest_mode(target, self._mode_tier(session_id, summary))
         cwd = summary.get("cwd")
         if not cwd or not Path(cwd).is_dir():
             raise ControlError("the session's working directory no longer exists")
@@ -762,7 +785,7 @@ class Hub:
         msgs = handoff.fit(msgs, handoff.BUDGET_CHARS, str(record))
         head = handoff.preface(source, summary.get("model"))
         title = summary.get("customTitle") or summary.get("title") or summary.get("firstPrompt")
-        shown = handoff.display_items(items, session_id, target)
+        shown = handoff.display_items(items, session_id, target, fork=fork)
 
         if target == "claude":
             setup = await self.claude_setup(api)
@@ -774,18 +797,12 @@ class Hub:
             self.store.refresh()
             self.prefs.remember(new_id, api=setup.route, handoffFrom=session_id)
             await self.ensure_process(new_id, model=model, permission_mode=mode)
-        elif target == "codex":
+        elif HARNESSES[target].handoff == "inject-responses":
             driver = await self.harnesses.create(target, cwd, model=model, mode=mode, api=api)
             new_id = str(driver.session_id)
             msgs[0] = {**msgs[0], "text": head + "\n\n" + msgs[0]["text"]}
             await driver.peer.request("thread/inject_items", {"threadId": new_id, "items": handoff.responses_items(msgs)},
                                       timeout=120)
-            await self.harnesses.set_imported(new_id, shown, session_id, title)
-        elif target == "dsh":
-            new_id = str(uuidlib.uuid4())
-            from .drivers.dsh import dsh_home
-            await asyncio.to_thread(handoff.write_dsh_seed, dsh_home(None), cwd, new_id, handoff.history_text(msgs, head))
-            await self.harnesses.create(target, cwd, model=model, mode=mode, api=api, session_id=new_id)
             await self.harnesses.set_imported(new_id, shown, session_id, title)
         else:
             # Nothing to write into: the history goes in front of the first message sent there.
@@ -793,8 +810,10 @@ class Hub:
             new_id = str(driver.session_id)
             await self.harnesses.set_imported(new_id, shown, session_id, title, pending=handoff.history_text(msgs, head))
 
-        # One session for the user: the source steps aside and points to the new one.
-        if self.harnesses.has(session_id):
+        # One session for the user: the source steps aside and points to the new one (a fork leaves it be).
+        if fork:
+            pass
+        elif self.harnesses.has(session_id):
             self.harnesses.records[session_id]["handedOffTo"] = new_id
             self.harnesses._save()
         else:

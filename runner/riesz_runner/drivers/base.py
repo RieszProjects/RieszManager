@@ -62,12 +62,38 @@ def _camel(name: str) -> str:
     return head + "".join(part.title() for part in rest)
 
 
+# Slash commands every harness offers under one name, each run its own way. Every harness says how
+# for each of them in HarnessSpec.commands (harnesses.py), with one of:
+#   "/<command>"           its own slash command, sent as typed (checked to do this);
+#   "offered:/<command>"   the same, when the harness lists that command (agents that report their commands);
+#   "method:<name>"        a method of its driver, called with the arguments;
+#   "none:<why>"           it has nothing that does this (the reason is shown when someone tries).
+UNIVERSAL_COMMANDS: dict[str, str] = {
+    "compact": "压缩对话上下文（用这个工具自己的压缩方式）",
+}
+
+
+def command(name: str, description: str, hint: str = "", builtin: bool = False) -> dict[str, Any]:
+    """A slash command as the composer lists it."""
+    return {"name": name, "description": description, "argumentHint": hint, "builtin": builtin}
+
+
+def universal_commands() -> list[dict[str, Any]]:
+    return [command(name, text, builtin=True) for name, text in UNIVERSAL_COMMANDS.items()]
+
+
 @dataclass
 class Mode:
-    """A permission mode as the harness defines it."""
+    """A permission mode as the harness defines it, and its tier (modes.py) for moving between harnesses."""
     id: str
     name: str
+    tier: str              # one of modes.TIERS: readonly, ask, edits, auto, full
     description: str = ""
+
+    def __post_init__(self) -> None:
+        from ..modes import TIERS
+        if self.tier not in TIERS:
+            raise ValueError(f"mode {self.id}: tier {self.tier!r} is not one of {TIERS}")
 
 
 def iso(ts: float | None = None) -> str:
@@ -237,6 +263,18 @@ class Driver:
         return []
 
     def modes(self) -> list[Mode]:
+        return []
+
+    # ---- slash commands ----------------------------------------------------------------
+
+    def commands(self) -> list[dict[str, Any]]:
+        """The composer's slash commands: the universal ones, then the harness's own."""
+        universal = universal_commands()
+        own = [c for c in self.native_commands() if c["name"] not in UNIVERSAL_COMMANDS]
+        return universal + own
+
+    def native_commands(self) -> list[dict[str, Any]]:
+        """The harness's own slash commands (sent to it as they are typed)."""
         return []
 
     async def stop(self) -> None:

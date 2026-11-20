@@ -33,6 +33,7 @@ from typing import Any
 
 from .base import (
     Capabilities,
+    command,
     Driver,
     Mode,
     assistant_item,
@@ -57,9 +58,9 @@ FALLBACK_MODELS = [
     {"value": "deepseek-flash", "displayName": "DeepSeek V4.1 Flash", "supportedEffortLevels": EFFORTS},
 ]
 MODES = [
-    Mode("read-only", "只读", "只能读文件；要写文件时先问你"),
-    Mode("workspace-write", "工作区可写", "可以改工作区里的文件、运行命令；超出工作区时先问你"),
-    Mode("danger-full-access", "完全访问", "不受沙箱限制"),
+    Mode("read-only", "只读", "readonly", "只能读文件；要写文件时先问你"),
+    Mode("workspace-write", "工作区可写", "auto", "可以改工作区里的文件、运行命令；超出工作区时先问你"),
+    Mode("danger-full-access", "完全访问", "full", "不受沙箱限制"),
 ]
 DEFAULT_MODE = "workspace-write"
 QUIET_COMMANDS = {"permission"}
@@ -353,6 +354,12 @@ class DshDriver(Driver):
         result = self.turn_finished("interrupted", stop_reason="interrupted")
         await self.emit({"ev": "result", "result": result, "text": self.last_assistant_text()[:400]})
         await self.emit_state()
+
+    def native_commands(self) -> list[dict[str, Any]]:
+        # What dsh's SDK recognises besides /compact (/permission is the mode picker's).
+        return [command("plan", "进入计划模式；/plan off 退出，/plan <内容> 进入后提交内容", "[off|内容]"),
+                command("goal", "设定目标并自动连续推进到完成；也可 clear、edit <目标>、pause、resume",
+                        "<目标>|clear|edit <目标>|pause|resume")]
 
     async def set_mode(self, mode: str) -> None:
         if mode not in {m.id for m in MODES}:

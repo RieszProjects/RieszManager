@@ -102,17 +102,6 @@ class PlainHistoryTest(unittest.TestCase):
         items = [{"kind": "user", "text": "old"}, {"kind": "compact", "summary": "摘要"}, {"kind": "user", "text": "new"}]
         self.assertEqual([i.get("text") for i in handoff.since_last_compaction(items)], [None, "new"])
 
-    def test_dsh_seed_log(self):
-        import subprocess
-        home = Path(tempfile.mkdtemp())
-        path = handoff.write_dsh_seed(home, "/w/proj", "sid-1", "历史")
-        self.assertEqual(path.parent.parent.name, "--w-proj--")
-        lines = subprocess.run(["zstd", "-dc", str(path)], capture_output=True, check=True).stdout.decode().splitlines()
-        records = [json.loads(x) for x in lines]
-        self.assertEqual(records[0]["type"], "session")
-        self.assertEqual([r["type"] for r in records[1:]], ["turn/start", "step/start", "user/message", "step/end", "turn/end"])
-        self.assertEqual(records[3]["data"]["content"][0]["text"], "历史")
-
 
 if __name__ == "__main__":
     unittest.main()

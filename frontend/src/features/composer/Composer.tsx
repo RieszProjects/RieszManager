@@ -72,7 +72,7 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
   const ta = useRef<HTMLTextAreaElement>(null);
   const attachments = useAttachments();
   const history = usePromptHistory(projectId);
-  const { commands, models: sessionModels, defaults, routes: sessionRoutes } = useCommands(sessionId, projectId);
+  const { commands: sessionCommands, models: sessionModels, defaults, routes: sessionRoutes } = useCommands(sessionId, projectId);
 
   // Which harness runs the session: Claude Code, or another one (Codex, DeepSeek Harness), picked for a new session.
   const harnesses = useHarnesses();
@@ -88,10 +88,12 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
   const routes = !sessionId && other ? newSessionRoutes : sessionRoutes;
   const route = (sessionId ? state?.api ?? knownApi : localRoute) ?? defaultRoute(routes);
   const currentRoute = routes.find((r) => r.id === route);
-  const nativeProvider = ({ codex: "openai", dsh: "deepseek", gemini: "gemini", antigravity: "gemini" } as Record<string, string>)[harness] ?? "anthropic";
+  const nativeProvider = info?.nativeProvider ?? "anthropic";
   const nativeRoute = !currentRoute || currentRoute.provider === nativeProvider;
   const models = currentRoute?.models?.length ? currentRoute.models : !sessionId && other ? [] : sessionModels;
   const routeLocked = Boolean(sessionId) && state?.capabilities?.apiSwitch === false;
+  // Slash commands: the session's own list, or (a new session of another harness) the ones it offers.
+  const commands = !sessionId && other ? info?.commands ?? [] : sessionCommands;
 
   const hosted = Boolean(state?.hosted && state.alive);
   const external = Boolean(state?.external && state.alive && !hosted);
@@ -171,7 +173,7 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
   if (dropRef) dropRef.current = (files) => void attachments.add(files);
 
   // ---- suggestions -----------------------------------------------------------
-  const slash = other ? null : slashToken(text, caret);
+  const slash = slashToken(text, caret);
   const mention = slash === null ? mentionToken(text, caret) : null;
 
   const slashItems = useMemo<Suggestion[]>(() => {
@@ -465,7 +467,7 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
     : busy
       ? "继续输入，消息会在合适时机送达…"
       : other
-        ? sessionId ? `给 ${harnessLabel(harness)} 发消息，@ 引用文件` : "描述你想做的事，@ 引用文件"
+        ? sessionId ? `给 ${harnessLabel(harness)} 发消息，/ 打开命令，@ 引用文件` : "描述你想做的事，/ 打开命令，@ 引用文件"
         : "给 Claude 发消息，/ 打开命令，@ 引用文件";
 
   const chips = (

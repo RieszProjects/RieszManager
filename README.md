@@ -103,6 +103,8 @@ $EDITOR .env                 # 至少设置 WORKSPACE_ROOT 和 RIESZ_PUBLIC_ORIG
 
 ## 开发
 
+接入新的 agent（harness）要走的完整流程见 [`runner/riesz_runner/drivers/README.md`](runner/riesz_runner/drivers/README.md)；`runner/tests/test_conformance.py` 会检查每个已登记的 harness 有没有走完。
+
 文档站的页面正文在 `docs/_src/zh/` 和 `docs/_src/en/`，修改后执行 `python3 docs/_src/build.py` 重新生成 `docs/` 下的页面。
 
 三个部分各开一个终端，在仓库根目录下执行：

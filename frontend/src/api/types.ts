@@ -273,6 +273,15 @@ export interface HarnessMode {
 export interface HarnessInfo {
   id: string;
   name: string;
+  /** Short name for tags. */
+  label?: string;
+  /** The provider of its own route ("openai" for Codex). */
+  nativeProvider?: string;
+  /** Terminal command to continue a session, "{id}" for its id; null: none. */
+  resumeCommand?: string | null;
+  fork?: "native" | "copy";
+  /** Its slash commands before a session exists (the universal ones it can do). */
+  commands?: SlashCommand[];
   available: boolean;
   reason: string | null;
   /** Claude Code's entry has none of these: the composer knows its modes and models. */
