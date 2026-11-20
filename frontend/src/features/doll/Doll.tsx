@@ -90,21 +90,20 @@ function randomReaction(): Expression {
   return lastReaction;
 }
 
-/** The models a window is for ("Fable", "Gemini 模型"), or null for the plan's general one. */
-function scopeOf(w: UsageWindow): string | null {
-  const scope = /\(([^)]+)\)/.exec(w.label)?.[1];
-  return scope && !/all models/i.test(scope) ? scope : null;
-}
-
-/** The main models' windows (the first window's) get a meter; the others one short line each. */
-function WindowRows({ windows }: { windows: UsageWindow[] }) {
-  const main = scopeOf(windows[0]);
-  const minor = windows.filter((w) => scopeOf(w) !== main);
+/** A quota's windows: with meters for the one in use, one short line each for the others. */
+function WindowRows({ windows, compact }: { windows: UsageWindow[]; compact: boolean }) {
   return (
-    <div className="rz-doll-usage">
-      {windows.filter((w) => scopeOf(w) === main).map((w) => {
+    <div className={`rz-doll-usage${compact ? " compact" : ""}`}>
+      {windows.map((w) => {
         const level = w.percent >= 90 ? "high" : w.percent >= 80 ? "mid" : "";
         const reset = resetLabel(w.resetsAt, w.resetText);
+        if (compact)
+          return (
+            <div key={w.label} className={`rz-doll-minor ${level}`} title={reset ? `${reset} 重置` : undefined}>
+              <span>{windowName(w)}</span>
+              <span className="mono">{Math.round(w.percent)}%</span>
+            </div>
+          );
         return (
           <div key={w.label} className={`rz-doll-window ${level}`}>
             <div className="rz-doll-window-head">
@@ -116,21 +115,11 @@ function WindowRows({ windows }: { windows: UsageWindow[] }) {
           </div>
         );
       })}
-      {minor.map((w) => {
-        const level = w.percent >= 90 ? "high" : w.percent >= 80 ? "mid" : "";
-        const reset = resetLabel(w.resetsAt, w.resetText);
-        return (
-          <div key={w.label} className={`rz-doll-minor ${level}`} title={reset ? `${reset} 重置` : undefined}>
-            <span>{windowName(w)}</span>
-            <span className="mono">{Math.round(w.percent)}%</span>
-          </div>
-        );
-      })}
     </div>
   );
 }
 
-/** Every quota alike; the current session's one is marked. */
+/** Every quota alike; the one the open session uses is marked and shown in full, the others briefly. */
 function QuotaRows({ list, current }: { list: Quota[]; current: string | null }) {
   if (!list.length) return <div className="rz-doll-usage dim">没有可查的额度。</div>;
   return (
@@ -150,7 +139,9 @@ function QuotaRows({ list, current }: { list: Quota[]; current: string | null })
               <span className="mono">{q.balances.map(formatBalance).join(" · ") || "—"}</span>
             ) : null}
           </div>
-          {!q.error && q.windows && q.windows.length > 0 && <WindowRows windows={q.windows} />}
+          {!q.error && q.windows && q.windows.length > 0 && (
+            <WindowRows windows={q.windows} compact={current === null || q.route !== current} />
+          )}
         </div>
       ))}
     </div>
@@ -634,7 +625,7 @@ export default function Doll() {
               <div className="rz-doll-line">{bubble.text}</div>
               {(() => {
                 const q = bubble.quota ? list.find((x) => x.id === bubble.quota) : undefined;
-                return q?.windows?.length ? <WindowRows windows={q.windows} /> : null;
+                return q?.windows?.length ? <WindowRows windows={q.windows} compact={false} /> : null;
               })()}
               {bubble.action && (
                 <button type="button" className="rz-doll-action" onClick={() => { bubble.action?.run(); closeBubble(); }}>
