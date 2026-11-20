@@ -798,7 +798,7 @@ def _shown(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     from .handoff import PREFACE_START, strip_history
     out = []
     for it in items:
-        if it.get("kind") == "user" and str(it.get("text") or "").startswith(PREFACE_START):
+        if it.get("kind") == "user" and str(it.get("text") or "").lstrip().startswith(PREFACE_START):
             text = strip_history(it["text"])
             if not text:
                 continue

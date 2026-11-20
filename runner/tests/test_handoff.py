@@ -89,6 +89,9 @@ class PlainHistoryTest(unittest.TestCase):
         self.assertEqual(handoff.strip_history(handoff.history_text(msgs, handoff.preface("codex", None))), "")
         self.assertEqual(handoff.strip_history("普通消息"), "普通消息")
         self.assertEqual(handoff.strip_history(" " + text), "接着做")          # handed back with leading space
+        from riesz_runner.harnesses import _shown
+        shown = _shown([{"kind": "user", "text": "/plan"}, {"kind": "user", "text": " " + text}])
+        self.assertEqual([i["text"] for i in shown], ["/plan", "接着做"])     # what the web app shows
 
     def test_fit_keeps_the_latest(self):
         msgs = [{"role": "user", "text": "a" * 100}, {"role": "assistant", "text": "b" * 100},
