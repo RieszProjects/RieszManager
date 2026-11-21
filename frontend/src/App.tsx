@@ -18,6 +18,7 @@ import { ScheduleDialog } from "@/features/schedules/ScheduleDialog";
 import { startSchedules } from "@/features/schedules/store";
 import { NewSessionDialog } from "@/features/sessions/NewSessionDialog";
 import { RenameDialog } from "@/features/sessions/RenameDialog";
+import { ServerBrowser } from "@/features/browser/ServerBrowser";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
 import { setupPresence } from "@/lib/presence";
 import { syncPush } from "@/lib/push";
@@ -105,6 +106,7 @@ export function App() {
       <ImageViewer />
       <SubagentViewer />
       <ScheduleDialog />
+      <ServerBrowser />
       <SettingsDialog />
       <NewSessionDialog />
       <NewProjectDialog />

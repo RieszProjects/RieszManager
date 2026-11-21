@@ -1285,6 +1285,70 @@ async def harness_models(request: web.Request) -> web.Response:
     return _json({"models": await request.app[HUB].harnesses.models(harness=harness, route=route)})
 
 
+# ---- server browser (browser.py) ----------------------------------------------
+
+async def browser_status(request: web.Request) -> web.Response:
+    return _json(await request.app[HUB].browser.status())
+
+
+async def browser_start(request: web.Request) -> web.Response:
+    browser = request.app[HUB].browser
+    try:
+        await browser.ensure_running()
+    except RuntimeError as exc:
+        return _err(503, str(exc))
+    return _json(await browser.status())
+
+
+async def browser_stop(request: web.Request) -> web.Response:
+    browser = request.app[HUB].browser
+    await browser.stop()
+    return _json(await browser.status())
+
+
+async def browser_new_tab(request: web.Request) -> web.Response:
+    browser = request.app[HUB].browser
+    body = await _body(request) if request.can_read_body else {}
+    try:
+        tab = await browser.new_tab(str(body.get("url") or "about:blank"))
+    except RuntimeError as exc:
+        return _err(503, str(exc))
+    return _json({"tab": tab, "tabs": await browser.list_tabs()})
+
+
+async def browser_tab_action(request: web.Request) -> web.Response:
+    browser = request.app[HUB].browser
+    tid = request.match_info["tid"]
+    action = request.match_info["action"]
+    try:
+        if action == "activate":
+            await browser.activate_tab(tid)
+        elif action == "close":
+            await browser.close_tab(tid)
+        else:
+            return _err(404, "unknown action")
+    except RuntimeError as exc:
+        return _err(400, str(exc))
+    return _json({"tabs": await browser.list_tabs()})
+
+
+async def browser_ws(request: web.Request) -> web.WebSocketResponse:
+    browser = request.app[HUB].browser
+    ws = web.WebSocketResponse(heartbeat=25, max_msg_size=16 * 1024 * 1024)
+    await ws.prepare(request)
+    try:
+        await browser.bridge_ws(ws, request.query.get("target") or None)
+    except RuntimeError as exc:
+        with contextlib.suppress(Exception):
+            await ws.send_str(json.dumps({"ev": "error", "message": str(exc)}))
+    except Exception:  # noqa: BLE001
+        log.exception("browser websocket bridge failed")
+    finally:
+        with contextlib.suppress(Exception):
+            await ws.close()
+    return ws
+
+
 # ---- app ---------------------------------------------------------------------
 
 def build_app(cfg: Config) -> web.Application:
@@ -1362,6 +1426,12 @@ def build_app(cfg: Config) -> web.Application:
     r.add_post("/v1/uploads", upload)
     r.add_get("/v1/uploads/{uid}", upload_raw)
     r.add_get("/v1/ws", websocket)
+    r.add_get("/v1/browser/status", browser_status)
+    r.add_post("/v1/browser/start", browser_start)
+    r.add_post("/v1/browser/stop", browser_stop)
+    r.add_post("/v1/browser/tabs", browser_new_tab)
+    r.add_post(r"/v1/browser/tabs/{tid:[A-Za-z0-9_-]{1,128}}/{action:activate|close}", browser_tab_action)
+    r.add_get("/v1/browser/ws", browser_ws)
     r.add_get("/v1/harnesses", harnesses)
     r.add_get("/v1/credentials", credentials)
     r.add_post(r"/v1/credentials/{provider:[a-z]{1,16}}/{action:set|test|clear}", credential_action)

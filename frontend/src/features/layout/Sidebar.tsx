@@ -1,6 +1,6 @@
 /** Left sidebar: brand, new-session entry, search, recent sessions and projects. */
 import { IconButton, InputBase, Tooltip } from "@mui/material";
-import { PanelLeftClose, Plus, Search, Settings, Wifi, WifiOff } from "lucide-react";
+import { Globe, PanelLeftClose, Plus, Search, Settings, Wifi, WifiOff } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { SessionSummary } from "@/api/types";
 import { Mascot } from "@/components/Mascot";
@@ -83,6 +83,7 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
   const route = useUi((s) => s.route);
   const setNewSessionOpen = useUi((s) => s.setNewSessionOpen);
   const setSettingsOpen = useUi((s) => s.setSettingsOpen);
+  const setBrowserOpen = useUi((s) => s.setBrowserOpen);
   const socketState = useApp((s) => s.socketState);
   const runnerOnline = useApp((s) => s.runnerOnline);
   const reload = useApp((s) => s.reload);
@@ -128,6 +129,9 @@ export function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
         </Tooltip>
         {online && reload && <ReloadWait reload={reload} />}
         <div className="rz-spacer" />
+        <Tooltip title="服务器浏览器">
+          <IconButton size="small" onClick={() => setBrowserOpen(true)}><Globe size={17} /></IconButton>
+        </Tooltip>
         <Tooltip title="设置">
           <IconButton size="small" onClick={() => setSettingsOpen(true)}><Settings size={17} /></IconButton>
         </Tooltip>

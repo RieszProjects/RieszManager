@@ -68,6 +68,7 @@ interface UiStore {
   scheduleSession: string | null;
   gallery: ImageGallery | null;
   settingsOpen: boolean;
+  browserOpen: boolean;
   newSessionOpen: boolean;
   newProjectOpen: boolean;
   renameTarget: { sessionId: string; title: string } | null;
@@ -90,6 +91,7 @@ interface UiStore {
   setScheduleSession: (sessionId: string | null) => void;
   openGallery: (gallery: ImageGallery | null) => void;
   setSettingsOpen: (open: boolean) => void;
+  setBrowserOpen: (open: boolean) => void;
   setNewSessionOpen: (open: boolean) => void;
   setNewProjectOpen: (open: boolean) => void;
   setRenameTarget: (target: UiStore["renameTarget"]) => void;
@@ -114,6 +116,7 @@ export const useUi = create<UiStore>((set) => ({
   scheduleSession: null,
   gallery: null,
   settingsOpen: false,
+  browserOpen: false,
   newSessionOpen: false,
   newProjectOpen: false,
   renameTarget: null,
@@ -149,6 +152,7 @@ export const useUi = create<UiStore>((set) => ({
   setScheduleSession: (scheduleSession) => set({ scheduleSession }),
   openGallery: (gallery) => set({ gallery }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+  setBrowserOpen: (browserOpen) => set({ browserOpen }),
   setNewSessionOpen: (newSessionOpen) => set({ newSessionOpen }),
   setNewProjectOpen: (newProjectOpen) => set({ newProjectOpen }),
   setRenameTarget: (renameTarget) => set({ renameTarget }),

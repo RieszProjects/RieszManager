@@ -98,7 +98,8 @@ class ConformanceTest(unittest.TestCase):
                 for part in (server.name, server.command, *server.args):
                     self.assertIn(json.dumps(part)[1:-1], mounted, "the mount names the server, its command and arguments")
                 source = "".join(inspect.getsource(c) for c in spec.driver.__mro__ if issubclass(c, Driver) and c is not Driver)
-                self.assertIn("self.tools", source, "start() uses the mount (tests/test_tools.py checks how)")
+                self.assertTrue("self.tools" in source or "self.all_tools" in source,
+                                "start() uses the mount (tests/test_tools.py checks how)")
 
     def test_tests_and_docs(self):
         guide = {lang: (ROOT / f"docs/_src/{lang}/guide.html").read_text(encoding="utf-8") for lang in ("zh", "en")}

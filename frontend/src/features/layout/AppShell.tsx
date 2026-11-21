@@ -1,6 +1,6 @@
 /** Responsive three-pane layout. On phones the side panes become swipeable drawers. */
 import { Drawer, IconButton, Tooltip } from "@mui/material";
-import { PanelLeftOpen, Plus, Settings } from "lucide-react";
+import { Globe, PanelLeftOpen, Plus, Settings } from "lucide-react";
 import type { ReactNode } from "react";
 import { Mascot } from "@/components/Mascot";
 import { useIsMobile, useIsWide } from "@/lib/useIsMobile";
@@ -14,6 +14,7 @@ function Rail() {
   const toggle = useUi((s) => s.toggleDesktopLeft);
   const setNewSessionOpen = useUi((s) => s.setNewSessionOpen);
   const setSettingsOpen = useUi((s) => s.setSettingsOpen);
+  const setBrowserOpen = useUi((s) => s.setBrowserOpen);
   const navigate = useUi((s) => s.navigate);
   return (
     <div className="rz-rail">
@@ -21,6 +22,7 @@ function Rail() {
       <Tooltip title="展开侧栏" placement="right"><IconButton size="small" onClick={toggle}><PanelLeftOpen size={18} /></IconButton></Tooltip>
       <Tooltip title="新会话" placement="right"><IconButton size="small" onClick={() => setNewSessionOpen(true)}><Plus size={18} /></IconButton></Tooltip>
       <div className="rz-spacer" />
+      <Tooltip title="服务器浏览器" placement="right"><IconButton size="small" onClick={() => setBrowserOpen(true)}><Globe size={17} /></IconButton></Tooltip>
       <Tooltip title="设置" placement="right"><IconButton size="small" onClick={() => setSettingsOpen(true)}><Settings size={17} /></IconButton></Tooltip>
     </div>
   );

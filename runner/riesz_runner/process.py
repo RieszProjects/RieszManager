@@ -42,9 +42,9 @@ class ControlError(RuntimeError):
     pass
 
 
-def claude_mcp_config(server: ToolServer) -> dict[str, Any]:
+def claude_mcp_config(*servers: ToolServer) -> dict[str, Any]:
     """Claude Code's --mcp-config for Riesz Manager's tools (added to the user's own MCP servers)."""
-    return {"mcpServers": {server.name: {"type": "stdio", **server.stdio()}}}
+    return {"mcpServers": {s.name: {"type": "stdio", **s.stdio()} for s in servers}}
 
 
 class ClaudeProcess:
@@ -64,10 +64,12 @@ class ClaudeProcess:
         sink: EventSink,
         api: ClaudeSetup | None = None,
         tools: ToolServer | None = None,
+        extra_tools: tuple[ToolServer, ...] = (),
         browser: bool = False,
     ) -> None:
         self.cfg = cfg
         self.tools = tools              # Riesz Manager's own tools (tools.py), as an MCP server
+        self.extra_tools = tuple(extra_tools)
         # A browser task (tools.py: browser_task): Claude in Chrome on, its tools allowed without asking (the
         # extension still asks per site); everything else asks as in the session's mode.
         self.browser = browser
@@ -147,8 +149,9 @@ class ClaudeProcess:
         flags = self.flag_settings()
         if flags:
             args += ["--settings", json.dumps(flags)]
-        if self.tools is not None:
-            args += ["--mcp-config", json.dumps(claude_mcp_config(self.tools))]
+        mcp_servers = [s for s in (self.tools, *self.extra_tools) if s is not None]
+        if mcp_servers:
+            args += ["--mcp-config", json.dumps(claude_mcp_config(*mcp_servers))]
         args += self.cfg.extra_args
         if self.cfg.login_shell:
             shell = os.environ.get("SHELL") or "/bin/bash"

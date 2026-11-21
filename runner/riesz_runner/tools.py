@@ -37,7 +37,8 @@ if TYPE_CHECKING:
 
 SERVER_NAME = "riesz"
 INSTRUCTIONS = ("Riesz Manager 托管着这个会话。这里的工具可以定时唤醒本会话（到点给它发一条消息，重启后也有效）、"
-                "给别的会话发消息、开新会话、查看别的会话的状态和回复。")
+                "给别的会话发消息、开新会话、查看别的会话的状态和回复、把文件发给用户。"
+                "如果同时挂载了 `browser`（chrome-devtools-mcp）服务器，操作服务器浏览器请直接用它，无需走 browser_task。")
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 DAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 MIN_PREFIX = 6

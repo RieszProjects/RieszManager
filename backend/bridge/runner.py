@@ -42,8 +42,8 @@ async def request(method: str, path: str, *, params: Any = None, json: Any = Non
         raise RunnerUnavailable(str(exc)) from exc
 
 
-async def ws_connect() -> aiohttp.ClientWebSocketResponse:
+async def ws_connect(path: str = "/v1/ws", *, params: Any = None) -> aiohttp.ClientWebSocketResponse:
     try:
-        return await session().ws_connect(BASE + "/v1/ws", heartbeat=30, max_msg_size=64 * 1024 * 1024)
+        return await session().ws_connect(BASE + path, params=params, heartbeat=30, max_msg_size=64 * 1024 * 1024)
     except (aiohttp.ClientConnectionError, FileNotFoundError, ConnectionRefusedError) as exc:
         raise RunnerUnavailable(str(exc)) from exc

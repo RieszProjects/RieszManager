@@ -21,6 +21,7 @@ from .projects import ProjectResolver
 from .session_prefs import SessionPrefs
 from .auto_resume import AutoResume
 from .balances import BalanceMonitor
+from .browser import ServerBrowser, mcp_server as browser_mcp_server
 from .limits import Limits
 from .shares import Shares
 from .schedules import Scheduler
@@ -90,6 +91,9 @@ class Hub:
         self.balances.credentials = self.credentials
         # Sessions of other harnesses (Codex, DeepSeek Harness): see harnesses.py.
         self.tool_server = tools_server(cfg)       # Riesz Manager's own tools, for every harness (tools.py)
+        self.browser = ServerBrowser(cfg)          # persistent server-side Chrome (browser.py)
+        browser_mcp = browser_mcp_server(cfg)
+        self.extra_tools = (browser_mcp,) if browser_mcp is not None else ()
         self.harnesses = Harnesses(self)
         self.shares = Shares(cfg.state_dir)        # files agents sent to the user (shares.py)
         self.limits = Limits(self)               # other subscriptions' usage limits (limits.py)
@@ -112,6 +116,8 @@ class Hub:
             asyncio.create_task(self._keep_alive_loop()),
             asyncio.create_task(self.harnesses.loop()),
         ]
+        if self.browser.available and self.extra_tools:
+            self._tasks.append(asyncio.create_task(self.browser.start_background()))
 
     # ---- graceful reload ------------------------------------------------------
 
@@ -162,7 +168,8 @@ class Hub:
         self.closing = True
         for task in self._tasks:
             task.cancel()
-        await asyncio.gather(*(p.stop() for p in list(self.hosted.values())), self.harnesses.close(), return_exceptions=True)
+        await asyncio.gather(*(p.stop() for p in list(self.hosted.values())), self.harnesses.close(),
+                             self.browser.stop(), return_exceptions=True)
 
     # ---- subscriptions ------------------------------------------------------
 
@@ -619,6 +626,7 @@ class Hub:
                 effort=effort or last_effort,
                 sink=self._sink,
                 tools=self.tool_server,
+                extra_tools=self.extra_tools,
                 api=await self.claude_setup(route),
                 browser=bool((self.prefs.get(session_id) or {}).get("browser")),
             )
@@ -657,6 +665,7 @@ class Hub:
             effort=effort,
             sink=self._sink,
             tools=self.tool_server,
+            extra_tools=self.extra_tools,
             api=setup,
             browser=browser,
         )
@@ -691,6 +700,7 @@ class Hub:
             effort=self.resume_effort(session_id),
             sink=self._sink,
             tools=self.tool_server,
+            extra_tools=self.extra_tools,
             api=setup,
         )
         self.hosted[new_id] = proc

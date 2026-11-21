@@ -209,8 +209,8 @@ class CodexDriver(Driver):
         env = dict(self.env if self.env is not None else os.environ)
         env.pop("RUNNER_TOKEN", None)
         provider, extra = codex_provider(self.api)
-        if self.tools is not None:
-            extra = [*extra, *self.mount_tools(self.tools)]
+        for server in self.all_tools:
+            extra = [*extra, *self.mount_tools(server)]
         self.peer = JsonRpcPeer([self.codex, "app-server", *extra], cwd=self.cwd, env=env, version=False,
                                 on_notification=self._notification, on_request=self._request, on_exit=self._exited)
         await self.peer.start()

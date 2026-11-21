@@ -115,3 +115,66 @@ class EventsConsumer(AsyncWebsocketConsumer):
                 task.cancel()
         if self.upstream is not None and not self.upstream.closed:
             await self.upstream.close()
+
+
+class BrowserConsumer(AsyncWebsocketConsumer):
+    """Authenticated WebSocket relay for the interactive server-browser CDP viewer."""
+
+    upstream: aiohttp.ClientWebSocketResponse | None = None
+    relay_task: asyncio.Task[Any] | None = None
+    watch_task: asyncio.Task[Any] | None = None
+
+    async def connect(self) -> None:
+        from urllib.parse import parse_qs
+
+        user = self.scope.get("user")
+        if user is None or not user.is_authenticated or not await _totp_ok(user.username):
+            await self.close(code=4401)
+            return
+        qs = parse_qs((self.scope.get("query_string") or b"").decode("utf-8", "ignore"))
+        target = (qs.get("target") or [""])[0]
+        params = {"target": target} if target and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", target) else None
+        try:
+            self.upstream = await runner.ws_connect("/v1/browser/ws", params=params)
+        except runner.RunnerUnavailable:
+            await self.accept()
+            await self.send(text_data=json.dumps({"ev": "error", "message": "宿主机运行器未连接"}))
+            await self.close(code=4503)
+            return
+        await self.accept()
+        self.relay_task = asyncio.create_task(self._relay())
+        self.watch_task = asyncio.create_task(self._watch_session())
+
+    async def _relay(self) -> None:
+        assert self.upstream is not None
+        try:
+            async for msg in self.upstream:
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    await self.send(text_data=msg.data)
+                elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                    break
+        except Exception:  # noqa: BLE001
+            log.exception("browser ws relay failed")
+        finally:
+            await self.close(code=4503)
+
+    async def _watch_session(self) -> None:
+        session = self.scope.get("session")
+        key = getattr(session, "session_key", None)
+        while True:
+            await asyncio.sleep(SESSION_RECHECK_SECONDS)
+            if not await _session_valid(key):
+                await self.close(code=4401)
+                return
+
+    async def receive(self, text_data: str | None = None, bytes_data: bytes | None = None) -> None:
+        if not text_data or self.upstream is None or self.upstream.closed:
+            return
+        await self.upstream.send_str(text_data)
+
+    async def disconnect(self, code: int) -> None:
+        for task in (self.relay_task, self.watch_task):
+            if task is not None:
+                task.cancel()
+        if self.upstream is not None and not self.upstream.closed:
+            await self.upstream.close()

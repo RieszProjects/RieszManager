@@ -284,8 +284,8 @@ class DshDriver(Driver):
 
     async def _spawn(self, *, resume: bool) -> None:
         argv = [self.dsh, "--profile", "sdk", *(["--patch", self.patch] if self.patch else [])]
-        if self.tools is not None:
-            argv += ["--patch", self._tools_patch(self.tools)]
+        for server in self.all_tools:
+            argv += ["--patch", self._tools_patch(server)]
         self.peer = JsonRpcPeer(argv, cwd=self.cwd, env=self._env(), version=True,
                                 on_notification=self._notification, on_request=self._request, on_exit=self._exited)
         await self.peer.start()

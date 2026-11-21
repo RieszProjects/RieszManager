@@ -488,6 +488,8 @@ class Harnesses:
             extra["settings"] = settings_file(self.cfg.state_dir)
         if spec.tools == "mcp":
             extra["tools"] = self.hub.tool_server
+            if self.hub.extra_tools:
+                extra["extra_tools"] = self.hub.extra_tools
         return spec.driver(cwd=cwd, sink=self._sink, session_id=session_id, model=model, effort=effort, mode=mode,
                               env=await self._env(harness, route), **extra)
 

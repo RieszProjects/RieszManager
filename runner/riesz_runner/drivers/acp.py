@@ -137,7 +137,7 @@ class AcpDriver(Driver):
         return [{"name": server.name, **server.stdio(), "env": []}]
 
     def _mcp_servers(self) -> list[dict[str, Any]]:
-        return self.mount_tools(self.tools) if self.tools is not None else []
+        return [entry for server in self.all_tools for entry in self.mount_tools(server)]
 
     # ---- lifecycle --------------------------------------------------------------------
 

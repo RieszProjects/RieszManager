@@ -57,6 +57,10 @@ ROUTES: list[tuple[str, re.Pattern[str], str]] = [
         ("POST", rf"^sessions/(?P<sid>{UUID})/open-file$", "/v1/sessions/{sid}/open-file"),
         ("GET", r"^history$", "/v1/history"),
         ("GET", r"^files/(?P<op>list|content|search)$", "/v1/files/{op}"),
+        ("GET", r"^browser/status$", "/v1/browser/status"),
+        ("POST", r"^browser/(?P<action>start|stop|tabs)$", "/v1/browser/{action}"),
+        ("POST", r"^browser/tabs/(?P<tid>[A-Za-z0-9_-]{1,128})/(?P<action>activate|close)$",
+         "/v1/browser/tabs/{tid}/{action}"),
     ]
 ]
 

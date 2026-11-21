@@ -92,6 +92,13 @@ class Config:
     dsh_bin: str = ""
     gemini_bin: str = ""
     agy_bin: str = ""
+    # Dedicated persistent server-side Chrome (browser.py) + chrome-devtools-mcp mounted into harnesses.
+    browser_enabled: bool = True
+    browser_bin: str = ""
+    browser_port: int = 19222
+    browser_profile: str = ""
+    browser_mcp_bin: str = ""
+    browser_headless: str = "auto"
     extra_args: list[str] = field(default_factory=list)
 
     @property
@@ -117,6 +124,10 @@ class Config:
     @property
     def balances_file(self) -> Path:
         return Path(os.path.expanduser(self.balances_path)) if self.balances_path else self.state_dir / "balances.json"
+
+    @property
+    def browser_profile_dir(self) -> Path:
+        return Path(os.path.expanduser(self.browser_profile)) if self.browser_profile else self.state_dir / "browser-profile"
 
 
 def _state_dir(env: dict[str, str]) -> Path:
@@ -166,5 +177,11 @@ def load_config(env_file: str | None = None) -> Config:
         dsh_bin=env.get("RUNNER_DSH_BIN") or "",
         gemini_bin=env.get("RUNNER_GEMINI_BIN") or "",
         agy_bin=env.get("RUNNER_AGY_BIN") or "",
+        browser_enabled=_bool(env.get("RUNNER_BROWSER_ENABLED"), True),
+        browser_bin=env.get("RUNNER_BROWSER_BIN") or "",
+        browser_port=int(env.get("RUNNER_BROWSER_PORT") or 19222),
+        browser_profile=env.get("RUNNER_BROWSER_PROFILE") or "",
+        browser_mcp_bin=env.get("RUNNER_BROWSER_MCP_BIN") or "",
+        browser_headless=(env.get("RUNNER_BROWSER_HEADLESS") or "auto").strip().lower(),
         extra_args=extra,
     )

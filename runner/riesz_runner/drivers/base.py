@@ -248,9 +248,10 @@ class Driver:
 
     def __init__(self, *, cwd: str, sink: Sink, session_id: str | None = None, model: str | None = None,
                  effort: str | None = None, mode: str | None = None, env: dict[str, str] | None = None,
-                 tools: ToolServer | None = None) -> None:
+                 tools: ToolServer | None = None, extra_tools: tuple[ToolServer, ...] = ()) -> None:
         self.cwd = cwd
         self.tools = tools              # Riesz Manager's tools, mounted in start() through mount_tools()
+        self.extra_tools = tuple(extra_tools)
         self.sink = sink
         self.session_id = session_id
         self.model = model
@@ -385,6 +386,10 @@ class Driver:
     @property
     def pid(self) -> int | None:
         return None
+
+    @property
+    def all_tools(self) -> list[ToolServer]:
+        return [s for s in (self.tools, *self.extra_tools) if s is not None]
 
     def mount_tools(self, server: ToolServer) -> Any:
         """What start() adds to the harness's launch so it starts `server` as an MCP server (its own
