@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import json
 import logging
 import os
 import time
@@ -25,6 +26,7 @@ from typing import Any
 
 from .base import BYPASS, Capabilities, Driver, Mode, ToolServer, most_permissive, assistant_item, command, interrupted_item, notice_item, tool_block, tool_result, user_item
 from .jsonrpc import JsonRpcError, JsonRpcPeer, PeerClosed
+from ..auto_resume import failure_from_text
 
 log = logging.getLogger(__name__)
 
@@ -237,12 +239,14 @@ class AcpDriver(Driver):
         self._open.clear()
         self.tasks.clear()                              # background calls end with the process
         self._autonomous = False
+        during_turn = self.busy
         if self.busy:
             self.mark_unfinished_tools("exited")
             self.busy = False
         self.cancel_permissions()
         await self.flush()
-        await self.emit({"ev": "exit", "code": code, "stderr": list(self.peer.stderr_tail)[-15:] if self.peer else []})
+        await self.emit({"ev": "exit", "code": code, "stderr": list(self.peer.stderr_tail)[-15:] if self.peer else [],
+                         "duringTurn": during_turn})
         await self.emit_state()
 
     def snapshot(self) -> dict[str, Any]:
@@ -280,12 +284,14 @@ class AcpDriver(Driver):
     async def _run_prompt(self, prompt: list[dict[str, Any]]) -> None:
         await self.flush()
         await self.emit_state()
-        stop_reason, error = None, None
+        stop_reason, error, fail = None, None, None
         try:
             res = await self.peer.request("session/prompt", {"sessionId": self.session_id, "prompt": prompt}, timeout=None)
             stop_reason = (res or {}).get("stopReason")
         except JsonRpcError as exc:
             error = exc.message
+            detail = exc.data if isinstance(exc.data, str) else json.dumps(exc.data, ensure_ascii=False) if exc.data else ""
+            fail = failure_from_text(f"{exc.message} {detail}".strip())
         except PeerClosed:
             return                                      # _exited reports it
         self._close_current()
@@ -298,7 +304,7 @@ class AcpDriver(Driver):
             self._open.clear()
             self.mark_unfinished_tools("error")
             self.items.put(notice_item(f"a:t:{self._turn}:end", f"{self.harness} 这一轮没有完成：{error}", level="error"))
-            result = self.turn_finished("error", error=True, stop_reason="error")
+            result = self.turn_finished("error", error=True, stop_reason="error", failure=fail)
         else:
             if stop_reason in ("max_tokens", "max_turn_requests", "refusal"):
                 self.items.put(notice_item(f"a:t:{self._turn}:end", f"这一轮停止了：{stop_reason}", level="warning"))

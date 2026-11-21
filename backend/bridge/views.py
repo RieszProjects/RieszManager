@@ -49,7 +49,7 @@ ROUTES: list[tuple[str, re.Pattern[str], str]] = [
         ("GET", rf"^sessions/(?P<sid>{UUID})/commands$", "/v1/sessions/{sid}/commands"),
         ("GET", rf"^sessions/(?P<sid>{UUID})/context$", "/v1/sessions/{sid}/context"),
         ("GET", rf"^sessions/(?P<sid>{UUID})/context-limits$", "/v1/sessions/{sid}/context-limits"),
-        ("POST", rf"^sessions/(?P<sid>{UUID})/(?P<action>messages|start|stop|interrupt|cancel|model|mode|effort|api|handoff|rename|fork|takeover|keep-alive|background|resume|dismiss-interrupted)$",
+        ("POST", rf"^sessions/(?P<sid>{UUID})/(?P<action>messages|start|stop|interrupt|cancel|model|mode|effort|api|handoff|rename|fork|takeover|keep-alive|background|resume|dismiss-interrupted|cancel-auto-resume)$",
          "/v1/sessions/{sid}/{action}"),
         ("POST", rf"^sessions/(?P<sid>{UUID})/permissions/(?P<rid>[\w-]{{1,80}})$",
          "/v1/sessions/{sid}/permissions/{rid}"),
@@ -94,7 +94,8 @@ async def proxy(request: HttpRequest, path: str) -> HttpResponse:
         except ValueError:
             raise ApiError(400, "请求格式错误")
     try:
-        resp = await runner.request(request.method or "GET", target, params=list(request.GET.items()), json=body)
+        resp = await runner.request(request.method or "GET", target, params=list(request.GET.items()), json=body,
+                                    headers={"X-Riesz-From": "web"})
     except runner.RunnerUnavailable:
         return _unavailable()
     async with resp:

@@ -1,7 +1,7 @@
 /** A conversation: header, transcript, live activity, pending prompts and the composer. */
 import { IconButton, ListItemIcon, Menu, MenuItem } from "@mui/material";
 import {
-  AlarmClock, Archive, ArchiveRestore, ArrowLeftRight, Check, Copy, EllipsisVertical, GitFork, Hand, LoaderCircle, MonitorUp, Pencil, Pin, Power, SquareTerminal, TriangleAlert, X,
+  AlarmClock, Archive, ArchiveRestore, ArrowLeftRight, Check, Copy, EllipsisVertical, GitFork, Hand, LoaderCircle, MonitorUp, Pencil, Pin, Power, RotateCcw, SquareTerminal, TriangleAlert, X,
 } from "lucide-react";
 import { useSchedules } from "@/features/schedules/store";
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
@@ -279,7 +279,26 @@ export function ChatView({ sessionId }: { sessionId: string }) {
           interruptible={false}
         />
       )}
-      {turn.terminated && <div className="rz-terminated">已终止 · 上次运行没有完成</div>}
+      {state?.autoResume && (
+        <div className="rz-auto-resume">
+          <RotateCcw size={13} />
+          <span className="rz-auto-resume-text">
+            {state.autoResume.sentAt
+              ? "正在尝试自动继续…"
+              : state.autoResume.nextAt
+                ? `${state.autoResume.label}，预计 ${clockTime(state.autoResume.nextAt)} 自动继续`
+                : `${state.autoResume.label}，等待自动继续`}
+          </span>
+          <button
+            type="button"
+            className="rz-linklike"
+            onClick={() => void api(`sessions/${sessionId}/cancel-auto-resume`, { body: {} }).catch((err: Error) => toast(err.message, "error"))}
+          >
+            取消
+          </button>
+        </div>
+      )}
+      {turn.terminated && !state?.autoResume && <div className="rz-terminated">已终止 · 上次运行没有完成</div>}
     </>
   );
 

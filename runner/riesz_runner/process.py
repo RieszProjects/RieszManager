@@ -13,6 +13,7 @@ import uuid as uuidlib
 from collections import deque
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
+from .auto_resume import claude_failure
 from .autoapprove import auto_approvable
 from .drivers.base import ToolServer
 from .claude_settings import chrome_enabled_by_default
@@ -101,6 +102,8 @@ class ClaudeProcess:
         self._progress_emitted = 0.0
         self.partial: dict[str, Any] | None = None
         self.last_result: dict[str, Any] | None = None
+        self._api_error: dict[str, Any] | None = None       # this turn's synthetic "API Error" message
+        self._rejected: dict[str, Any] | None = None        # the last rate_limit_event that turned a request away
         self.stderr_tail: deque[str] = deque(maxlen=STDERR_TAIL_LINES)
 
         self._pending_controls: dict[str, asyncio.Future[dict[str, Any]]] = {}
@@ -460,6 +463,10 @@ class ClaudeProcess:
                 "stopReason": msg.get("stop_reason"),
                 "ts": time.time(),
             }
+            fail = claude_failure(msg, self._api_error, self._rejected)
+            if fail:
+                self.last_result["failure"] = fail
+            self._api_error = self._rejected = None
             text = msg.get("result") if isinstance(msg.get("result"), str) else ""
             await self.sink(self, {"ev": "result", "result": self.last_result, "text": text[:400]})
             await self.sink(self, {"ev": "transcript"})
@@ -469,10 +476,15 @@ class ClaudeProcess:
             # The transcript file is the source of truth; nudge the hub to read it.
             if mtype == "assistant" and msg.get("parent_tool_use_id") is None:
                 self.partial = None
+                if msg.get("error"):
+                    self._api_error = msg
             await self.sink(self, {"ev": "transcript"})
             return
         if mtype == "rate_limit_event":
-            await self.sink(self, {"ev": "rate_limit", "info": msg.get("rate_limit_info")})
+            info = msg.get("rate_limit_info")
+            if isinstance(info, dict) and info.get("status") == "rejected":
+                self._rejected = info
+            await self.sink(self, {"ev": "rate_limit", "info": info})
 
     async def _handle_system(self, msg: dict[str, Any]) -> None:
         subtype = msg.get("subtype")

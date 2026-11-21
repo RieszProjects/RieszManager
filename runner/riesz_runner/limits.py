@@ -87,6 +87,19 @@ class Limits:
         if isinstance(snapshot, dict):
             self._live = (time.time(), snapshot)
 
+    def reset_time(self, route: str | None) -> float | None:
+        """Cached reset time (unix seconds) when `route` has an exhausted window, if known."""
+        if not route or not self._view:
+            return None
+        for entry in self._view.get("limits") or ():
+            if entry.get("id") != route:
+                continue
+            full = [w["resetsAt"] for w in entry.get("windows") or ()
+                    if (w.get("percent") or 0) >= 100 and w.get("resetsAt")]
+            if full:
+                return float(max(full))
+        return None
+
     async def get(self, force: bool = False) -> dict[str, Any]:
         async with self._lock:
             age = time.time() - self._fetched

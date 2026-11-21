@@ -529,6 +529,8 @@ async def send_message(request: web.Request) -> web.Response:
     body = await _body(request)
     mode = _validate_mode(hub.cfg, body.get("permissionMode"))
     text, attachments, message_uuid = _prompt(request, body)
+    if request.headers.get("X-Riesz-From") == "web":
+        await hub.auto_resume.taken_over(sid)
     result = await request.app[DELIVERY].send(
         sid, text, attachments, message_uuid,
         model=body.get("model") or None, permission_mode=mode, effort=_validate_effort(body.get("effort")),
@@ -651,6 +653,8 @@ async def resume_session(request: web.Request) -> web.Response:
     """Pick up an interrupted session: ask Claude to carry on from where it was cut off."""
     hub = request.app[HUB]
     sid = _session_id(request)
+    if request.headers.get("X-Riesz-From") == "web":
+        await hub.auto_resume.taken_over(sid)
     result = await request.app[DELIVERY].send(sid, RESUME_TEXT, [], str(uuidlib.uuid4()))
     return _json({**result, "state": hub.session_state(sid)})
 
@@ -658,6 +662,13 @@ async def resume_session(request: web.Request) -> web.Response:
 async def dismiss_interrupted(request: web.Request) -> web.Response:
     await request.app[HUB].clear_interrupted(_session_id(request))
     return _json({"ok": True})
+
+
+async def cancel_auto_resume(request: web.Request) -> web.Response:
+    hub = request.app[HUB]
+    sid = _session_id(request)
+    cancelled = await hub.auto_resume.taken_over(sid)
+    return _json({"cancelled": cancelled, "state": hub.session_state(sid)})
 
 
 async def start_session(request: web.Request) -> web.Response:
@@ -674,6 +685,7 @@ async def stop_session(request: web.Request) -> web.Response:
     hub = request.app[HUB]
     sid = _session_id(request)
     # Stopping a session by hand also ends "keep running"; otherwise it would come straight back.
+    await hub.auto_resume.taken_over(sid)
     kept = hub.prefs.keep_alive(sid)
     if kept:
         await hub.set_keep_alive(sid, False)
@@ -1098,6 +1110,8 @@ async def h_send(request: web.Request, hub: Hub, sid: str) -> web.Response:
     model = body.get("model") or None
     if model is not None and not (isinstance(model, str) and re.fullmatch(r"[A-Za-z0-9._:/-]{1,100}", model)):
         return _err(400, "invalid model")
+    if request.headers.get("X-Riesz-From") == "web":
+        await hub.auto_resume.taken_over(sid)
     result = await request.app[DELIVERY].send(sid, text, attachments, message_uuid, model=model,
                                               permission_mode=_harness_mode(hub, sid, body.get("permissionMode")),
                                               effort=_harness_effort(body.get("effort")))
@@ -1105,6 +1119,8 @@ async def h_send(request: web.Request, hub: Hub, sid: str) -> web.Response:
 
 
 async def h_resume(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    if request.headers.get("X-Riesz-From") == "web":
+        await hub.auto_resume.taken_over(sid)
     result = await request.app[DELIVERY].send(sid, RESUME_TEXT, [], str(uuidlib.uuid4()))
     return _json({**result, "state": hub.harnesses.state(sid)})
 
@@ -1309,6 +1325,7 @@ def build_app(cfg: Config) -> web.Application:
     r.add_post("/v1/schedules", create_schedule)
     r.add_post(r"/v1/schedules/{id:[0-9a-f]{1,32}}/{action:update|run|delete}", schedule_action)
     r.add_post("/v1/sessions/{sid}/dismiss-interrupted", dismiss_interrupted)
+    r.add_post("/v1/sessions/{sid}/cancel-auto-resume", cancel_auto_resume)
     r.add_post("/v1/sessions/{sid}/interrupt", interrupt)
     r.add_post("/v1/sessions/{sid}/cancel", cancel_message)
     r.add_post("/v1/sessions/{sid}/permissions/{rid}", answer_permission)
@@ -1335,6 +1352,7 @@ def build_app(cfg: Config) -> web.Application:
     HARNESS_HANDLERS.update({
         session_shared: lambda request, _hub, _sid: session_shared(request),
         open_file: lambda request, _hub, _sid: open_file(request),
+        cancel_auto_resume: lambda request, _hub, _sid: cancel_auto_resume(request),
         session_detail: h_detail, session_items: h_items, session_image: h_image, session_commands: h_commands,
         context_limits: h_context_limits, send_message: h_send, resume_session: h_resume, start_session: h_start,
         stop_session: h_stop, interrupt: h_interrupt, cancel_message: h_cancel, answer_permission: h_permission,

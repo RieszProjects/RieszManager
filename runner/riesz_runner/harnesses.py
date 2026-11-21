@@ -398,6 +398,7 @@ class Harnesses:
             "subagentsActive": sum(1 for c in children if c["running"]),
             "subagentOf": (self.hub.prefs.get(session_id) or {}).get("subagentOf"),
             "api": rec.get("api"), "handoffFrom": rec.get("handoffFrom"), "handedOffTo": rec.get("handedOffTo"),
+            "autoResume": self.hub.auto_resume.view(session_id),
         }
 
     def summaries(self, project: str | None = None) -> list[dict[str, Any]]:
@@ -418,6 +419,7 @@ class Harnesses:
         sample = driver or cls(cwd="/", sink=_nowhere)
         state["modes"] = [m.__dict__ for m in sample.modes()]
         state["api"] = rec.get("api")
+        state["autoResume"] = self.hub.auto_resume.view(session_id)
         return state
 
     def items(self, session_id: str) -> list[dict[str, Any]]:
@@ -684,6 +686,8 @@ class Harnesses:
 
     async def stop(self, session_id: str, by_user: bool = False) -> bool:
         """`by_user`: stopping it by hand also ends "keep running" (it would come straight back)."""
+        if by_user:
+            await self.hub.auto_resume.taken_over(session_id)
         if by_user and self.records.get(session_id, {}).get("keepAlive"):
             self.records[session_id]["keepAlive"] = False
             self._save()
@@ -775,6 +779,10 @@ class Harnesses:
         if ev == "result" and rec is not None:
             rec["updatedAt"] = time.time()
             self._save()
+            await self.hub.auto_resume.on_result(sid, event.get("result") or {})
+        if ev == "exit" and rec is not None:
+            await self.hub.auto_resume.on_exit(sid, during_turn=bool(event.get("duringTurn")),
+                                               requested=sid in self._stopping)
         if rec is not None and ev in ("permission", "result", "exit"):
             await self._attention(sid, event)
         if ev not in ("permission", "permission_resolved", "rate_limit"):

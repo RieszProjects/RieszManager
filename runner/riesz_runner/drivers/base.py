@@ -10,7 +10,7 @@ reports into the shapes the web app already shows for Claude Code sessions:
 - events passed to `sink(driver, event)`: {"ev": "items", "items": [...]},
   {"ev": "reset", "items": [...]}, {"ev": "state"}, {"ev": "permission", "request"},
   {"ev": "permission_resolved", "requestId"}, {"ev": "result", "result", "text"},
-  {"ev": "notice", "level", "text"}, {"ev": "rate_limit", "info"}, {"ev": "exit", "code", "stderr"}.
+  {"ev": "notice", "level", "text"}, {"ev": "rate_limit", "info"}, {"ev": "exit", "code", "stderr", "duringTurn"}.
 
 What a harness cannot do is declared in `capabilities`, so the web app can
 leave it out rather than offer something that does nothing.
@@ -422,12 +422,16 @@ class Driver:
         self.busy = True
         self._turn_started = time.time()
 
-    def turn_finished(self, subtype: str, *, error: bool = False, stop_reason: str | None = None) -> dict[str, Any]:
+    def turn_finished(self, subtype: str, *, error: bool = False, stop_reason: str | None = None,
+                      failure: dict[str, Any] | None = None) -> dict[str, Any]:
+        """`failure`: the turn failed for a reason that passes (auto_resume.failure()); it is picked up again later."""
         self.busy = False
         duration = (time.time() - self._turn_started) * 1000 if self._turn_started else None
         self._turn_started = None
         self.last_result = {"subtype": subtype, "isError": error, "durationMs": duration, "costUsd": None,
                             "numTurns": None, "stopReason": stop_reason, "ts": time.time()}
+        if failure:
+            self.last_result["failure"] = failure
         return self.last_result
 
     def last_assistant_text(self) -> str:

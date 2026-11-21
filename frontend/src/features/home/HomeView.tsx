@@ -1,6 +1,6 @@
 /** Landing view (nothing selected) and the per-project "new session" view. */
 import { Button, Switch } from "@mui/material";
-import { AlarmClock, ChevronRight } from "lucide-react";
+import { AlarmClock, ChevronRight, RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/api/client";
 import { Mascot } from "@/components/Mascot";
@@ -172,6 +172,59 @@ function HomeInterrupted() {
   );
 }
 
+/** Sessions waiting to pick themselves up after a quota, billing or transient failure. */
+function HomeAutoResume() {
+  const sessions = useApp((s) => s.sessions);
+  const projects = useApp((s) => s.projects);
+  const navigate = useUi((s) => s.navigate);
+  const [cancelling, setCancelling] = useState<Set<string>>(new Set());
+  const list = useMemo(
+    () => Object.values(sessions)
+      .filter((s) => s.autoResume && !s.handedOffTo)
+      .sort((a, b) => (a.autoResume?.nextAt ?? Infinity) - (b.autoResume?.nextAt ?? Infinity)),
+    [sessions],
+  );
+  if (!list.length) return null;
+
+  const cancel = async (sid: string) => {
+    setCancelling((p) => new Set(p).add(sid));
+    try {
+      await api(`sessions/${sid}/cancel-auto-resume`, { body: {} });
+    } catch (err) {
+      toast((err as Error).message, "error");
+    } finally {
+      setCancelling((p) => {
+        const n = new Set(p);
+        n.delete(sid);
+        return n;
+      });
+    }
+  };
+
+  return (
+    <section className="rz-home-recent rz-home-interrupted">
+      <div className="rz-home-recent-head"><span className="rz-side-label">等待自动续跑</span></div>
+      {list.map((s) => {
+        const ar = s.autoResume!;
+        const proj = projects.find((p) => p.id === s.project)?.name ?? "";
+        const when = ar.sentAt ? "正在尝试继续" : ar.nextAt ? `预计 ${clockTime(ar.nextAt)} 继续` : "等待继续";
+        return (
+          <div key={s.sessionId} className="rz-interrupted-row">
+            <button type="button" className="rz-interrupted-main" onClick={() => navigate({ view: "session", sessionId: s.sessionId })}>
+              <RotateCcw size={14} className="rz-sched-mark" />
+              <span className="rz-interrupted-text">
+                <span className="clamp-1">{sessionTitle(s)}</span>
+                <span className="dim clamp-1">{proj ? `${proj} · ` : ""}{ar.label} · {when}</span>
+              </span>
+            </button>
+            <Button size="small" color="inherit" disabled={cancelling.has(s.sessionId)} onClick={() => void cancel(s.sessionId)}>取消</Button>
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
 /** Every scheduled wake-up, soonest first: switch one off here, or open its session's schedules. */
 function HomeSchedules() {
   const items = useSchedules((s) => s.items);
@@ -217,6 +270,7 @@ export function HomeView() {
         <HomeGreeting />
       </div>
       <HomeInterrupted />
+      <HomeAutoResume />
       <HomeSchedules />
       {isMobile && <HomeRecent />}
     </div>

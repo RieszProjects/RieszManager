@@ -49,6 +49,7 @@ from .base import (
     user_item,
 )
 from .jsonrpc import JsonRpcPeer, PeerClosed
+from ..auto_resume import dsh_failure
 
 log = logging.getLogger(__name__)
 
@@ -315,12 +316,14 @@ class DshDriver(Driver):
         self.alive = False
         self.ready = False
         self.exit_code = code
+        during_turn = self.busy
         if self.busy:
             self.mark_unfinished_tools("exited")
             self.busy = False
         self.cancel_permissions()
         await self.flush()
-        await self.emit({"ev": "exit", "code": code, "stderr": list(self.peer.stderr_tail)[-15:] if self.peer else []})
+        await self.emit({"ev": "exit", "code": code, "stderr": list(self.peer.stderr_tail)[-15:] if self.peer else [],
+                         "duringTurn": during_turn})
         await self.emit_state()
 
     async def restart(self) -> None:
@@ -466,7 +469,7 @@ class DshDriver(Driver):
                 end = self.events.last_turn_end or {}
                 reason = (end.get("reason") or {}).get("kind") or "completed"
                 result = self.turn_finished("success" if reason == "completed" else reason, error=reason not in ("completed", "aborted"),
-                                            stop_reason=reason)
+                                            stop_reason=reason, failure=dsh_failure(end.get("reason")))
                 await self.flush()
                 await self.emit({"ev": "result", "result": result, "text": self.last_assistant_text()[:400]})
                 await self.emit_state()

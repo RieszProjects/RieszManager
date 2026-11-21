@@ -29,6 +29,17 @@ export interface LiveInfo {
   agents?: string[];
 }
 
+export interface AutoResumeInfo {
+  cause: string;
+  label: string;
+  message: string;
+  nextAt: number | null;
+  sentAt: number | null;
+  since: number;
+  attempts: number;
+  resetsAt?: number | null;
+}
+
 export interface SessionSummary {
   sessionId: string;
   /** Sessions of other harnesses ("codex", "dsh"); absent for Claude Code. */
@@ -65,6 +76,8 @@ export interface SessionSummary {
   subagents?: number;
   /** When one of its subagents last wrote anything (unix seconds). */
   subagentsActive?: number | null;
+  /** Scheduled auto-resume after a recoverable turn failure (quota, billing, transient error). */
+  autoResume?: AutoResumeInfo | null;
 }
 
 export interface LiveProcess {
@@ -318,6 +331,8 @@ export interface SessionState {
   api?: string | null;
   context?: { used: number; window: number | null } | null;
   keepAlive?: boolean;
+  /** Scheduled auto-resume after a recoverable turn failure. */
+  autoResume?: AutoResumeInfo | null;
   hosted: boolean;
   alive: boolean;
   ready?: boolean;

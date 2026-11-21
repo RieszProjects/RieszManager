@@ -19,6 +19,7 @@ from .process import ClaudeProcess, ControlError
 from .tools import server as tools_server
 from .projects import ProjectResolver
 from .session_prefs import SessionPrefs
+from .auto_resume import AutoResume
 from .balances import BalanceMonitor
 from .limits import Limits
 from .shares import Shares
@@ -77,6 +78,7 @@ class Hub:
         self.reload_pending = False
         self.reload_since: float | None = None
         self.reload_ready = asyncio.Event()
+        self.closing = False
         self._working_file = cfg.state_dir / "working.json"
         self._working_saved: set[str] | None = None
         # API keys for every harness, and which harnesses are logged in to a subscription.
@@ -87,6 +89,7 @@ class Hub:
         self.harnesses = Harnesses(self)
         self.shares = Shares(cfg.state_dir)        # files agents sent to the user (shares.py)
         self.limits = Limits(self)               # other subscriptions' usage limits (limits.py)
+        self.auto_resume = AutoResume(self)      # retry turns that failed for quota / billing / transient errors
 
     # ---- lifecycle ----------------------------------------------------------
 
@@ -98,6 +101,7 @@ class Hub:
         self._tasks = [
             asyncio.create_task(self._working_loop()),
             asyncio.create_task(self.schedules.loop()),
+            asyncio.create_task(self.auto_resume.loop()),
             asyncio.create_task(self._live_loop()),
             asyncio.create_task(self._index_loop()),
             asyncio.create_task(self._reap_loop()),
@@ -151,6 +155,7 @@ class Hub:
         self.reload_ready.set()
 
     async def close(self) -> None:
+        self.closing = True
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*(p.stop() for p in list(self.hosted.values())), self.harnesses.close(), return_exceptions=True)
@@ -404,6 +409,7 @@ class Hub:
         data["api"] = (self.prefs.get(session_id) or {}).get("api")
         data["handoffFrom"] = (self.prefs.get(session_id) or {}).get("handoffFrom")
         data["handedOffTo"] = (self.prefs.get(session_id) or {}).get("handedOffTo")
+        data["autoResume"] = self.auto_resume.view(session_id)
         return data
 
     def _live_info(self, session_id: str) -> dict[str, Any] | None:
@@ -454,6 +460,7 @@ class Hub:
                 if not state.get(key):
                     state[key] = value
         state["keepAlive"] = self.prefs.keep_alive(session_id)
+        state["autoResume"] = self.auto_resume.view(session_id)
         if not state.get("api"):
             state["api"] = (self.prefs.get(session_id) or {}).get("api")
         return state
@@ -495,9 +502,13 @@ class Hub:
             await self.broadcast_global({"ev": "usage_changed"})
         if ev in ("permission", "result", "exit"):
             await self._attention_from(proc, event)
+        if ev == "result":
+            await self.auto_resume.on_result(proc.session_id, event.get("result") or {})
         if ev == "exit":
             self._remember(proc)
             self._poke(proc.session_id)
+            await self.auto_resume.on_exit(proc.session_id, during_turn=bool(event.get("duringTurn")),
+                                           requested=bool(event.get("requested")))
             await self.broadcast_global({"ev": "live", "live": self.live_list()})
         if ev == "state":
             self._remember(proc)
@@ -873,8 +884,10 @@ class Hub:
         elif self.harnesses.has(session_id):
             self.harnesses.records[session_id]["handedOffTo"] = new_id
             self.harnesses._save()
+            await self.auto_resume.taken_over(session_id)
         else:
             self.prefs.remember(session_id, handedOffTo=new_id)
+            await self.auto_resume.taken_over(session_id)
         log.info("moved the conversation of %s (%s) to %s session %s", session_id[:8], source, target, new_id[:8])
         await self.broadcast_global({"ev": "sessions", "sessions": [self.session_summary(new_id), self.session_summary(session_id)],
                                      "removed": []})
