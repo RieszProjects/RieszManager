@@ -7,6 +7,8 @@ export interface SessionContextValue {
   projectId: string | null;
   /** Tool calls that are really still running (others without a result were cut off). */
   pendingTools: Set<string>;
+  /** Tool calls without a result in a turn that ended normally: done, not cut off. */
+  settledTools?: Set<string>;
   /** Tasks (subagents, background commands) of the session's claude process, when it runs here. */
   tasks: TaskInfo[];
   /** The session's claude process runs here, so its tasks can be stopped or backgrounded. */

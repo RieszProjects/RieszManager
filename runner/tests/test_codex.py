@@ -81,6 +81,17 @@ class MapItemTest(unittest.TestCase):
         self.assertEqual(item["blocks"][0]["type"], "thinking")
         self.assertTrue(item["blocks"][0]["redacted"])
 
+    def test_items_without_status_finish_when_completed(self):
+        started = map_item({"type": "sleep", "id": "s", "durationMs": 45000})
+        self.assertEqual(started["blocks"][0]["name"], "Sleep")
+        self.assertIsNone(started["blocks"][0]["result"])
+        done = map_item({"type": "sleep", "id": "s", "durationMs": 45000}, done=True)
+        self.assertFalse(done["blocks"][0]["result"]["isError"])
+        activity = map_item({"type": "subAgentActivity", "id": "a", "agentPath": "x", "agentThreadId": "t", "kind": "k"}, done=True)
+        self.assertIsNotNone(activity["blocks"][0]["result"])
+        running = map_item({"type": "dynamicToolCall", "id": "d", "tool": "t", "arguments": {}, "status": "inProgress"}, done=True)
+        self.assertIsNone(running["blocks"][0]["result"])
+
     def test_unknown_kinds_become_generic_tools(self):
         item = map_item({"type": "somethingNew", "id": "n", "status": "completed", "detail": 1})
         self.assertEqual(item["blocks"][0]["name"], "somethingNew")

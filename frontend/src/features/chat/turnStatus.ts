@@ -11,6 +11,8 @@ export interface TurnStatus {
   waitingSince: string | null;
   /** Background tasks a hosted, otherwise idle session is still waiting for. */
   backgroundTasks: TaskInfo[];
+  /** Tool calls without a result in a turn that still ended normally: the harness never reported them done. */
+  settledTools: Set<string>;
   /** The last turn stopped before finishing and nothing is running it any more. */
   terminated: boolean;
 }
@@ -44,6 +46,10 @@ export function turnStatus(items: Item[], state: SessionState | null): TurnStatu
   const backgroundTasks = hosted ? (state?.tasks ?? []).filter((t) => t.background) : [];
   const waiting = working ? unresolved[unresolved.length - 1] ?? null : null;
   const promptUnanswered = lastPrompt >= 0 && items[lastPrompt].kind === "user" && !answered;
+  // The harness said the turn finished fine after those tool calls: they ended, the harness just never said so.
+  const result = state?.lastResult;
+  const lastCall = unresolved.length ? Date.parse(unresolved[unresolved.length - 1].ts ?? "") / 1000 : NaN;
+  const endedFine = !working && !!result && result.subtype === "success" && !result.isError && result.ts >= lastCall;
 
   return {
     working,
@@ -51,7 +57,8 @@ export function turnStatus(items: Item[], state: SessionState | null): TurnStatu
     waitingTool: waiting?.tool ?? null,
     waitingSince: waiting?.ts ?? null,
     backgroundTasks,
-    terminated: !working && !interrupted && backgroundTasks.length === 0 && (unresolved.length > 0 || promptUnanswered),
+    settledTools: new Set(endedFine ? unresolved.map((u) => u.tool.id) : []),
+    terminated: !working && !interrupted && !endedFine && backgroundTasks.length === 0 && (unresolved.length > 0 || promptUnanswered),
   };
 }
 

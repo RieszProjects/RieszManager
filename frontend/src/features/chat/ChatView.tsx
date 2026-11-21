@@ -226,11 +226,11 @@ export function ChatView({ sessionId }: { sessionId: string }) {
   const turn = useMemo(() => turnStatus(items, state), [items, state]);
   const ctx = useMemo(
     () => ({
-      sessionId, cwd: summary?.cwd ?? null, projectId, pendingTools: turn.pendingTools,
+      sessionId, cwd: summary?.cwd ?? null, projectId, pendingTools: turn.pendingTools, settledTools: turn.settledTools,
       tasks: state?.tasks ?? [], hosted: Boolean(state?.hosted && state?.alive),
       harness: harness ?? null, capabilities: state?.capabilities ?? null,
     }),
-    [sessionId, summary?.cwd, projectId, turn.pendingTools, state?.tasks, state?.hosted, state?.alive, harness, state?.capabilities],
+    [sessionId, summary?.cwd, projectId, turn.pendingTools, turn.settledTools, state?.tasks, state?.hosted, state?.alive, harness, state?.capabilities],
   );
   const hostedHere = Boolean(state?.hosted && state.alive);
   const waitingSince = turn.waitingSince ? Date.parse(turn.waitingSince) : null;

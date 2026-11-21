@@ -357,11 +357,11 @@ function ChildSessionLink({ tool }: { tool: ToolBlockType }) {
 }
 
 function ToolBlockImpl({ tool }: { tool: ToolBlockType }) {
-  const { cwd, pendingTools } = useSessionContext();
+  const { cwd, pendingTools, settledTools } = useSessionContext();
   const meta = toolMeta(tool.name, tool.input ?? {}, cwd);
   const [open, setOpen] = useState(OPEN_BY_DEFAULT.has(tool.name));
   const pending = !tool.result && pendingTools.has(tool.id);
-  const terminated = !tool.result && !pending;
+  const terminated = !tool.result && !pending && !settledTools?.has(tool.id);
   const error = tool.result?.isError;
   const Icon = meta.icon;
   const mcp = mcpParts(tool.name);

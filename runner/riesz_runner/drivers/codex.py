@@ -91,8 +91,12 @@ def _mcp_text(result: dict[str, Any] | None) -> str:
     return "\n".join(parts)
 
 
-def map_item(item: dict[str, Any], *, model: str | None = None, ts: str | None = None) -> dict[str, Any] | None:
-    """A Codex ThreadItem as a conversation item (None for kinds that show nothing)."""
+def map_item(item: dict[str, Any], *, model: str | None = None, ts: str | None = None, done: bool = False) -> dict[str, Any] | None:
+    """A Codex ThreadItem as a conversation item (None for kinds that show nothing).
+
+    `done`: Codex reported the item completed (item/completed, or a finished turn of the history).
+    Kinds without a status (sleep, sub-agent activity) only finish that way.
+    """
     kind = item.get("type")
     key = f"c:{item.get('id')}"
     ts = ts or (iso(item["startedAtMs"] / 1000) if item.get("startedAtMs") else None)
@@ -134,6 +138,10 @@ def map_item(item: dict[str, Any], *, model: str | None = None, ts: str | None =
     if kind == "imageView":
         block = tool_block(str(item.get("id")), "Read", {"file_path": item.get("path")}, tool_result(""))
         return assistant_item(key, [block], ts=ts, model=model)
+    if kind == "sleep":
+        block = tool_block(str(item.get("id")), "Sleep", {"durationMs": item.get("durationMs")},
+                           tool_result("") if done or item.get("completedAtMs") else None)
+        return assistant_item(key, [block], ts=ts, model=model)
     if kind == "contextCompaction":
         return {"kind": "compact", "key": key, "seq": 0, "ts": ts or iso(), "uuid": None, "summary": None}
     if kind in ("enteredReviewMode", "exitedReviewMode"):
@@ -143,8 +151,9 @@ def map_item(item: dict[str, Any], *, model: str | None = None, ts: str | None =
     # Other tool-like items (dynamic tools, sub-agents, ...): shown with their raw fields.
     fields = {k: v for k, v in item.items() if k not in ("type", "id", "startedAtMs", "completedAtMs")}
     block = tool_block(str(item.get("id")), str(kind), fields)
-    if item.get("status") not in (None, "inProgress", "running"):
-        block["result"] = tool_result("", error=item.get("status") == "failed")
+    status = item.get("status")
+    if status not in (None, "inProgress", "running") or (status is None and (done or item.get("completedAtMs"))):
+        block["result"] = tool_result("", error=status == "failed")
     return assistant_item(key, [block], ts=ts, model=model)
 
 
@@ -350,8 +359,9 @@ class CodexDriver(Driver):
         await self.reset()
 
     def add_turn(self, turn: dict[str, Any]) -> None:
+        done = turn.get("status") not in (None, "inProgress")
         for item in turn.get("items") or ():
-            mapped = map_item(item, model=self.model)
+            mapped = map_item(item, model=self.model, done=done)
             if mapped:
                 self.items.put(mapped)
         self._turn_end_items(turn)
@@ -376,7 +386,7 @@ class CodexDriver(Driver):
                 self.turn_started()
             await self.emit_state()
         elif method in ("item/started", "item/completed"):
-            mapped = map_item(p.get("item") or {}, model=self.model)
+            mapped = map_item(p.get("item") or {}, model=self.model, done=method == "item/completed")
             if mapped:
                 old = self.items.get(mapped["key"])
                 if old and method == "item/completed" and mapped["kind"] == "assistant" and not _has_text(mapped) and _has_text(old):
