@@ -303,21 +303,47 @@ async def session_items(request: web.Request) -> web.Response:
     return _json({"items": page, "hasMore": len(items) > len(page), "total": len(every)})
 
 
-async def session_image(request: web.Request) -> web.StreamResponse:
-    hub = request.app[HUB]
-    sid = _session_id(request)
-    ref = request.query.get("ref", "")
+def _serve_image(hub: Hub, sid: str, ref: str) -> web.StreamResponse:
+    """Serve an image from either a session's upload (`file:`), its own transcript (`<off>:<path>`),
+    or an earlier session in its handoff chain (`sid:<owner>:<ref>` or fallback search)."""
+    if ref.startswith("file:"):
+        path = Path(os.path.realpath(ref[5:]))
+        if not path.is_relative_to(Path(os.path.realpath(hub.cfg.uploads_dir))) or not path.is_file():
+            return _err(404, "not found")
+        mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        if not mime.startswith("image/"):
+            return _err(404, "not found")
+        return web.FileResponse(path, headers={"Content-Type": mime, "Cache-Control": "private, max-age=86400"})
+
+    chain = _handoff_chain(hub, sid)
+    targets = chain
+    if ref.startswith("sid:"):
+        parts = ref.split(":", 2)
+        if len(parts) != 3 or parts[1] not in chain or not parts[2]:
+            return _err(404, "not found")
+        owner, inner = parts[1], parts[2]
+        if inner.startswith("file:"):
+            return _serve_image(hub, owner, inner)
+        targets = [owner]
+        ref = inner
+
     offset_s, _, path = ref.partition(":")
     if not offset_s.isdigit() or not path:
         return _err(400, "invalid ref")
-    line = hub.store.read_line_at(sid, int(offset_s))
-    if not line:
-        return _err(404, "not found")
-    resolved = resolve_image(line, path)
-    if resolved is None:
-        return _err(404, "not found")
-    data, mime = resolved
-    return web.Response(body=data, content_type=mime, headers={"Cache-Control": "private, max-age=86400"})
+    offset = int(offset_s)
+    for cand in targets:
+        line = hub.store.read_line_at(cand, offset)
+        if not line:
+            continue
+        resolved = resolve_image(line, path)
+        if resolved is not None:
+            data, mime = resolved
+            return web.Response(body=data, content_type=mime, headers={"Cache-Control": "private, max-age=86400"})
+    return _err(404, "not found")
+
+
+async def session_image(request: web.Request) -> web.StreamResponse:
+    return _serve_image(request.app[HUB], _session_id(request), request.query.get("ref", ""))
 
 
 async def session_commands(request: web.Request) -> web.Response:
@@ -1067,17 +1093,8 @@ async def h_items(request: web.Request, hub: Hub, sid: str) -> web.Response:
 
 
 async def h_image(request: web.Request, hub: Hub, sid: str) -> web.StreamResponse:
-    """An image the user attached (only files in the upload folder are served)."""
-    ref = request.query.get("ref", "")
-    if not ref.startswith("file:"):
-        return _err(404, "not found")
-    path = Path(os.path.realpath(ref[5:]))
-    if not path.is_relative_to(Path(os.path.realpath(hub.cfg.uploads_dir))) or not path.is_file():
-        return _err(404, "not found")
-    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    if not mime.startswith("image/"):
-        return _err(404, "not found")
-    return web.FileResponse(path, headers={"Content-Type": mime, "Cache-Control": "private, max-age=86400"})
+    """An image attached here or carried over from an earlier session in its handoff chain."""
+    return _serve_image(hub, sid, request.query.get("ref", ""))
 
 
 async def h_commands(request: web.Request, hub: Hub, sid: str) -> web.Response:
@@ -1140,7 +1157,9 @@ async def h_interrupt(request: web.Request, hub: Hub, sid: str) -> web.Response:
 
 
 async def h_cancel(request: web.Request, hub: Hub, sid: str) -> web.Response:
-    return _json({"result": {"cancelled": False}})
+    body = await _body(request)
+    cancelled = await request.app[DELIVERY].cancel(sid, str(body.get("uuid") or ""))
+    return _json({"result": {"cancelled": cancelled}})
 
 
 async def h_permission(request: web.Request, hub: Hub, sid: str) -> web.Response:

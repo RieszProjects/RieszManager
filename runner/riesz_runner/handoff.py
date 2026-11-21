@@ -263,10 +263,38 @@ def responses_items(msgs: list[dict[str, str]]) -> list[dict[str, Any]]:
     return out
 
 
+def _tag_images(images: Any, source: str) -> list[dict[str, Any]]:
+    out = []
+    for img in images or ():
+        if not isinstance(img, dict):
+            continue
+        ref = str(img.get("ref") or "")
+        if ref and not ref.startswith(("file:", "sid:")):
+            img = {**img, "ref": f"sid:{source}:{ref}"}
+        out.append(img)
+    return out
+
+
 def display_items(items: list[dict[str, Any]], source: str, target: str, fork: bool = False) -> list[dict[str, Any]]:
     """The source's items as shown before the new session's own, then a divider (keys and seqs of their own)."""
     kinds = ("user", "assistant", "command", "output", "compact", "interrupted", "notice")
-    shown = [dict(it) for it in items if it.get("kind") in kinds]
+    shown = []
+    for raw in items:
+        if raw.get("kind") not in kinds:
+            continue
+        it = dict(raw)
+        if it.get("images"):
+            it["images"] = _tag_images(it["images"], source)
+        if it.get("kind") == "assistant" and it.get("blocks"):
+            blocks = []
+            for b in it["blocks"]:
+                if isinstance(b, dict) and b.get("type") == "tool" and isinstance(b.get("result"), dict) and b["result"].get("images"):
+                    res = {**b["result"], "images": _tag_images(b["result"]["images"], source)}
+                    blocks.append({**b, "result": res})
+                else:
+                    blocks.append(b)
+            it["blocks"] = blocks
+        shown.append(it)
     shown.append({"kind": "notice", "level": "info", "subtype": "handoff", "ts": None, "uuid": None,
                   "text": "从这里分叉" if fork else f"从这里起改用 {HARNESS_NAMES.get(target, target)} 继续"})
     for n, it in enumerate(shown):

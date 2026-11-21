@@ -67,9 +67,15 @@ class Delivery:
         model: str | None = None,
         permission_mode: str | None = None,
         effort: str | None = None,
+        _bypass_handoff: bool = False,
     ) -> dict[str, Any]:
         """Deliver a prompt. Returns {"uuid", "held": bool}."""
         options = {"model": model, "permission_mode": permission_mode, "effort": effort}
+        if not _bypass_handoff:
+            if session_id in self.hub._handing_off:
+                await self.hub.hold_during_handoff(session_id, message_uuid, text, attachments, options)
+                return {"uuid": message_uuid, "held": True}
+            session_id = self.hub.final_handoff_target(session_id)
         await self.hub.clear_interrupted(session_id)  # the user has taken it up again
         if self.hub.harnesses.has(session_id):
             result = await self.hub.harnesses.send(session_id, text, attachments, message_uuid,
@@ -114,6 +120,8 @@ class Delivery:
         return [h.entry() for h in self.held.get(session_id, [])]
 
     async def cancel(self, session_id: str, message_uuid: str) -> bool:
+        if await self.hub.cancel_handoff_held(session_id, message_uuid):
+            return True
         held = self.held.get(session_id) or []
         kept = [h for h in held if h.uuid != message_uuid]
         if len(kept) == len(held):

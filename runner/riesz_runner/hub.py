@@ -79,6 +79,10 @@ class Hub:
         self.reload_since: float | None = None
         self.reload_ready = asyncio.Event()
         self.closing = False
+        # Sessions currently moving to another harness (e.g. compacting before handoff): prompts sent meanwhile
+        # wait here and are delivered to the target session once the move finishes, instead of going to the old one.
+        self._handing_off: set[str] = set()
+        self._handoff_held: dict[str, list[dict[str, Any]]] = {}
         self._working_file = cfg.state_dir / "working.json"
         self._working_saved: set[str] | None = None
         # API keys for every harness, and which harnesses are logged in to a subscription.
@@ -341,6 +345,8 @@ class Hub:
     async def _revive(self, session_id: str) -> None:
         if self.reload_pending or self.reload_ready.is_set():
             return
+        if (self.prefs.get(session_id) or {}).get("handedOffTo"):
+            return
         proc = self.hosted.get(session_id)
         if (proc is not None and proc.alive) or session_id in self.live or session_id not in self.store.entries:
             return  # running here, running in a terminal, or gone
@@ -461,6 +467,9 @@ class Hub:
                     state[key] = value
         state["keepAlive"] = self.prefs.keep_alive(session_id)
         state["autoResume"] = self.auto_resume.view(session_id)
+        held = self.handoff_queue_entries(session_id)
+        if held:
+            state["queue"] = [*(state.get("queue") or []), *held]
         if not state.get("api"):
             state["api"] = (self.prefs.get(session_id) or {}).get("api")
         return state
@@ -791,11 +800,49 @@ class Hub:
         view = await self.catch_up(session_id)
         return self.display_items(session_id, view.items if view is not None else [])
 
+    def final_handoff_target(self, session_id: str) -> str:
+        """Follow handedOffTo links to the session that currently carries this conversation on."""
+        cur = session_id
+        seen = {cur}
+        for _ in range(10):
+            rec = self.harnesses.records.get(cur) or {}
+            nxt = rec.get("handedOffTo") or (self.prefs.get(cur) or {}).get("handedOffTo")
+            if not nxt or nxt in seen:
+                break
+            seen.add(nxt)
+            cur = nxt
+        return cur
+
+    def handoff_queue_entries(self, session_id: str) -> list[dict[str, Any]]:
+        return [{"uuid": h["uuid"], "preview": h["preview"][:300], "state": "held", "ts": h["ts"]}
+                for h in self._handoff_held.get(session_id, [])]
+
+    async def hold_during_handoff(self, session_id: str, message_uuid: str, text: str,
+                                  attachments: list[dict[str, Any]], options: dict[str, Any]) -> None:
+        preview = text.strip() or f"[{len(attachments)} 个附件]"
+        self._handoff_held.setdefault(session_id, []).append({
+            "uuid": message_uuid, "text": text, "attachments": attachments,
+            "preview": preview, "options": options, "ts": time.time(),
+        })
+        await self.broadcast_session(session_id, {"ev": "state", "state": self.session_state(session_id)})
+
+    async def cancel_handoff_held(self, session_id: str, message_uuid: str) -> bool:
+        held = self._handoff_held.get(session_id) or []
+        kept = [h for h in held if h["uuid"] != message_uuid]
+        if len(kept) == len(held):
+            return False
+        if kept:
+            self._handoff_held[session_id] = kept
+        else:
+            self._handoff_held.pop(session_id, None)
+        await self.broadcast_session(session_id, {"ev": "state", "state": self.session_state(session_id)})
+        return True
+
     async def _compact_claude(self, session_id: str, timeout: float = 300.0) -> None:
         """Have Claude Code compact a session (as /compact would) and wait for it."""
         before = sum(1 for it in await self._source_items(session_id) if it.get("kind") == "compact")
         assert self.delivery is not None
-        await self.delivery.send(session_id, "/compact", [], str(uuidlib.uuid4()))
+        await self.delivery.send(session_id, "/compact", [], str(uuidlib.uuid4()), _bypass_handoff=True)
         deadline = time.time() + timeout
         while time.time() < deadline:
             await asyncio.sleep(2.0)
@@ -838,59 +885,77 @@ class Hub:
         cwd = summary.get("cwd")
         if not cwd or not Path(cwd).is_dir():
             raise ControlError("the session's working directory no longer exists")
-        items = await self._source_items(session_id)
-        msgs = handoff.conversation(handoff.since_last_compaction(items))
-        if handoff.size(msgs) > handoff.BUDGET_CHARS and source == "claude" and not self.harnesses.has(session_id):
-            await self._compact_claude(session_id)            # the usual way out of a long conversation
+        if not fork:
+            if session_id in self._handing_off:
+                raise ControlError("the session is already moving to another harness")
+            self._handing_off.add(session_id)
+        new_id: str | None = None
+        try:
             items = await self._source_items(session_id)
             msgs = handoff.conversation(handoff.since_last_compaction(items))
-        if not msgs:
-            raise ControlError("the session has no conversation to move")
-        record_dir = self.cfg.state_dir / "handoff"
-        record_dir.mkdir(parents=True, exist_ok=True)
-        record = record_dir / f"{session_id}-{int(time.time())}.md"
-        record.write_text(handoff.record_text(handoff.conversation(items)), encoding="utf-8")
-        msgs = handoff.fit(msgs, handoff.BUDGET_CHARS, str(record))
-        head = handoff.preface(source, summary.get("model"))
-        title = summary.get("customTitle") or summary.get("title") or summary.get("firstPrompt")
-        shown = handoff.display_items(items, session_id, target, fork=fork)
+            if handoff.size(msgs) > handoff.BUDGET_CHARS and source == "claude" and not self.harnesses.has(session_id):
+                await self._compact_claude(session_id)            # the usual way out of a long conversation
+                items = await self._source_items(session_id)
+                msgs = handoff.conversation(handoff.since_last_compaction(items))
+            if not msgs:
+                raise ControlError("the session has no conversation to move")
+            record_dir = self.cfg.state_dir / "handoff"
+            record_dir.mkdir(parents=True, exist_ok=True)
+            record = record_dir / f"{session_id}-{int(time.time())}.md"
+            record.write_text(handoff.record_text(handoff.conversation(items)), encoding="utf-8")
+            msgs = handoff.fit(msgs, handoff.BUDGET_CHARS, str(record))
+            head = handoff.preface(source, summary.get("model"))
+            title = summary.get("customTitle") or summary.get("title") or summary.get("firstPrompt")
+            shown = handoff.display_items(items, session_id, target, fork=fork)
 
-        if target == "claude":
-            setup = await self.claude_setup(api)
-            new_id = str(uuidlib.uuid4())
-            msgs[0] = {**msgs[0], "text": head + "\n\n" + msgs[0]["text"]}
-            records = handoff.claude_records(msgs, new_id, cwd, summary.get("model"), title)
-            await asyncio.to_thread(handoff.write_claude_transcript, self.cfg.projects_dir, cwd, records, new_id)
-            self._handoff_file(new_id).write_text(json.dumps({"items": shown}, ensure_ascii=False), encoding="utf-8")
-            self.store.refresh()
-            self.prefs.remember(new_id, api=setup.route, handoffFrom=session_id)
-            await self.ensure_process(new_id, model=model, permission_mode=mode)
-        elif HARNESSES[target].handoff == "inject-responses":
-            driver = await self.harnesses.create(target, cwd, model=model, mode=mode, api=api)
-            new_id = str(driver.session_id)
-            msgs[0] = {**msgs[0], "text": head + "\n\n" + msgs[0]["text"]}
-            await driver.peer.request("thread/inject_items", {"threadId": new_id, "items": handoff.responses_items(msgs)},
-                                      timeout=120)
-            await self.harnesses.set_imported(new_id, shown, session_id, title)
-        else:
-            # Nothing to write into: the history goes in front of the first message sent there.
-            driver = await self.harnesses.create(target, cwd, model=model, mode=mode, api=api)
-            new_id = str(driver.session_id)
-            await self.harnesses.set_imported(new_id, shown, session_id, title, pending=handoff.history_text(msgs, head))
+            if target == "claude":
+                setup = await self.claude_setup(api)
+                new_id = str(uuidlib.uuid4())
+                msgs[0] = {**msgs[0], "text": head + "\n\n" + msgs[0]["text"]}
+                records = handoff.claude_records(msgs, new_id, cwd, summary.get("model"), title)
+                await asyncio.to_thread(handoff.write_claude_transcript, self.cfg.projects_dir, cwd, records, new_id)
+                self._handoff_file(new_id).write_text(json.dumps({"items": shown}, ensure_ascii=False), encoding="utf-8")
+                self.store.refresh()
+                self.prefs.remember(new_id, api=setup.route, handoffFrom=session_id)
+                await self.ensure_process(new_id, model=model, permission_mode=mode)
+            elif HARNESSES[target].handoff == "inject-responses":
+                driver = await self.harnesses.create(target, cwd, model=model, mode=mode, api=api)
+                new_id = str(driver.session_id)
+                msgs[0] = {**msgs[0], "text": head + "\n\n" + msgs[0]["text"]}
+                await driver.peer.request("thread/inject_items", {"threadId": new_id, "items": handoff.responses_items(msgs)},
+                                          timeout=120)
+                await self.harnesses.set_imported(new_id, shown, session_id, title)
+            else:
+                # Nothing to write into: the history goes in front of the first message sent there.
+                driver = await self.harnesses.create(target, cwd, model=model, mode=mode, api=api)
+                new_id = str(driver.session_id)
+                await self.harnesses.set_imported(new_id, shown, session_id, title, pending=handoff.history_text(msgs, head))
 
-        # One session for the user: the source steps aside and points to the new one (a fork leaves it be).
-        if fork:
-            pass
-        elif self.harnesses.has(session_id):
-            self.harnesses.records[session_id]["handedOffTo"] = new_id
-            self.harnesses._save()
-            await self.auto_resume.taken_over(session_id)
-        else:
-            self.prefs.remember(session_id, handedOffTo=new_id)
-            await self.auto_resume.taken_over(session_id)
-        log.info("moved the conversation of %s (%s) to %s session %s", session_id[:8], source, target, new_id[:8])
-        await self.broadcast_global({"ev": "sessions", "sessions": [self.session_summary(new_id), self.session_summary(session_id)],
-                                     "removed": []})
+            # One session for the user: the source steps aside, stops running, and points to the new one.
+            if not fork:
+                if self.harnesses.has(session_id):
+                    self.harnesses.records[session_id]["handedOffTo"] = new_id
+                    self.harnesses._save()
+                    await self.harnesses.stop(session_id)
+                else:
+                    self.prefs.remember(session_id, handedOffTo=new_id)
+                    await self.stop_process(session_id)
+                await self.auto_resume.taken_over(session_id)
+            log.info("moved the conversation of %s (%s) to %s session %s", session_id[:8], source, target, new_id[:8])
+            await self.broadcast_global({"ev": "sessions", "sessions": [self.session_summary(new_id), self.session_summary(session_id)],
+                                         "removed": []})
+        finally:
+            if not fork:
+                self._handing_off.discard(session_id)
+                held = self._handoff_held.pop(session_id, [])
+                dest = new_id or session_id
+                if held and self.delivery is not None:
+                    for h in held:
+                        try:
+                            await self.delivery.send(dest, h["text"], h["attachments"], h["uuid"])
+                        except Exception:  # noqa: BLE001
+                            log.exception("failed to forward message held during handoff to %s", dest[:8])
+        assert new_id is not None
         return new_id
 
     async def rename(self, session_id: str, title: str) -> None:

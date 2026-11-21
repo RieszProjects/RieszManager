@@ -276,7 +276,9 @@ class AcpDriver(Driver):
 
     def _start_turn(self, text: str, images: list[dict[str, Any]], uuid: str) -> None:
         self._turn += 1
-        self.items.put(user_item(f"a:u:{uuid}", text, uuid=uuid, origin="user"))
+        shown_images = [{"ref": f"file:{im['path']}", "mediaType": im.get("mime") or "image/png"}
+                        for im in images if im.get("path")]
+        self.items.put(user_item(f"a:u:{uuid}", text, uuid=uuid, images=shown_images, origin="user"))
         self._current = None
         self.turn_started()
         self._prompt_task = asyncio.get_running_loop().create_task(self._run_prompt(self._prompt(text, images)))

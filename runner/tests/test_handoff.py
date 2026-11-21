@@ -136,6 +136,113 @@ class PlainHistoryTest(unittest.TestCase):
         items = [{"kind": "user", "text": "old"}, {"kind": "compact", "summary": "摘要"}, {"kind": "user", "text": "new"}]
         self.assertEqual([i.get("text") for i in handoff.since_last_compaction(items)], [None, "new"])
 
+    def test_display_items_tags_transcript_image_refs(self):
+        items = [
+            {"kind": "user", "key": "u1", "text": "pic", "images": [
+                {"ref": "123:message.content.0", "mediaType": "image/png"},
+                {"ref": "file:/tmp/up/a.png", "mediaType": "image/png"},
+            ]},
+        ]
+        shown = handoff.display_items(items, "11111111-1111-4111-8111-111111111111", "codex")
+        self.assertEqual(shown[0]["images"][0]["ref"], "sid:11111111-1111-4111-8111-111111111111:123:message.content.0")
+        self.assertEqual(shown[0]["images"][1]["ref"], "file:/tmp/up/a.png")
+        # Multi-hop preserves the original owner sid and never mutates the input.
+        hop2 = handoff.display_items(shown, "22222222-2222-4222-8222-222222222222", "antigravity")
+        self.assertEqual(hop2[0]["images"][0]["ref"], "sid:11111111-1111-4111-8111-111111111111:123:message.content.0")
+        self.assertEqual(items[0]["images"][0]["ref"], "123:message.content.0")
+
+
+class HandoffImageAndHoldTest(unittest.IsolatedAsyncioTestCase):
+    async def test_serve_image_across_handoff_chain(self):
+        import base64
+        from types import SimpleNamespace
+        from riesz_runner.server import _serve_image
+        from riesz_runner.store import SessionStore
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            projects = root / "projects"
+            uploads = root / "uploads"
+            uploads.mkdir()
+            pdir = projects / "-w-proj"
+            pdir.mkdir(parents=True)
+            png = b"\x89PNG\r\n\x1a\nfake"
+            sid_claude = "11111111-1111-4111-8111-111111111111"
+            sid_codex = "22222222-2222-4222-8222-222222222222"
+            sid_other = "33333333-3333-4333-8333-333333333333"
+            rec = {"type": "user", "message": {"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": base64.b64encode(png).decode()}},
+            ]}}
+            (pdir / f"{sid_claude}.jsonl").write_text(json.dumps(rec) + "\n", encoding="utf-8")
+            store = SessionStore(projects)
+            store.refresh()
+
+            up = uploads / "a.png"
+            up.write_bytes(png)
+            hub = SimpleNamespace(
+                cfg=SimpleNamespace(uploads_dir=uploads),
+                store=store,
+                prefs=SimpleNamespace(get=lambda s: {}),
+                harnesses=SimpleNamespace(records={sid_codex: {"handoffFrom": sid_claude}}),
+            )
+            # Tagged ref resolves through the chain
+            r1 = _serve_image(hub, sid_codex, f"sid:{sid_claude}:0:message.content.0")
+            self.assertEqual(r1.status, 200)
+            self.assertEqual(r1.body, png)
+            # Legacy untagged ref also resolves through the chain
+            r2 = _serve_image(hub, sid_codex, "0:message.content.0")
+            self.assertEqual(r2.status, 200)
+            self.assertEqual(r2.body, png)
+            # Unrelated session cannot read another session's image
+            r3 = _serve_image(hub, sid_other, f"sid:{sid_claude}:0:message.content.0")
+            self.assertEqual(r3.status, 404)
+            # Uploaded file works on Claude session too
+            r4 = _serve_image(hub, sid_claude, f"file:{up}")
+            self.assertEqual(r4.status, 200)
+
+    async def test_message_sent_during_handoff_is_held_and_forwarded(self):
+        from unittest.mock import AsyncMock
+        from types import SimpleNamespace
+        from riesz_runner.delivery import Delivery
+
+        held_list: dict[str, list] = {}
+        forwarded: list[tuple] = []
+
+        class FakeHub:
+            def __init__(self):
+                self._handing_off = {"src"}
+                self._handoff_held = held_list
+                self.prefs = SimpleNamespace(get=lambda s: {"handedOffTo": "dst"} if s == "src_done" else {})
+                self.harnesses = SimpleNamespace(records={"dst": {"cwd": "/w"}}, has=lambda s: s == "dst", send=AsyncMock(
+                    side_effect=lambda sid, text, att, uid, **kw: forwarded.append((sid, text, att, uid)) or {"uuid": uid, "held": False}
+                ))
+                self.broadcast_session = AsyncMock()
+                self.clear_interrupted = AsyncMock()
+
+            def final_handoff_target(self, sid):
+                return "dst" if sid == "src_done" else sid
+
+            def session_state(self, sid):
+                return {"queue": []}
+
+            async def hold_during_handoff(self, sid, uid, text, att, opts):
+                self._handoff_held.setdefault(sid, []).append({"uuid": uid, "text": text, "attachments": att, "preview": text, "options": opts, "ts": 0})
+
+        hub = FakeHub()
+        history = SimpleNamespace(record=lambda *a, **kw: None)
+        delivery = Delivery(hub, history)
+
+        res = await delivery.send("src", "带着截图的消息", [{"path": "/up/a.png", "mime": "image/png"}], "u-1")
+        self.assertTrue(res["held"])
+        self.assertEqual(len(held_list["src"]), 1)
+        self.assertEqual(forwarded, [])
+
+        # Once handed off, messages to the old id redirect to the new target
+        hub._handing_off.clear()
+        res2 = await delivery.send("src_done", "补发", [], "u-2")
+        self.assertFalse(res2["held"])
+        self.assertEqual(forwarded[0][:2], ("dst", "补发"))
+
 
 if __name__ == "__main__":
     unittest.main()

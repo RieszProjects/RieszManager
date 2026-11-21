@@ -420,6 +420,9 @@ class Harnesses:
         state["modes"] = [m.__dict__ for m in sample.modes()]
         state["api"] = rec.get("api")
         state["autoResume"] = self.hub.auto_resume.view(session_id)
+        held = self.hub.handoff_queue_entries(session_id)
+        if held:
+            state["queue"] = [*(state.get("queue") or []), *held]
         return state
 
     def items(self, session_id: str) -> list[dict[str, Any]]:
