@@ -1,4 +1,4 @@
-import { CheckCircle2, ChevronRight, Circle, CircleDot, CircleSlash, Globe, LoaderCircle, TriangleAlert, Workflow } from "lucide-react";
+import { CheckCircle2, ChevronRight, Circle, CircleDot, CircleSlash, Globe, LoaderCircle, StickyNote, TriangleAlert, Workflow } from "lucide-react";
 import { memo, useEffect, useState, type ReactNode } from "react";
 import { api, imageUrl } from "@/api/client";
 import type { ToolBlock as ToolBlockType, ToolResult } from "@/api/types";
@@ -6,6 +6,7 @@ import { CodeBlock } from "@/components/CodeBlock";
 import { DiffView, diffStats, patchHunks, type Hunk, type PatchChange } from "@/components/DiffView";
 import { shortPath } from "@/lib/format";
 import { harnessLabel } from "@/lib/harnesses";
+import { useNotes } from "@/features/notes/store";
 import { useSubagentLists } from "@/features/sessions/SessionSubagents";
 import { Markdown } from "@/components/Markdown";
 import { languageFor } from "@/lib/language";
@@ -316,6 +317,7 @@ function SubagentBar({ tool }: { tool: ToolBlockType }) {
 /** Riesz Manager's own tools under any harness's naming (mcp__riesz__x, "Run mcp_riesz_x", "x(...)"). */
 const RIESZ_LABELS: Record<string, string> = {
   send_file: "发送文件", browser_task: "浏览器任务", subagent_start: "子代理", subagent_send: "发给子代理",
+  note_write: "写便签", note_list: "查看便签", note_delete: "删除便签",
 };
 function rieszTool(name: string): string | null {
   const n = name.replace(/^Run /, "");
@@ -356,6 +358,24 @@ function ChildSessionLink({ tool }: { tool: ToolBlockType }) {
   );
 }
 
+/** Under a note_write call: jump straight to the floating sticky-notes window. */
+function NoteShortcut({ tool }: { tool: ToolBlockType }) {
+  const openNote = useNotes((s) => s.openNote);
+  const input = (tool.input ?? {}) as Record<string, unknown>;
+  const title = String(input.title ?? "").trim();
+  const explicitId = typeof input.id === "string" ? input.id.trim() : "";
+  const resultMatch = tool.result?.text?.match(/便签\s+([0-9a-f]{8})\b/i);
+  const noteId = explicitId || resultMatch?.[1] || null;
+  if (tool.result?.isError) return null;
+  return (
+    <button type="button" className="rz-child-link" onClick={() => openNote(noteId, "session")}>
+      <StickyNote size={13} />
+      <span>在便签窗口查看{title ? `「${title}」` : ""}</span>
+      <ChevronRight size={13} />
+    </button>
+  );
+}
+
 function ToolBlockImpl({ tool }: { tool: ToolBlockType }) {
   const { cwd, pendingTools, settledTools } = useSessionContext();
   const meta = toolMeta(tool.name, tool.input ?? {}, cwd);
@@ -379,6 +399,7 @@ function ToolBlockImpl({ tool }: { tool: ToolBlockType }) {
       </button>
       {(tool.name === "Agent" || tool.name === "Task") && <SubagentBar tool={tool} />}
       {isSendFile(tool.name) && <SentFiles tool={tool} />}
+      {rieszTool(tool.name) === "note_write" && <NoteShortcut tool={tool} />}
       {(rieszTool(tool.name) === "browser_task" || rieszTool(tool.name)?.startsWith("subagent_")) && <ChildSessionLink tool={tool} />}
       {open && (
         <div className="rz-tool-body">

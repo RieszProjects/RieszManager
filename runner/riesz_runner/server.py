@@ -31,6 +31,7 @@ from .hub import Hub
 from .probe import CapabilityProbe
 from .process import ControlError
 from .schedules import ScheduleError, system_timezone
+from .notes import NoteError
 from . import tools as tools_mod
 from .projects import ROOT_ID
 from .transcript import resolve_image
@@ -618,6 +619,55 @@ async def schedule_action(request: web.Request) -> web.Response:
     except ScheduleError as exc:
         return _err(400, str(exc))
     return _json({"schedule": _schedule_view(hub, s)})
+
+
+async def list_notes(request: web.Request) -> web.Response:
+    hub = request.app[HUB]
+    sid = request.query.get("session")
+    ids = set(_handoff_chain(hub, sid)) if sid else None
+    return _json({"notes": hub.notes.list(ids)})
+
+
+async def create_note(request: web.Request) -> web.Response:
+    hub = request.app[HUB]
+    body = await _body(request)
+    sid = str(body.get("sessionId") or "")
+    try:
+        note, created = await hub.notes.upsert(
+            sid,
+            str(body.get("content") or ""),
+            title=body.get("title") if body.get("title") is not None else None,
+            note_id=str(body["id"]) if body.get("id") else None,
+            color=str(body["color"]) if body.get("color") else None,
+        )
+    except NoteError as exc:
+        return _err(400, str(exc))
+    return _json({"note": note, "created": created})
+
+
+async def note_action(request: web.Request) -> web.Response:
+    hub = request.app[HUB]
+    note_id = request.match_info["id"]
+    action = request.match_info["action"]
+    try:
+        if action == "update":
+            note = await hub.notes.update(note_id, await _body(request))
+            return _json({"note": note})
+        if action == "delete":
+            await hub.notes.delete(note_id)
+            return _json({"ok": True})
+        return _err(404, "unknown action")
+    except NoteError as exc:
+        return _err(400, str(exc))
+
+
+async def clear_notes(request: web.Request) -> web.Response:
+    hub = request.app[HUB]
+    body = await _body(request)
+    sid = str(body.get("sessionId") or "")
+    ids = set(_handoff_chain(hub, sid)) if sid else None
+    removed = await hub.notes.clear(ids)
+    return _json({"ok": True, "removed": removed})
 
 
 def _handoff_chain(hub: Hub, sid: str) -> list[str]:
@@ -1508,6 +1558,10 @@ def build_app(cfg: Config) -> web.Application:
     r.add_get("/v1/schedules", list_schedules)
     r.add_post("/v1/schedules", create_schedule)
     r.add_post(r"/v1/schedules/{id:[0-9a-f]{1,32}}/{action:update|run|delete}", schedule_action)
+    r.add_get("/v1/notes", list_notes)
+    r.add_post("/v1/notes", create_note)
+    r.add_post("/v1/notes/clear", clear_notes)
+    r.add_post(r"/v1/notes/{id:[0-9a-f]{1,32}}/{action:update|delete}", note_action)
     r.add_post("/v1/sessions/{sid}/dismiss-interrupted", dismiss_interrupted)
     r.add_post("/v1/sessions/{sid}/cancel-auto-resume", cancel_auto_resume)
     r.add_post("/v1/sessions/{sid}/interrupt", interrupt)

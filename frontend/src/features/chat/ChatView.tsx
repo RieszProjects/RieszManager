@@ -23,6 +23,7 @@ import { toast, useUi } from "@/store/ui";
 import { Composer } from "../composer/Composer";
 import { MobileHeaderButtons } from "../layout/MobileHeaderButtons";
 import { RightDock, RightPanelButton } from "../layout/RightDock";
+import { NotesButton } from "../notes/NotesButton";
 import { MessageList } from "./MessageList";
 import { PendingPrompts } from "./PermissionCard";
 import { SessionContext } from "./SessionContext";
@@ -345,6 +346,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
               )}
             </div>
           </div>
+          <NotesButton sessionId={sessionId} />
           <SessionMenu sessionId={sessionId} state={state} cwd={summary?.cwd ?? null} title={sessionTitle(summary)} keepAlive={keepAlive}
             harness={harness} />
           {isMobile ? <MobileHeaderButtons side="right" /> : <RightPanelButton />}

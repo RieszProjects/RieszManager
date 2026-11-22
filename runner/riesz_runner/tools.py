@@ -30,6 +30,7 @@ import aiohttp
 
 from .drivers.base import ToolServer
 from .harnesses import HARNESSES
+from .notes import COLORS as NOTE_COLORS, NoteError
 from .shares import ShareError
 
 if TYPE_CHECKING:
@@ -37,7 +38,8 @@ if TYPE_CHECKING:
 
 SERVER_NAME = "riesz"
 INSTRUCTIONS = ("Riesz Manager 托管着这个会话。这里的工具可以定时唤醒本会话（到点给它发一条消息，重启后也有效）、"
-                "给别的会话发消息、开新会话、查看别的会话的状态和回复、把文件发给用户。"
+                "给别的会话发消息、开新会话、查看别的会话的状态和回复、把文件发给用户、"
+                "以及用 note_write 给用户写便签（持续显示在网页顶栏的浮动便签窗口里，不随上下文覆盖）。"
                 "如果同时挂载了 `browser`（chrome-devtools-mcp）服务器，操作服务器浏览器请直接用它，无需走 browser_task。")
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 DAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
@@ -349,6 +351,52 @@ def _size(n: int) -> str:
     return f"{n} B"
 
 
+# ---- reader sticky notes -----------------------------------------------------------------------
+
+def _note_line(n: dict[str, Any]) -> str:
+    head = f"{n['id']}"
+    if n.get("title"):
+        head += f"  【{n['title']}】"
+    if n.get("sessionId"):
+        head += f"  (会话 {n['sessionId'][:8]})"
+    preview = re.sub(r"\s+", " ", n.get("content") or "").strip()
+    return f"{head}\n{preview}"
+
+
+async def note_write(call: Call, a: dict[str, Any]) -> str:
+    content = str(a.get("content") or "").strip()
+    if not content:
+        raise ToolError("content 不能为空")
+    title = str(a["title"]) if a.get("title") is not None else None
+    note_id = str(a["id"]).strip() if a.get("id") else None
+    color = str(a["color"]) if a.get("color") else None
+    try:
+        note, created = await call.hub.notes.upsert(call.session_id, content, title=title, note_id=note_id, color=color)
+    except NoteError as exc:
+        raise ToolError(str(exc)) from None
+    verb = "已新建便签" if created else "已更新便签"
+    label = f"「{note['title']}」" if note.get("title") else ""
+    return f"{verb} {note['id']}{label}（已同步到网页顶栏的便签浮动窗口；后续更新或删除请传 id={note['id']}）"
+
+
+async def note_list(call: Call, a: dict[str, Any]) -> str:
+    query = "" if a.get("all") else f"?session={call.session_id}"
+    items = (await call.api("GET", "/v1/notes" + query)).get("notes", [])
+    return "\n\n".join(_note_line(n) for n in items) if items else "没有便签"
+
+
+async def note_delete(call: Call, a: dict[str, Any]) -> str:
+    note_id = str(a.get("id") or "").strip()
+    if not note_id:
+        raise ToolError("id 不能为空")
+    try:
+        removed = await call.hub.notes.delete(note_id)
+    except NoteError as exc:
+        raise ToolError(str(exc)) from None
+    label = f"「{removed['title']}」" if removed.get("title") else ""
+    return f"已删除便签 {removed['id']}{label}"
+
+
 # ---- browser tasks -----------------------------------------------------------------------------------
 
 # ---- subagents: sessions of any harness started for this one -------------------------------------------
@@ -527,6 +575,20 @@ TOOLS: list[Tool] = [
           "paths": {"type": "array", "items": {"type": "string"}, "description": "一次发多个文件时用"},
           "caption": {"type": "string", "description": "附一句说明（可选）"}},
          send_file),
+    Tool("note_write",
+         "给用户写一条便签：持续显示在网页顶栏的浮动便签小窗口里，不会随聊天滚走或被后续上下文覆盖。"
+         "适合放需要用户反复对照看的短信息（例如待选项、重要结论、操作步骤、端口/命令备忘等），可以建多条，每条建议精炼在几百字以内。"
+         "传 id 可更新已有便签。",
+         {"content": {"type": "string", "description": "便签正文（支持 Markdown，建议精炼在几百字以内）"},
+          "title": {"type": "string", "description": "便签标题（可选，简短概括主题）"},
+          "id": {"type": "string", "description": "要更新的已有便签 ID；不传则新建一条"},
+          "color": {"type": "string", "enum": list(NOTE_COLORS), "description": "色标（默认 amber；amber=重点，sage=完成/参考，slate=参数/信息，rose=注意/警告）"}},
+         note_write, required=("content",)),
+    Tool("note_list", "列出当前会话写给用户的便签（all 为真时列出所有会话的便签），含 ID、标题和内容。",
+         {"all": {"type": "boolean"}}, note_list, read_only=True),
+    Tool("note_delete", "删除一条不再需要给用户展示的便签。",
+         {"id": {"type": "string", "description": "note_write 或 note_list 返回的便签 ID"}},
+         note_delete, required=("id",)),
     Tool("schedule_add",
          "定时唤醒：到点时 Riesz Manager 给会话（默认是你自己所在的会话）发一条消息，会话没在运行就先启动它。"
          "定时保存在 Riesz Manager 里，重启、空闲关闭后都有效。at（每天几点）和 every（每隔多久）二选一。",

@@ -1,7 +1,7 @@
 /** Display metadata for tool calls: icon, label and a one-line argument summary. */
 import {
   Bot, BookOpen, CircleHelp, ClipboardList, FilePen, FilePlus2, FileSearch, FileText, Globe, Hammer,
-  ListChecks, type LucideIcon, Map as MapIcon, MonitorSmartphone, Plug, Search, Sparkles, SquareTerminal, Timer, Wrench,
+  ListChecks, type LucideIcon, Map as MapIcon, MonitorSmartphone, Plug, Search, Sparkles, SquareTerminal, StickyNote, Timer, Wrench,
 } from "lucide-react";
 import { shortPath } from "@/lib/format";
 
@@ -95,6 +95,9 @@ export function toolMeta(name: string, input: Record<string, unknown>, cwd?: str
     default: {
       const mcp = mcpParts(name);
       if (mcp) {
+        if (mcp.tool.startsWith("note_")) {
+          return { icon: StickyNote, label: mcp.tool, summary: firstLine(str(input.title ?? input.content ?? input.id ?? "")) };
+        }
         const icon = mcp.server.includes("chrome") ? MonitorSmartphone : Plug;
         const action = str(input.action);
         return { icon, label: mcp.tool, summary: action || firstLine(str(input.url ?? input.query ?? input.text ?? "")) };

@@ -14,6 +14,8 @@ import { HomeView, ProjectView } from "@/features/home/HomeView";
 import { AppShell } from "@/features/layout/AppShell";
 import { NewProjectDialog } from "@/features/sessions/NewProjectDialog";
 import { SubagentViewer } from "@/features/chat/SubagentViewer";
+import { NotesWindow } from "@/features/notes/NotesWindow";
+import { startNotes, useNotes } from "@/features/notes/store";
 import { ScheduleDialog } from "@/features/schedules/ScheduleDialog";
 import { startSchedules } from "@/features/schedules/store";
 import { NewSessionDialog } from "@/features/sessions/NewSessionDialog";
@@ -48,6 +50,7 @@ function useLiveData(enabled: boolean) {
         // Catch up on anything missed while disconnected.
         void useApp.getState().loadSessions().catch(() => undefined);
         void useApp.getState().loadProjects().catch(() => undefined);
+        void useNotes.getState().load().catch(() => undefined);
       }
     });
     socket.start();
@@ -55,6 +58,7 @@ function useLiveData(enabled: boolean) {
     const stopPresence = setupPresence();
     void syncPush();
     startSchedules();
+    startNotes();
     const timer = window.setInterval(() => void useApp.getState().loadProjects().catch(() => undefined), 60000);
     return () => {
       offEvent();
@@ -111,6 +115,7 @@ export function App() {
       <NewSessionDialog />
       <NewProjectDialog />
       <RenameDialog />
+      <NotesWindow />
       <DollSlot />
       <Toaster />
       <UpdateBanner />

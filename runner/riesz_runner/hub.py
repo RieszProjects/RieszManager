@@ -23,6 +23,7 @@ from .auto_resume import AutoResume
 from .balances import BalanceMonitor
 from .browser import ServerBrowser, mcp_server as browser_mcp_server
 from .limits import Limits
+from .notes import Notes
 from .shares import Shares
 from .schedules import Scheduler
 from .subagents import SubagentStore
@@ -96,6 +97,7 @@ class Hub:
         self.extra_tools = (browser_mcp,) if browser_mcp is not None else ()
         self.harnesses = Harnesses(self)
         self.shares = Shares(cfg.state_dir)        # files agents sent to the user (shares.py)
+        self.notes = Notes(self)                   # reader sticky notes shown in the web floating window (notes.py)
         self.limits = Limits(self)               # other subscriptions' usage limits (limits.py)
         self.auto_resume = AutoResume(self)      # retry turns that failed for quota / billing / transient errors
 
