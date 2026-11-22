@@ -415,7 +415,7 @@ class Harnesses:
             state = {"harness": rec["harness"], "hosted": False, "alive": False, "busy": False, "queue": [], "permissions": [],
                      "partial": None, "model": rec.get("model"), "effort": rec.get("effort"), "permissionMode": rec.get("mode"),
                      "capabilities": cls.capabilities.as_dict(), "exitCode": driver.exit_code if driver else None,
-                     "lastResult": driver.last_result if driver else None}
+                     "lastResult": driver.last_result if driver and driver.last_result else rec.get("lastResult")}
         sample = driver or cls(cwd="/", sink=_nowhere)
         state["modes"] = [m.__dict__ for m in sample.modes()]
         state["api"] = rec.get("api")
@@ -783,6 +783,8 @@ class Harnesses:
             self._active[sid] = time.time()
         if ev == "result" and rec is not None:
             rec["updatedAt"] = time.time()
+            if event.get("result"):
+                rec["lastResult"] = event["result"]
             self._save()
             await self.hub.auto_resume.on_result(sid, event.get("result") or {})
         if ev == "exit" and rec is not None:

@@ -33,11 +33,20 @@ export function turnStatus(items: Item[], state: SessionState | null): TurnStatu
   }
   const trailing = items.slice(lastPrompt + 1);
   const unresolved: { tool: ToolBlock; ts: string | null }[] = [];
+  const superseded: ToolBlock[] = [];
   let answered = false;
   for (const it of trailing) {
     if (it.kind === "assistant") {
       if (!it.synthetic) answered = true;
-      for (const b of it.blocks) if (b.type === "tool" && !b.result) unresolved.push({ tool: b, ts: it.ts });
+      for (const b of it.blocks) {
+        if (b.type === "tool" && !b.result) {
+          unresolved.push({ tool: b, ts: it.ts });
+        } else if (b.type === "text" && !it.synthetic && b.text.trim() && unresolved.length > 0) {
+          // The agent wrote a reply after these tool calls: they already finished (the harness just omitted their results).
+          for (const u of unresolved) superseded.push(u.tool);
+          unresolved.length = 0;
+        }
+      }
     } else if (it.kind === "output" || it.kind === "notice" || it.kind === "compact") {
       answered = true;
     }
@@ -50,6 +59,8 @@ export function turnStatus(items: Item[], state: SessionState | null): TurnStatu
   const result = state?.lastResult;
   const lastCall = unresolved.length ? Date.parse(unresolved[unresolved.length - 1].ts ?? "") / 1000 : NaN;
   const endedFine = !working && !!result && result.subtype === "success" && !result.isError && result.ts >= lastCall;
+  const settledTools = new Set<string>(superseded.map((t) => t.id));
+  if (endedFine) for (const u of unresolved) settledTools.add(u.tool.id);
 
   return {
     working,
@@ -57,7 +68,7 @@ export function turnStatus(items: Item[], state: SessionState | null): TurnStatu
     waitingTool: waiting?.tool ?? null,
     waitingSince: waiting?.ts ?? null,
     backgroundTasks,
-    settledTools: new Set(endedFine ? unresolved.map((u) => u.tool.id) : []),
+    settledTools,
     terminated: !working && !interrupted && !endedFine && backgroundTasks.length === 0 && (unresolved.length > 0 || promptUnanswered),
   };
 }

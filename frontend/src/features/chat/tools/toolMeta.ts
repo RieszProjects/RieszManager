@@ -77,6 +77,7 @@ export function toolMeta(name: string, input: Record<string, unknown>, cwd?: str
     case "ScheduleWakeup":
     case "CronCreate":
       return { icon: Timer, label: "定时", summary: str(input.reason ?? input.schedule) };
+    case "sleep":
     case "Sleep": {
       const ms = Number(input.durationMs);
       return { icon: Timer, label: "等待", summary: Number.isFinite(ms) ? `${Math.round(ms / 1000)} 秒` : "" };
