@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from .config import Config
 from .live import LiveProcess, scan_live
 from .process import ClaudeProcess, ControlError
-from .tools import server as tools_server
+from .tools import SubagentWatcher, server as tools_server
 from .projects import ProjectResolver
 from .session_prefs import SessionPrefs
 from .auto_resume import AutoResume
@@ -98,6 +98,7 @@ class Hub:
         self.harnesses = Harnesses(self)
         self.shares = Shares(cfg.state_dir)        # files agents sent to the user (shares.py)
         self.notes = Notes(self)                   # reader sticky notes shown in the web floating window (notes.py)
+        self.subagent_watcher = SubagentWatcher(self)  # persistent parent callbacks for subagent turns
         self.limits = Limits(self)               # other subscriptions' usage limits (limits.py)
         self.auto_resume = AutoResume(self)      # retry turns that failed for quota / billing / transient errors
 
@@ -522,11 +523,13 @@ class Hub:
             await self._attention_from(proc, event)
         if ev == "result":
             await self.auto_resume.on_result(proc.session_id, event.get("result") or {})
+            self.subagent_watcher.on_result(proc.session_id, event)
         if ev == "exit":
             self._remember(proc)
             self._poke(proc.session_id)
             await self.auto_resume.on_exit(proc.session_id, during_turn=bool(event.get("duringTurn")),
                                            requested=bool(event.get("requested")))
+            self.subagent_watcher.on_exit(proc.session_id, event)
             await self.broadcast_global({"ev": "live", "live": self.live_list()})
         if ev == "state":
             self._remember(proc)
@@ -716,16 +719,16 @@ class Hub:
     # ---- model APIs (routes.py) ---------------------------------------------------
 
     def session_working(self, session_id: str) -> bool | None:
-        """Whether a hosted session of any harness is busy (a turn, queued messages, a prompt); None: not running."""
+        """Whether a hosted session of any harness is busy (a turn, queued messages, a prompt, or open background tasks); None: not running."""
         if self.harnesses.has(session_id):
             driver = self.harnesses.drivers.get(session_id)
             if driver is None or not driver.alive:
                 return None
-            return bool(driver.busy or driver.permissions or getattr(driver, "_queue", None))
+            return bool(driver.busy or driver.permissions or driver.tasks or getattr(driver, "_queue", None))
         proc = self.get_hosted(session_id)
         if proc is None or not proc.alive:
             return None
-        return bool(proc.busy or proc.queue or proc.permissions)
+        return bool(proc.busy or proc.queue or proc.permissions or proc.tasks)
 
     def _last_active(self, sid: str, pref: dict[str, Any]) -> float:
         """When a session last did something (its subagent row is "recent" for a while after)."""

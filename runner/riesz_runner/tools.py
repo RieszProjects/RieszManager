@@ -430,47 +430,214 @@ def _harness_name(hub: Hub, sid: str) -> str:
     return "Claude Code" if harness == "claude" else HARNESSES[harness].name
 
 
-async def _until_done(hub: Hub, sid: str, seconds: float) -> bool:
-    """Wait for the session's turn to end (True), or give up after `seconds` (False)."""
-    start = time.time()
-    seen_work = False
-    while time.time() - start < seconds:
-        working = hub.session_working(sid)
-        if working is None:                      # not running (any more)
-            return True
-        if working:
-            seen_work = True
-        elif seen_work or time.time() - start > 120:
-            return True
-        await asyncio.sleep(1.5)
-    return False
+async def _last_reply_item(hub: Hub, sid: str, *, include_error: bool = False) -> tuple[str | None, str]:
+    """Latest assistant reply after the last user message: `(item_key, text)` (or `(None, "")`)."""
+    if hub.harnesses.has(sid):
+        items = hub.harnesses.items(sid)
+    else:
+        view = await hub.catch_up(sid)
+        items = view.items if view is not None else []
+    error_note: tuple[str | None, str] | None = None
+    for item in reversed(items):
+        kind = item.get("kind")
+        if kind == "user":
+            break
+        if kind == "assistant":
+            texts = [b.get("text", "") for b in item.get("blocks") or () if b.get("type") == "text" and b.get("text")]
+            if texts:
+                key = str(item.get("key") or item.get("uuid") or "") or None
+                return key, "\n\n".join(texts).strip()
+        elif include_error and error_note is None and kind == "notice" and item.get("level") == "error":
+            text = str(item.get("text") or "").strip()
+            if text:
+                key = str(item.get("key") or item.get("uuid") or "") or None
+                error_note = (key, text)
+    return error_note or (None, "")
 
 
-async def _reply_when_done(call: Call, child: str, wait: bool, label: str, stop_after: bool = False) -> str:
-    """The child's reply once its turn ends: within the call (up to WAIT), or later as a message to the caller."""
-    hub = call.hub
+class SubagentWatcher:
+    """Delivers subagent turn replies to the parent session, including autonomous follow-up turns
+    after background commands or timers finish (e.g. Antigravity waking up on its own)."""
 
-    async def reply() -> str:
-        text = await _last_reply(call, child)
+    def __init__(self, hub: Hub) -> None:
+        self.hub = hub
+        self._sync: dict[str, asyncio.Event] = {}
+        self._sync_saw_result: set[str] = set()
+        self._delivered: dict[str, tuple[str | None, str]] = {}
+        self._reported_this_prompt: set[str] = set()
+        self._stop_after: set[str] = set()
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    def _lock(self, child: str) -> asyncio.Lock:
+        lock = self._locks.get(child)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[child] = lock
+        return lock
+
+    def _parent_of(self, child: str) -> tuple[str, dict[str, Any]] | tuple[None, dict[str, Any]]:
+        pref = self.hub.prefs.get(child) or {}
+        parent = pref.get("subagentOf")
+        return (parent if isinstance(parent, str) and parent else None), pref
+
+    def prepare_prompt(self, child: str, *, sync_wait: bool, stop_after: bool = False) -> None:
+        """Register before sending a prompt to `child`, so fast completions cannot race."""
+        self._reported_this_prompt.discard(child)
         if stop_after:
-            with contextlib.suppress(ToolError):
-                await call.api("POST", f"/v1/sessions/{child}/stop", {})
-        _announce(hub, call.session_id)
-        return text or "（它没有给出回复）"
+            self._stop_after.add(child)
+        if sync_wait:
+            self._sync[child] = asyncio.Event()
+            self._sync_saw_result.discard(child)
 
-    if wait and await _until_done(hub, child, WAIT):
-        return await reply()
+    async def wait_sync(self, child: str, seconds: float) -> bool:
+        """Wait up to `seconds` for `child` to finish its turn and any open background tasks."""
+        ev = self._sync.get(child)
+        start = time.time()
+        seen_work = False
+        while time.time() - start < seconds:
+            working = self.hub.session_working(child)
+            if working is None:                      # not running (any more)
+                return True
+            if working:
+                seen_work = True
+            elif child in self._sync_saw_result or seen_work or time.time() - start > 120:
+                return True
+            if ev is not None:
+                ev.clear()
+                try:
+                    await asyncio.wait_for(ev.wait(), timeout=1.5)
+                except asyncio.TimeoutError:
+                    pass
+            else:
+                await asyncio.sleep(1.5)
+        return False
 
-    async def later() -> None:
-        await _until_done(hub, child, 6 * 3600)
-        text = await reply()
-        await hub.delivery.send(call.session_id, f"[{label} {child[:8]} 这一轮做完了，回复如下]\n\n{text}", [], str(uuidlib.uuid4()))
-    _keep(asyncio.get_running_loop().create_task(later()))
-    return (f"{label} {child[:8]} 还在做（可能在等用户批准）。做完后它的回复会作为一条消息发给你，不用反复查。")
+    async def _stop_child(self, child: str) -> None:
+        with contextlib.suppress(Exception):
+            if self.hub.harnesses.has(child):
+                await self.hub.harnesses.stop(child)
+            else:
+                await self.hub.stop_session(child)
+
+    async def finish_sync(self, child: str, finished: bool) -> str | None:
+        """End a synchronous wait. Returns the reply text if finished, or None to hand off to async callbacks."""
+        async with self._lock(child):
+            self._sync.pop(child, None)
+            self._sync_saw_result.discard(child)
+            parent, _ = self._parent_of(child)
+            if finished:
+                key, text = await _last_reply_item(self.hub, child, include_error=True)
+                if text:
+                    self._delivered[child] = (key, text)
+                    self._reported_this_prompt.add(child)
+                if child in self._stop_after:
+                    self._stop_after.discard(child)
+                    await self._stop_child(child)
+                if parent:
+                    _announce(self.hub, parent)
+                return text or "（它没有给出回复）"
+            # Timed out: if the child finished in the tiny window before we left _sync, deliver asynchronously.
+            if not self.hub.session_working(child):
+                _keep(asyncio.get_running_loop().create_task(self._deliver(child, {})))
+            return None
+
+    def on_result(self, child: str, event: dict[str, Any]) -> None:
+        """Called whenever any hosted session finishes a turn (prompted or autonomous)."""
+        parent, _ = self._parent_of(child)
+        if not parent:
+            return
+        _announce(self.hub, parent)
+        ev = self._sync.get(child)
+        if ev is not None:
+            self._sync_saw_result.add(child)
+            ev.set()
+            return
+        _keep(asyncio.get_running_loop().create_task(self._deliver(child, event)))
+
+    def on_exit(self, child: str, event: dict[str, Any]) -> None:
+        """Called whenever any hosted session exits."""
+        parent, _ = self._parent_of(child)
+        if not parent:
+            return
+        _announce(self.hub, parent)
+        ev = self._sync.get(child)
+        if ev is not None:
+            self._sync_saw_result.add(child)
+            ev.set()
+            return
+        _keep(asyncio.get_running_loop().create_task(self._deliver_exit(child, event)))
+
+    async def _deliver(self, child: str, event: dict[str, Any]) -> None:
+        async with self._lock(child):
+            if child in self._sync:
+                return
+            parent, pref = self._parent_of(child)
+            if not parent:
+                return
+            # Still busy, queued, waiting on a permission prompt, or running open background tasks:
+            # wait for the later autonomous turn that completes them.
+            if self.hub.session_working(child):
+                return
+            is_error = bool((event.get("result") or {}).get("isError"))
+            key, text = await _last_reply_item(self.hub, child, include_error=is_error)
+            if not text:
+                return
+            if self._delivered.get(child) == (key, text):
+                return
+            self._delivered[child] = (key, text)
+            is_followup = child in self._reported_this_prompt
+            self._reported_this_prompt.add(child)
+            if child in self._stop_after:
+                self._stop_after.discard(child)
+                await self._stop_child(child)
+            target = self.hub.final_handoff_target(parent)
+            label = "浏览器任务" if pref.get("browser") else "子代理"
+            header = (f"[{label} {child[:8]} 后台任务完成后又更新了回复，最新结果如下]"
+                      if is_followup else f"[{label} {child[:8]} 这一轮做完了，回复如下]")
+            if self.hub.delivery is not None:
+                await self.hub.delivery.send(target, f"{header}\n\n{text}", [], str(uuidlib.uuid4()))
+            _announce(self.hub, parent)
+
+    async def _deliver_exit(self, child: str, event: dict[str, Any]) -> None:
+        async with self._lock(child):
+            if child in self._sync or event.get("requested"):
+                return
+            parent, pref = self._parent_of(child)
+            if not parent:
+                return
+            key, text = await _last_reply_item(self.hub, child, include_error=True)
+            target = self.hub.final_handoff_target(parent)
+            label = "浏览器任务" if pref.get("browser") else "子代理"
+            if text and self._delivered.get(child) != (key, text):
+                self._delivered[child] = (key, text)
+                is_followup = child in self._reported_this_prompt
+                self._reported_this_prompt.add(child)
+                header = (f"[{label} {child[:8]} 后台任务完成后又更新了回复，最新结果如下]"
+                          if is_followup else f"[{label} {child[:8]} 这一轮做完了，回复如下]")
+                if self.hub.delivery is not None:
+                    await self.hub.delivery.send(target, f"{header}\n\n{text}", [], str(uuidlib.uuid4()))
+            elif event.get("duringTurn") or event.get("code") not in (0, None):
+                code = event.get("code")
+                msg = f"[{label} {child[:8]} 进程异常退出（代码 {code}），未能完成这一轮]"
+                if self.hub.delivery is not None:
+                    await self.hub.delivery.send(target, msg, [], str(uuidlib.uuid4()))
+            _announce(self.hub, parent)
+
+
+async def _reply_when_done(call: Call, child: str, wait: bool, label: str) -> str:
+    """The child's reply once its turn ends: within the call (up to WAIT), or later via SubagentWatcher."""
+    watcher = call.hub.subagent_watcher
+    if wait:
+        finished = await watcher.wait_sync(child, WAIT)
+        text = await watcher.finish_sync(child, finished)
+        if text is not None:
+            return text
+    return f"{label} {child[:8]} 还在做（可能在等用户批准）。做完后它的回复会作为一条消息发给你，不用反复查。"
 
 
 async def _start_child(call: Call, harness: str, text: str, label: str, *, mode: str | None, model: str | None = None,
-                       effort: str | None = None, directory: str | None = None, browser: bool = False) -> str:
+                       effort: str | None = None, directory: str | None = None, browser: bool = False,
+                       sync_wait: bool = True, stop_after: bool = False) -> str:
     hub = call.hub
     if (hub.prefs.get(call.session_id) or {}).get("subagentOf"):
         raise ToolError("子代理里不能再开子代理")
@@ -489,10 +656,16 @@ async def _start_child(call: Call, harness: str, text: str, label: str, *, mode:
                        browser="1" if browser else None)
     with contextlib.suppress(ToolError):
         await call.api("POST", f"/v1/sessions/{child}/rename", {"title": label[:60]})
-    if harness == "claude":
-        await hub.delivery.send_new(proc, text, [], str(uuidlib.uuid4()))
-    else:
-        await hub.delivery.send(child, text, [], str(uuidlib.uuid4()))
+    hub.subagent_watcher.prepare_prompt(child, sync_wait=sync_wait, stop_after=stop_after)
+    try:
+        if harness == "claude":
+            await hub.delivery.send_new(proc, text, [], str(uuidlib.uuid4()))
+        else:
+            await hub.delivery.send(child, text, [], str(uuidlib.uuid4()))
+    except Exception:
+        if sync_wait:
+            await hub.subagent_watcher.finish_sync(child, False)
+        raise
     _announce(hub, call.session_id)
     return child
 
@@ -512,10 +685,11 @@ async def subagent_start(call: Call, a: dict[str, Any]) -> str:
     else:                                       # Claude Code: its mode now is in the running process's state
         summary = {**hub.session_summary(caller), "permissionMode": (hub.session_state(caller) or {}).get("permissionMode")}
     mode = hub._closest_mode(harness, hub._mode_tier(caller, summary))
+    wait = a.get("wait", True) is not False
     text = SUBAGENT_PREFACE.format(name=_harness_name(hub, caller), caller=caller[:8], task=task)
     child = await _start_child(call, harness, text, task, mode=mode, model=a.get("model") or None,
-                               directory=a.get("directory"))
-    reply = await _reply_when_done(call, child, a.get("wait", True) is not False, "子代理")
+                               directory=a.get("directory"), sync_wait=wait)
+    reply = await _reply_when_done(call, child, wait, "子代理")
     return f"子代理 {child[:8]}（{_harness_name(hub, child)}）：\n\n{reply}\n\n（接着跟它说话用 subagent_send，agent_id={child[:8]}）"
 
 
@@ -527,10 +701,17 @@ async def subagent_send(call: Call, a: dict[str, Any]) -> str:
     text = str(a.get("message") or "").strip()
     if not text:
         raise ToolError("message 不能为空")
-    await hub.delivery.send(child, FOLLOW_UP.format(name=_harness_name(hub, call.session_id), caller=call.session_id[:8], text=text),
-                            [], str(uuidlib.uuid4()))
+    wait = a.get("wait", True) is not False
+    hub.subagent_watcher.prepare_prompt(child, sync_wait=wait)
+    try:
+        await hub.delivery.send(child, FOLLOW_UP.format(name=_harness_name(hub, call.session_id), caller=call.session_id[:8], text=text),
+                                [], str(uuidlib.uuid4()))
+    except Exception:
+        if wait:
+            await hub.subagent_watcher.finish_sync(child, False)
+        raise
     _announce(hub, call.session_id)
-    reply = await _reply_when_done(call, child, a.get("wait", True) is not False, "子代理")
+    reply = await _reply_when_done(call, child, wait, "子代理")
     return f"子代理 {child[:8]}（{_harness_name(hub, child)}）：\n\n{reply}"
 
 
@@ -540,8 +721,8 @@ async def browser_task(call: Call, a: dict[str, Any]) -> str:
         raise ToolError("task 不能为空")
     text = BROWSER_PREFACE.format(name=_harness_name(call.hub, call.session_id), caller=call.session_id[:8], task=task)
     child = await _start_child(call, "claude", text, "浏览器任务：" + task, mode=BROWSER_MODE, model=BROWSER_MODEL,
-                               effort=BROWSER_EFFORT, browser=True)
-    return await _reply_when_done(call, child, True, "浏览器任务", stop_after=True)
+                               effort=BROWSER_EFFORT, browser=True, sync_wait=True, stop_after=True)
+    return await _reply_when_done(call, child, True, "浏览器任务")
 
 
 _SESSION_ID = {"type": "string", "description": "会话 ID（可以只写前 8 位）"}

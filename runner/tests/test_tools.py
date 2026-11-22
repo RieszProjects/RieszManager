@@ -219,6 +219,74 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
         text, error = await relay.call("subagent_start", task="x", harness="nope")
         self.assertTrue(error)
 
+    async def test_subagent_autonomous_followup_and_background_task_callbacks(self):
+        from riesz_runner.drivers.base import assistant_item, tool_block, tool_result
+
+        me = await self.session("parent")
+        hub = self.app[HUB]
+        hub.harnesses.drivers[me].fake_pid = os.getpid()
+        parent_driver = hub.harnesses.drivers[me]
+        parent_msgs = lambda: [it["text"] for it in parent_driver.items.items if it.get("kind") == "user"]
+        relay = await self.relay()
+
+        # 1) Sync wait=True returns Turn 1 directly (no duplicate callback), then an autonomous
+        #    tool-only turn is deduped, then an autonomous Turn 3 with new text notifies the parent.
+        text, error = await relay.call("subagent_start", task="先试点生图", harness="fake")
+        self.assertFalse(error, text)
+        child_prefix = text.split("子代理 ")[1][:8]
+        child = next(s for s in hub.harnesses.drivers if s.startswith(child_prefix))
+        child_driver = hub.harnesses.drivers[child]
+        await asyncio.sleep(0.05)
+        self.assertEqual(len(parent_msgs()), 1)                       # only the initial "parent" prompt; no dup for Turn 1
+
+        # Silent tool-only autonomous turn (no text blocks) -> must NOT re-send Turn 1.
+        child_driver.items.put(assistant_item("auto:toolonly", [tool_block("t1", "Bash", {"command": "echo"}, tool_result("ok"))]))
+        await child_driver.emit({"ev": "result", "result": {"subtype": "success", "isError": False}, "text": ""})
+        await asyncio.sleep(0.05)
+        self.assertEqual(len(parent_msgs()), 1)
+
+        # Autonomous Turn 3 with real final delivery -> parent gets follow-up callback automatically!
+        child_driver.items.put(assistant_item("auto:final", [{"type": "text", "text": "全部 13 种怪物已生成完毕"}]))
+        await child_driver.emit({"ev": "result", "result": {"subtype": "success", "isError": False}, "text": "全部 13 种怪物已生成完毕"})
+        await asyncio.sleep(0.1)
+        self.assertEqual(len(parent_msgs()), 2)
+        self.assertIn("后台任务完成后又更新了回复", parent_msgs()[-1])
+        self.assertIn("全部 13 种怪物已生成完毕", parent_msgs()[-1])
+
+        # 2) Async wait=False with an open background task at Turn 1 end:
+        #    Turn 1 is deferred while driver.tasks is non-empty; once the background task clears and
+        #    autonomous Turn 2 finishes, parent gets ONE clean callback with Turn 2's final reply.
+        text2, error2 = await relay.call("subagent_send", agent_id=child_prefix, message="跑 build", wait=False)
+        self.assertFalse(error2, text2)
+        await asyncio.sleep(0.05)
+        before_bg = len(parent_msgs())
+
+        # Simulate a new prompt cycle whose Turn 1 ends with a background task still in driver.tasks.
+        hub.subagent_watcher.prepare_prompt(child, sync_wait=False)
+        child_driver.tasks["bg-build"] = {"id": "bg-build", "description": "dotnet build", "type": "tool", "background": True}
+        child_driver.items.put(assistant_item("auto:bg1", [{"type": "text", "text": "等待 dotnet build 完成"}]))
+        await child_driver.emit({"ev": "result", "result": {"subtype": "success", "isError": False}, "text": "等待 dotnet build 完成"})
+        await asyncio.sleep(0.1)
+        self.assertEqual(len(parent_msgs()), before_bg)               # deferred while bg-build is running
+
+        # Background task finishes -> autonomous Turn 2 completes with driver.tasks empty.
+        child_driver.tasks.clear()
+        child_driver.items.put(assistant_item("auto:bg2", [{"type": "text", "text": "build 与单测全部通过"}]))
+        await child_driver.emit({"ev": "result", "result": {"subtype": "success", "isError": False}, "text": "build 与单测全部通过"})
+        await asyncio.sleep(0.1)
+        self.assertEqual(len(parent_msgs()), before_bg + 1)
+        self.assertIn("这一轮做完了", parent_msgs()[-1])
+        self.assertIn("build 与单测全部通过", parent_msgs()[-1])
+
+        # 3) Unexpected crash mid-turn notifies parent instead of leaving it hanging.
+        hub.subagent_watcher.prepare_prompt(child, sync_wait=False)
+        before_crash = len(parent_msgs())
+        await child_driver.emit({"ev": "exit", "code": 137, "stderr": [], "duringTurn": True})
+        await asyncio.sleep(0.1)
+        self.assertEqual(len(parent_msgs()), before_crash + 1)
+        self.assertIn("进程异常退出", parent_msgs()[-1])
+        self.assertIn("137", parent_msgs()[-1])
+
     async def test_a_process_outside_hosted_sessions_is_refused(self):
         await self.session("one")                                      # claims no process
         relay = await self.relay()                                     # the list is for anyone (a harness asks while it starts)

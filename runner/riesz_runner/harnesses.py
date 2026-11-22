@@ -787,9 +787,11 @@ class Harnesses:
                 rec["lastResult"] = event["result"]
             self._save()
             await self.hub.auto_resume.on_result(sid, event.get("result") or {})
+            self.hub.subagent_watcher.on_result(sid, event)
         if ev == "exit" and rec is not None:
             await self.hub.auto_resume.on_exit(sid, during_turn=bool(event.get("duringTurn")),
                                                requested=sid in self._stopping)
+            self.hub.subagent_watcher.on_exit(sid, {**event, "requested": sid in self._stopping})
         if rec is not None and ev in ("permission", "result", "exit"):
             await self._attention(sid, event)
         if ev not in ("permission", "permission_resolved", "rate_limit"):
