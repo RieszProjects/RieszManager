@@ -380,6 +380,96 @@ class RealClientServerE2ETest(unittest.IsolatedAsyncioTestCase):
             except asyncio.CancelledError:
                 pass
 
+    async def test_per_session_directory_isolation_and_client_distribution(self):
+        # Verify client.zip & bootstrap.py endpoints
+        r_zip = await self.client.get("/v1/nodes/client.zip", headers={"Authorization": "Bearer tok-e2e"})
+        self.assertEqual(r_zip.status, 200)
+        import io, zipfile
+        zf = zipfile.ZipFile(io.BytesIO(await r_zip.read()))
+        names = zf.namelist()
+        self.assertIn("riesz-node/pyproject.toml", names)
+        self.assertIn("riesz-node/riesz_node/tui.py", names)
+        self.assertFalse(any("tests/" in n or "__pycache__" in n for n in names))
+
+        r_boot = await self.client.get("/v1/nodes/bootstrap.py?origin=https://demo.invalid", headers={"Authorization": "Bearer tok-e2e"})
+        self.assertEqual(r_boot.status, 200)
+        boot_src = await r_boot.text()
+        compile(boot_src, "bootstrap.py", "exec")
+        self.assertIn("https://demo.invalid", boot_src)
+
+        # Start agent with NO startup --dir presets (roots=[]) and bind 2 sessions to isolated dirs
+        dir_a = self.client_dir / "proj_a"
+        dir_b = self.client_dir / "proj_b"
+        dir_a.mkdir()
+        dir_b.mkdir()
+        (dir_a / "a.txt").write_text("from-a", encoding="utf-8")
+        (dir_b / "b.txt").write_text("from-b", encoding="utf-8")
+
+        hub = self.app[HUB]
+        pair = hub.nodes.create_pairing(label="iso-pc")
+        seed, pub = client_ed.generate_keypair()
+        reg = hub.nodes.register_device(code=pair["code"], public_key=client_ed.b64u_encode(pub), name="iso-pc")
+        device = {
+            "nodeId": reg["nodeId"], "name": reg["name"],
+            "server": f"http://127.0.0.1:{self.server.port}",
+            "seed": client_ed.b64u_encode(seed), "publicKey": client_ed.b64u_encode(pub),
+        }
+        agent = NodeAgent(device=device, roots=[], max_mode="full", interactive=True)
+        agent_task = asyncio.create_task(agent.run())
+        sid_a = "aaaaaaaa-1111-4111-8111-111111111111"
+        sid_b = "bbbbbbbb-2222-4222-8222-222222222222"
+        try:
+            for _ in range(100):
+                if agent.status == "online":
+                    break
+                await asyncio.sleep(0.02)
+
+            # Bind session A -> dir_a only
+            bt_a = asyncio.create_task(hub.nodes.bind_session(reg["nodeId"], sid_a, mode="full"))
+            for _ in range(100):
+                if agent.pending_binds:
+                    break
+                await asyncio.sleep(0.02)
+            await agent.respond_bind(agent.pending_binds[0], allow=True, dirs=[str(dir_a)])
+            res_ba = await bt_a
+            self.assertEqual(res_ba["dirs"], [str(dir_a.resolve())])
+
+            # Bind session B -> dir_b only
+            bt_b = asyncio.create_task(hub.nodes.bind_session(reg["nodeId"], sid_b, mode="full"))
+            for _ in range(100):
+                if agent.pending_binds:
+                    break
+                await asyncio.sleep(0.02)
+            await agent.respond_bind(agent.pending_binds[0], allow=True, dirs=[str(dir_b)])
+            await bt_b
+
+            # Session A can run in dir_a, but CANNOT access dir_b!
+            ok_a = await hub.nodes.exec_command(sid_a, command="cat a.txt")
+            self.assertEqual(ok_a["exitCode"], 0)
+            self.assertIn("from-a", ok_a["output"])
+            cross = await hub.nodes.exec_command(sid_a, command="pwd", cwd=str(dir_b))
+            self.assertEqual(cross["exitCode"], -1)
+            self.assertIn("白名单", cross["error"])
+
+            # Live update session A's dirs to include dir_b -> now allowed!
+            await agent.update_binding_dirs(sid_a, [str(dir_a), str(dir_b)])
+            for _ in range(50):
+                snap_b = hub.nodes.snapshot()["devices"][0]["bindings"]
+                a_entry = next((x for x in snap_b if x["sessionId"] == sid_a), None)
+                if a_entry and len(a_entry.get("dirs") or []) == 2:
+                    break
+                await asyncio.sleep(0.02)
+            ok_ab = await hub.nodes.exec_command(sid_a, command="cat b.txt", cwd=str(dir_b))
+            self.assertEqual(ok_ab["exitCode"], 0)
+            self.assertIn("from-b", ok_ab["output"])
+        finally:
+            await agent.stop()
+            agent_task.cancel()
+            try:
+                await agent_task
+            except asyncio.CancelledError:
+                pass
+
     async def test_pairing_bruteforce_rate_limit(self):
         hub = self.app[HUB]
         _, pub = client_ed.generate_keypair()

@@ -13,13 +13,13 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from . import ed25519_pure as ed
 from .executor import RunningProcess, download_file_sync, run_command, safe_transfer_url, upload_file_sync
-from .policy import evaluate_local_command, resolve_allowed_path
+from .policy import PolicyError, evaluate_local_command, normalize_roots, resolve_allowed_path
 
 MODES = ("readonly", "ask", "auto", "full")
 MODE_RANK = {m: i for i, m in enumerate(MODES)}
@@ -139,6 +139,7 @@ class BoundSession:
     project: str
     mode: str
     bound_at: float
+    dirs: list[Path] = field(default_factory=list)
 
 
 @dataclass
@@ -388,13 +389,13 @@ class NodeAgent:
                 created_at=time.time(),
                 is_update=sid in self.bindings,
             )
-            if self.auto_accept_bind:
-                await self.respond_bind(req, allow=True)
+            if self.auto_accept_bind and self.roots:
+                await self.respond_bind(req, allow=True, dirs=[str(r) for r in self.roots])
             elif not self.interactive:
                 await self.respond_bind(req, allow=False)
             else:
                 self.pending_binds.append(req)
-                self._log(f"[绑定请求] 会话「{req.session_title}」申请绑定（权限={req.mode}），等待确认")
+                self._log(f"[绑定请求] 会话「{req.session_title}」申请绑定（权限={req.mode}），等待选择目录并确认")
                 self._emit()
         elif mtype == "unbind":
             sid = str(msg.get("sessionId") or "")
@@ -451,22 +452,38 @@ class NodeAgent:
 
     # ---- user actions -------------------------------------------------------
 
-    async def respond_bind(self, req: PendingBind, *, allow: bool) -> None:
-        self.pending_binds = [b for b in self.pending_binds if b.bind_id != req.bind_id]
+    async def respond_bind(self, req: PendingBind, *, allow: bool, dirs: list[str] | None = None) -> None:
         eff = req.mode if MODE_RANK.get(req.mode, 9) <= MODE_RANK[self.max_mode] else self.max_mode
+        resolved_dirs: list[Path] = []
+        if allow:
+            raw_dirs = dirs if dirs is not None else [str(r) for r in self.roots]
+            resolved_dirs = normalize_roots(raw_dirs, allow_empty=False)
+        self.pending_binds = [b for b in self.pending_binds if b.bind_id != req.bind_id]
         if allow:
             self.bindings[req.session_id] = BoundSession(
                 session_id=req.session_id, title=req.session_title, harness=req.harness,
-                project=req.project, mode=eff, bound_at=time.time(),
+                project=req.project, mode=eff, bound_at=time.time(), dirs=resolved_dirs,
             )
-            self._log(f"[已绑定] 会话「{req.session_title}」（权限={eff}）")
+            self._log(f"[已绑定] 会话「{req.session_title}」（权限={eff}，目录={', '.join(str(p) for p in resolved_dirs)}）")
         else:
             self._log(f"[已拒绝绑定] 会话「{req.session_title}」")
         await self._send({
             "type": "bind_response", "bindId": req.bind_id, "allow": allow,
-            "mode": eff, **({} if allow else {"reason": "用户在本地电脑端拒绝了绑定请求"}),
+            "mode": eff,
+            **({"dirs": [str(p) for p in resolved_dirs]} if allow else {"reason": "用户在本地电脑端拒绝了绑定请求"}),
         })
         self._emit()
+
+    async def update_binding_dirs(self, session_id: str, dirs: list[str]) -> list[Path]:
+        binding = self.bindings.get(session_id)
+        if binding is None:
+            raise PolicyError("该会话当前未绑定")
+        resolved = normalize_roots(dirs, allow_empty=False)
+        binding.dirs = resolved
+        await self._send({"type": "bind_update", "sessionId": session_id, "dirs": [str(p) for p in resolved]})
+        self._log(f"[更新目录] 会话「{binding.title}」允许目录已更新为：{', '.join(str(p) for p in resolved)}")
+        self._emit()
+        return resolved
 
     async def unbind_session(self, session_id: str) -> None:
         removed = self.bindings.pop(session_id, None)
@@ -529,10 +546,13 @@ class NodeAgent:
         if binding is None:
             await self._send({"type": "exec_done", "cmdId": cid, "exitCode": -1, "error": "本地拒绝：该会话未绑定此电脑"})
             return
+        if not binding.dirs:
+            await self._send({"type": "exec_done", "cmdId": cid, "exitCode": -1, "error": "本地拒绝：该会话尚未授权任何本地目录"})
+            return
 
         entry = CommandEntry(
             cmd_id=cid, session_id=sid, session_title=binding.title, action="exec",
-            command=command, cwd=cwd_raw or str(self.roots[0]),
+            command=command, cwd=cwd_raw or str(binding.dirs[0]),
             risk=str(msg.get("risk") or "low"), risk_reason=str(msg.get("riskReason") or ""),
             status="running", started_at=time.time(),
         )
@@ -540,7 +560,7 @@ class NodeAgent:
         self._emit()
 
         check = evaluate_local_command(
-            command, cwd_raw, self.roots, binding.mode,
+            command, cwd_raw, binding.dirs, binding.mode,
             server_approved_id=approval_id, seen_approvals=self._seen_approvals,
         )
         if check.verdict == "deny" or check.cwd is None:
@@ -665,20 +685,23 @@ class NodeAgent:
         if binding is None:
             await self._send({"type": "transfer_done", "transferId": tid, "ok": False, "error": "本地拒绝：会话未绑定"})
             return
+        if not binding.dirs:
+            await self._send({"type": "transfer_done", "transferId": tid, "ok": False, "error": "本地拒绝：该会话未授权允许目录"})
+            return
         if binding.mode == "readonly":
             await self._send({"type": "transfer_done", "transferId": tid, "ok": False, "error": "本地拒绝：只读模式禁止写入文件"})
             return
 
         entry = CommandEntry(
             cmd_id=tid, session_id=sid, session_title=binding.title, action="push",
-            command=f"接收文件 -> {dest_raw}", cwd=str(self.roots[0]),
+            command=f"接收文件 -> {dest_raw}", cwd=str(binding.dirs[0]),
             risk="low", risk_reason="文件推送", status="running", started_at=time.time(),
         )
         self._record_cmd(entry)
         self._emit()
         try:
             full_url = safe_transfer_url(self.server, url_path)
-            dest = resolve_allowed_path(dest_raw, self.roots, must_exist=False, strict_below_root=True)
+            dest = resolve_allowed_path(dest_raw, binding.dirs, must_exist=False, strict_below_root=True)
             size, digest = await asyncio.to_thread(download_file_sync, full_url, dest, expected_sha)
             entry.status = "done"
             entry.exit_code = 0
@@ -704,17 +727,20 @@ class NodeAgent:
         if binding is None:
             await self._send({"type": "transfer_done", "transferId": tid, "ok": False, "error": "本地拒绝：会话未绑定"})
             return
+        if not binding.dirs:
+            await self._send({"type": "transfer_done", "transferId": tid, "ok": False, "error": "本地拒绝：该会话未授权允许目录"})
+            return
 
         entry = CommandEntry(
             cmd_id=tid, session_id=sid, session_title=binding.title, action="pull",
-            command=f"上传文件 <- {src_raw}", cwd=str(self.roots[0]),
+            command=f"上传文件 <- {src_raw}", cwd=str(binding.dirs[0]),
             risk="low", risk_reason="文件拉取", status="running", started_at=time.time(),
         )
         self._record_cmd(entry)
         self._emit()
         try:
             full_url = safe_transfer_url(self.server, url_path)
-            src = resolve_allowed_path(src_raw, self.roots, must_exist=True, strict_below_root=True)
+            src = resolve_allowed_path(src_raw, binding.dirs, must_exist=True, strict_below_root=True)
             size, digest = await asyncio.to_thread(upload_file_sync, full_url, src)
             entry.status = "done"
             entry.exit_code = 0

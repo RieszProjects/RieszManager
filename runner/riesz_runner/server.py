@@ -32,7 +32,7 @@ from .hub import Hub
 from .probe import CapabilityProbe
 from .process import ControlError
 from .schedules import ScheduleError, system_timezone
-from .nodes import MAX_TRANSFER_BYTES, NodeError
+from .nodes import MAX_TRANSFER_BYTES, NodeError, build_client_zip, render_bootstrap_py
 from .notes import NoteError
 from . import tools as tools_mod
 from .projects import ROOT_ID
@@ -1667,6 +1667,31 @@ async def nodes_transfer_post(request: web.Request) -> web.Response:
     return _json({"ok": True, "size": total, "sha256": ticket.sha256})
 
 
+async def nodes_client_zip(request: web.Request) -> web.Response:
+    try:
+        raw, digest = await asyncio.to_thread(build_client_zip)
+    except NodeError as exc:
+        return _err(404, str(exc))
+    return web.Response(
+        body=raw,
+        content_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="riesz-node.zip"',
+            "X-Riesz-Client-Hash": digest,
+            "Cache-Control": "no-cache",
+        },
+    )
+
+
+async def nodes_bootstrap_py(request: web.Request) -> web.Response:
+    origin = request.query.get("origin") or "https://your-server"
+    try:
+        script = await asyncio.to_thread(render_bootstrap_py, origin)
+    except NodeError as exc:
+        return _err(404, str(exc))
+    return web.Response(text=script, content_type="text/x-python", headers={"Cache-Control": "no-cache"})
+
+
 async def nodes_ws(request: web.Request) -> web.WebSocketResponse:
     nodes = request.app[HUB].nodes
     ws = web.WebSocketResponse(heartbeat=25, max_msg_size=16 * 1024 * 1024)
@@ -1779,6 +1804,8 @@ def build_app(cfg: Config) -> web.Application:
     r.add_post(r"/v1/nodes/approvals/{aid:[A-Za-z0-9_-]{1,32}}/resolve", nodes_approval_resolve)
     r.add_get(r"/v1/nodes/transfer/{token:[A-Za-z0-9_-]{16,128}}", nodes_transfer_get)
     r.add_post(r"/v1/nodes/transfer/{token:[A-Za-z0-9_-]{16,128}}", nodes_transfer_post)
+    r.add_get("/v1/nodes/client.zip", nodes_client_zip)
+    r.add_get("/v1/nodes/bootstrap.py", nodes_bootstrap_py)
     r.add_get("/v1/nodes/ws", nodes_ws)
     r.add_get("/v1/harnesses", harnesses)
     r.add_get("/v1/credentials", credentials)

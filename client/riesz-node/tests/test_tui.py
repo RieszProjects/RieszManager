@@ -8,11 +8,11 @@ import time
 import unittest
 from pathlib import Path
 
-from textual.widgets import DataTable, ListView, RichLog, Static
+from textual.widgets import DataTable, Input, ListView, RichLog, Static
 
 from riesz_node import ed25519_pure as ed
 from riesz_node.agent import BoundSession, CommandEntry, LocalConfirm, NodeAgent, PendingApproval, PendingBind
-from riesz_node.tui import NodeTUI
+from riesz_node.tui import EditDirsScreen, NodeTUI
 
 
 class NodeTUITest(unittest.IsolatedAsyncioTestCase):
@@ -47,7 +47,9 @@ class NodeTUITest(unittest.IsolatedAsyncioTestCase):
         agent = self._make_agent()
         app = NodeTUI(agent, auto_connect=False)
         async with app.run_test(size=(120, 36)) as pilot:
-            # 1. Incoming bind request -> prompt bar visible -> press 'y' accepts
+            # 1. Incoming bind request -> prompt bar + dir input visible -> invalid dir rejected -> valid dir accepted
+            sub_dir = self.root / "session_dir"
+            sub_dir.mkdir()
             agent.pending_binds.append(PendingBind(
                 bind_id="b1", session_id="s1", session_title="项目构建", harness="claude",
                 project="demo", mode="auto", created_at=time.time(),
@@ -56,10 +58,21 @@ class NodeTUITest(unittest.IsolatedAsyncioTestCase):
             await pilot.pause(0.15)
             bar = app.query_one("#prompt-bar")
             self.assertTrue(bar.has_class("visible"))
-            await pilot.press("y")
+            dir_input = app.query_one("#bind-dirs-input", Input)
+            # Non-existent dir shows inline error and keeps bind pending
+            dir_input.value = str(self.root / "does_not_exist")
+            await pilot.click("#btn-allow")
+            await pilot.pause(0.12)
+            self.assertNotIn("s1", agent.bindings)
+            self.assertTrue(app.query_one("#prompt-error").has_class("visible"))
+            # Valid session-specific dir succeeds and sends dirs in bind_response
+            dir_input.value = str(sub_dir)
+            await pilot.click("#btn-allow")
             await pilot.pause(0.15)
             self.assertIn("s1", agent.bindings)
+            self.assertEqual(agent.bindings["s1"].dirs, [sub_dir.resolve()])
             self.assertEqual(self.sent[-1]["type"], "bind_response")
+            self.assertEqual(self.sent[-1]["dirs"], [str(sub_dir.resolve())])
             self.assertTrue(self.sent[-1]["allow"])
             self.assertFalse(bar.has_class("visible"))
 
@@ -160,6 +173,29 @@ class NodeTUITest(unittest.IsolatedAsyncioTestCase):
             # Press Ctrl+Q cleanly exits
             await pilot.press("ctrl+q")
             await pilot.pause(0.1)
+
+    async def test_tui_edit_session_dirs_modal(self):
+        agent = self._make_agent()
+        d1 = self.root / "d1"
+        d2 = self.root / "d2"
+        d1.mkdir()
+        d2.mkdir()
+        agent.bindings["s3"] = BoundSession(
+            session_id="s3", title="目录编辑测试", harness="claude", project="p",
+            mode="auto", bound_at=time.time(), dirs=[d1],
+        )
+        app = NodeTUI(agent, auto_connect=False)
+        async with app.run_test(size=(120, 36)) as pilot:
+            app.selected_session = "s3"
+            await pilot.press("e")
+            await pilot.pause(0.15)
+            self.assertIsInstance(app.screen, EditDirsScreen)
+            app.screen.query_one("#edit-input", Input).value = f"{d1}; {d2}"
+            await pilot.click("#edit-save")
+            await pilot.pause(0.15)
+            self.assertEqual(agent.bindings["s3"].dirs, [d1.resolve(), d2.resolve()])
+            self.assertEqual(self.sent[-1]["type"], "bind_update")
+            self.assertEqual(self.sent[-1]["dirs"], [str(d1.resolve()), str(d2.resolve())])
 
 
 if __name__ == "__main__":

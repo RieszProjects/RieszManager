@@ -748,9 +748,10 @@ async def node_info(call: Call, a: dict[str, Any]) -> str:
         return "当前会话尚未绑定任何在线的本地电脑节点。若需要操控用户的个人电脑，请提醒用户在 Riesz Manager 网页中将在线节点绑定到本会话。"
     lines = ["当前会话已绑定的在线本地节点："]
     for live, b in bound:
-        dirs = "、".join(live.dirs) if live.dirs else "（未声明目录）"
+        eff_dirs = b.dirs or live.dirs
+        dirs = "、".join(eff_dirs) if eff_dirs else "（尚未授权目录）"
         note = f" | 备注：{live.note}" if live.note else ""
-        lines.append(f"- {live.name} (id={live.node_id}, os={live.os_name or live.platform}, 权限={b.mode}, 目录={dirs}{note})")
+        lines.append(f"- {live.name} (id={live.node_id}, os={live.os_name or live.platform}, 权限={b.mode}, 本会话允许目录={dirs}{note})")
     lines.append("\n注意：本地电脑与服务器不在同一磁盘，且用户可随时断开；传文件请用 node_push / node_pull，执行命令用 node_exec。")
     return "\n".join(lines)
 

@@ -231,6 +231,39 @@ async def node_register(request: HttpRequest) -> HttpResponse:
 
 
 @csrf_exempt
+@require_http_methods(["GET"])
+async def node_client_zip(request: HttpRequest) -> HttpResponse:
+    """Serve installable `riesz-node.zip` archive for zero-config installs (`uvx` / `pip` / `bootstrap.py`)."""
+    try:
+        resp = await runner.request("GET", "/v1/nodes/client.zip", timeout=60)
+    except runner.RunnerUnavailable:
+        return _unavailable()
+    async with resp:
+        data = await resp.read()
+        out = HttpResponse(data, status=resp.status, content_type=resp.headers.get("Content-Type", "application/zip"))
+        for hdr in ("Content-Disposition", "X-Riesz-Client-Hash", "Cache-Control"):
+            if resp.headers.get(hdr):
+                out[hdr] = resp.headers[hdr]
+        return out
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+async def node_bootstrap_py(request: HttpRequest) -> HttpResponse:
+    """Serve zero-config cross-platform Python launcher pre-populated with this server's public origin."""
+    proto = request.headers.get("X-Forwarded-Proto") or request.scheme or "https"
+    host = request.get_host()
+    origin = f"{proto}://{host}"
+    try:
+        resp = await runner.request("GET", "/v1/nodes/bootstrap.py", params={"origin": origin}, timeout=30)
+    except runner.RunnerUnavailable:
+        return _unavailable()
+    async with resp:
+        return HttpResponse(await resp.read(), status=resp.status,
+                            content_type=resp.headers.get("Content-Type", "text/x-python"))
+
+
+@csrf_exempt
 @require_http_methods(["GET", "POST"])
 async def node_transfer(request: HttpRequest, token: str) -> HttpResponse:
     """Single-use token-authenticated streaming file transfer between runner and `riesz-node`."""

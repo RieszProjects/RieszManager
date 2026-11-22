@@ -76,7 +76,9 @@ function DeviceCard({ d }: { d: NodeDevice }) {
       {d.online && (
         <div className="rz-node-meta">
           {d.note && <div>备注：{d.note}</div>}
-          <div className="mono dim">允许目录：{d.dirs.length ? d.dirs.join("  |  ") : "无"}</div>
+          <div className="mono dim">
+            {d.dirs.length ? `默认目录：${d.dirs.join("  |  ")}` : "目录授权：按绑定会话在电脑端单独选择"}
+          </div>
         </div>
       )}
 
@@ -84,8 +86,11 @@ function DeviceCard({ d }: { d: NodeDevice }) {
         <div className="rz-node-bindings">
           <span className="dim">已绑定会话：</span>
           {d.bindings.map((b) => (
-            <span key={b.sessionId} className="rz-node-bind-tag">
-              <span>{b.sessionTitle} ({NODE_MODE_LABEL[b.mode]})</span>
+            <span key={b.sessionId} className="rz-node-bind-tag" title={b.dirs?.length ? `允许目录：${b.dirs.join(" ; ")}` : undefined}>
+              <span>
+                {b.sessionTitle} ({NODE_MODE_LABEL[b.mode]}
+                {b.dirs?.length ? ` · ${b.dirs.join(", ")}` : ""})
+              </span>
               <button type="button" title="解绑" onClick={() => void unbind(d.id, b.sessionId)}><Link2Off size={11} /></button>
             </span>
           ))}
@@ -170,8 +175,22 @@ export function NodesDialog() {
         <section className="rz-nodes-section">
           <h4>配对新电脑</h4>
           <p className="dim" style={{ margin: "0 0 10px", fontSize: 12.5 }}>
-            电脑端主动发起加密反向连接（Ed25519 验签），断开即解绑；需要在聊天输入栏中手动将在线节点绑定到某个会话后，Agent 才能使用。
+            电脑端主动发起加密反向连接（Ed25519 验签），断开即解绑；启动无需预选目录，可在电脑端界面里为每个绑定会话单独选目录。
           </p>
+          <div className="rz-node-pair-box" style={{ marginTop: 0, marginBottom: 12 }}>
+            <div className="rz-node-pair-code">
+              <span style={{ fontSize: 12.5, fontWeight: 600 }}>跨平台一键启动（可存进快捷脚本，换系统免配置）</span>
+              <span className="dim">需 Python 3.10+</span>
+            </div>
+            <div className="rz-node-pair-cmd">
+              <code className="mono">{`python -c "import urllib.request; exec(urllib.request.urlopen('${origin}/api/nodes/bootstrap.py').read())"`}</code>
+              <Tooltip title="复制一键启动命令">
+                <IconButton size="small" onClick={() => copyCmd(`python -c "import urllib.request; exec(urllib.request.urlopen('${origin}/api/nodes/bootstrap.py').read())"`)}>
+                  <Copy size={14} />
+                </IconButton>
+              </Tooltip>
+            </div>
+          </div>
           <div className="rz-nodes-pair-form">
             <TextField size="small" label="设备名称（可选）" placeholder="如 win-pc / macbook"
               value={label} onChange={(e) => setLabel(e.target.value)} sx={{ flex: 1 }} />
@@ -185,9 +204,10 @@ export function NodesDialog() {
           </div>
 
           {pairings.map((p) => {
-            const cmd = p.ephemeral
-              ? `riesz-node connect --server ${origin} --code ${p.code} --ephemeral --dir <允许目录> --mode auto`
-              : `riesz-node connect --server ${origin} --code ${p.code}${p.label ? ` --name "${p.label}"` : ""} --dir <允许目录> --mode auto`;
+            const extra = p.ephemeral
+              ? `--code ${p.code} --ephemeral`
+              : `--code ${p.code}${p.label ? ` --name "${p.label}"` : ""}`;
+            const cmd = `python -c "import urllib.request; exec(urllib.request.urlopen('${origin}/api/nodes/bootstrap.py').read())" -- ${extra}`;
             return (
               <div key={p.code} className="rz-node-pair-box">
                 <div className="rz-node-pair-code">

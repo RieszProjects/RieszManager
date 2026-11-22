@@ -81,16 +81,26 @@ class LocalCheckResult:
     reason: str = ""
 
 
-def normalize_roots(dirs: list[str]) -> list[Path]:
+def parse_dir_list(text: str) -> list[str]:
+    """Split user-entered directories separated by `;` or newlines."""
+    return [part.strip().strip('"').strip("'") for part in re.split(r"[;\r\n]+", text or "") if part.strip()]
+
+
+def normalize_roots(dirs: list[str], *, allow_empty: bool = False) -> list[Path]:
     roots: list[Path] = []
     for d in dirs:
+        _validate_raw_path_syntax(d)
+        if SENSITIVE_PATH_RE.search(d):
+            raise PolicyError(f"禁止授权敏感凭证目录：{d}")
         p = Path(os.path.realpath(os.path.expanduser(d)))
+        if SENSITIVE_PATH_RE.search(str(p)):
+            raise PolicyError(f"禁止授权敏感凭证目录：{p}")
         if not p.is_dir():
-            raise PolicyError(f"允许目录不存在：{d}")
+            raise PolicyError(f"允许目录不存在或不是文件夹：{d}")
         if p not in roots:
             roots.append(p)
-    if not roots:
-        raise PolicyError("必须通过 --dir 至少指定一个允许操作的目录")
+    if not roots and not allow_empty:
+        raise PolicyError("请至少选择一个有效的允许目录")
     return roots
 
 

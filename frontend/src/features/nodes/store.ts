@@ -12,6 +12,7 @@ export interface NodeBinding {
   harness: string;
   project: string;
   mode: NodeMode;
+  dirs?: string[];
   boundAt: number;
 }
 

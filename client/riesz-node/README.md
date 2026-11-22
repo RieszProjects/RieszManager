@@ -4,33 +4,29 @@ Cross-platform reverse-connected local computer node client for **Riesz Manager*
 
 Supports Windows (PowerShell / cmd), WSL, macOS, and Linux.
 
-## Install
+## Zero-Config One-Liner (No git, no manual install)
+
+Run on any machine with Python 3.10+ (auto-creates a cached venv, auto-updates when the server updates, and interactively asks for your pairing code on first run):
 
 ```bash
-pip install ./client/riesz-node
-# or with uv:
-uv tool install ./client/riesz-node
+python -c "import urllib.request; exec(urllib.request.urlopen('https://your-riesz-host/api/nodes/bootstrap.py').read())"
 ```
 
-## Quick Start
-
-1. Open Riesz Manager in your browser, click **本地节点** in the top bar, and generate a one-time pairing code (`RZ-XXXX-XXXX`).
-2. Pair and connect on your computer:
+Or with `uv`:
 
 ```bash
-# Permanent Ed25519 key pairing (stored locally with 0600 permissions)
-riesz-node pair --server https://your-riesz-host --code RZ-XXXX-XXXX --name win-pc
-riesz-node connect --dir D:\Sandbox --mode auto --note "Windows 11 + GPU"
-
-# Or one-shot ephemeral mode (key stays in RAM only, deleted on disconnect)
-riesz-node connect --server https://your-riesz-host --code RZ-XXXX-XXXX --ephemeral --dir ~/sandbox --mode auto
+uvx --from https://your-riesz-host/api/nodes/client.zip riesz-node connect --server https://your-riesz-host
 ```
+
+## Per-Session Directory Isolation
+
+You do **not** have to choose `--dir` at startup. When a session requests to bind to your computer, the TUI lets you pick or browse (`浏览目录…`) the exact directory (or directories) allowed for **that specific session**. Different sessions are strictly isolated to their own granted directories, and you can press `e` at any time to edit a bound session's directories.
 
 ## Shortcuts in TUI
 
-- `y` / `n`: approve or reject a session bind request or pending command approval (also synced with the Riesz Manager web UI)
+- `y` / `Ctrl+Y`: approve bind request (authorizing the entered/picked directories) or pending command
+- `n`: reject bind request or pending command
+- `e`: edit allowed directories of the selected bound session
 - `k`: kill the currently selected running command
 - `u`: unbind the currently selected session
 - `Ctrl+Q`: kill running commands, disconnect, and exit
-
-Pass `--plain` for a non-fullscreen scrolling log output mode.

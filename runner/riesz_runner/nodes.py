@@ -11,12 +11,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import io
 import json
 import logging
 import os
 import secrets
 import time
 import uuid as uuidlib
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -71,6 +73,7 @@ class SessionBinding:
     project: str
     mode: str
     bound_at: float
+    dirs: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -426,6 +429,12 @@ class NodeManager:
             fut = live.pending_binds.pop(bid, None)
             if fut and not fut.done():
                 fut.set_result(msg)
+        elif mtype == "bind_update":
+            sid = str(msg.get("sessionId") or "")
+            b = live.bindings.get(sid)
+            if b is not None and isinstance(msg.get("dirs"), list):
+                b.dirs = [str(d).strip() for d in msg["dirs"] if str(d).strip()][:20]
+                await self.broadcast()
         elif mtype == "unbind":
             sid = str(msg.get("sessionId") or "")
             if sid and live.bindings.pop(sid, None) is not None:
@@ -560,15 +569,17 @@ class NodeManager:
             reason = str(resp.get("reason") or "电脑端拒绝了绑定请求")
             raise NodeError(reason)
         agreed = _cap_mode(str(resp.get("mode") or eff_mode), live.max_mode)
+        resp_dirs = resp.get("dirs")
+        bound_dirs = [str(d).strip() for d in resp_dirs if str(d).strip()][:20] if isinstance(resp_dirs, list) else list(live.dirs)
         binding = SessionBinding(
             session_id=session_id, session_title=title, harness=harness,
-            project=project, mode=agreed, bound_at=time.time(),
+            project=project, mode=agreed, bound_at=time.time(), dirs=bound_dirs,
         )
         live.bindings[session_id] = binding
         await self.broadcast()
         return {
             "nodeId": node_id, "nodeName": live.name, "sessionId": session_id,
-            "mode": agreed, "boundAt": binding.bound_at,
+            "mode": agreed, "dirs": bound_dirs, "boundAt": binding.bound_at,
         }
 
     async def unbind_session(self, node_id: str, session_id: str) -> None:
@@ -670,10 +681,11 @@ class NodeManager:
         if not cmd_text:
             raise NodeError("command 不能为空")
         timeout = max(5, min(int(timeout), 600))
-        eff_cwd = cwd.strip() or (live.dirs[0] if live.dirs else "")
+        allowed_dirs = binding.dirs or live.dirs
+        eff_cwd = cwd.strip() or (allowed_dirs[0] if allowed_dirs else "")
         decision = await evaluate_action(
             mode=binding.mode, action="exec", command=cmd_text, cwd=eff_cwd,
-            allowed_dirs=live.dirs, node_os=live.os_name,
+            allowed_dirs=allowed_dirs, node_os=live.os_name,
             session_title=binding.session_title, credentials=self.hub.credentials,
         )
         if decision.decision == "deny":
@@ -744,9 +756,10 @@ class NodeManager:
         if size > MAX_TRANSFER_BYTES:
             raise NodeError(f"文件超过 200MB 限制（{size} bytes）")
         sha = await asyncio.to_thread(_sha256_file, server_path)
+        allowed_dirs = binding.dirs or live.dirs
         decision = await evaluate_action(
             mode=binding.mode, action="push", command=f"push {server_path.name} ({size}B) -> {dest_path}",
-            cwd=live.dirs[0] if live.dirs else "", allowed_dirs=live.dirs, node_os=live.os_name,
+            cwd=allowed_dirs[0] if allowed_dirs else "", allowed_dirs=allowed_dirs, node_os=live.os_name,
             session_title=binding.session_title, credentials=self.hub.credentials,
         )
         if decision.decision == "deny":
@@ -793,9 +806,10 @@ class NodeManager:
     ) -> dict[str, Any]:
         self._prune_transfers()
         live, binding = self._resolve_bound(session_id, node_ref)
+        allowed_dirs = binding.dirs or live.dirs
         decision = await evaluate_action(
             mode=binding.mode, action="pull", command=f"pull {node_path} -> {server_dest.name}",
-            cwd=live.dirs[0] if live.dirs else "", allowed_dirs=live.dirs, node_os=live.os_name,
+            cwd=allowed_dirs[0] if allowed_dirs else "", allowed_dirs=allowed_dirs, node_os=live.os_name,
             session_title=binding.session_title, credentials=self.hub.credentials,
         )
         if decision.decision == "deny":
@@ -873,7 +887,7 @@ class NodeManager:
                     {
                         "sessionId": b.session_id, "sessionTitle": b.session_title,
                         "harness": b.harness, "project": b.project,
-                        "mode": b.mode, "boundAt": b.bound_at,
+                        "mode": b.mode, "dirs": b.dirs or live.dirs, "boundAt": b.bound_at,
                     }
                     for b in (live.bindings.values() if live else ())
                 ],
@@ -898,3 +912,109 @@ def _sha256_file(path: Path) -> str:
         while chunk := fh.read(256 * 1024):
             h.update(chunk)
     return h.hexdigest()
+
+
+_ZIP_CACHE: tuple[float, bytes, str] | None = None
+
+
+def build_client_zip() -> tuple[bytes, str]:
+    """Package `client/riesz-node` into an installable zip archive; returns (bytes, sha256_hex)."""
+    global _ZIP_CACHE
+    client_dir = Path(__file__).resolve().parents[2] / "client" / "riesz-node"
+    if not client_dir.is_dir():
+        raise NodeError("服务器上未找到 client/riesz-node 目录")
+    files: list[Path] = []
+    latest_mtime = 0.0
+    for p in sorted(client_dir.rglob("*")):
+        rel = p.relative_to(client_dir)
+        if any(part in ("__pycache__", "tests", ".pytest_cache") or part.endswith(".egg-info") for part in rel.parts):
+            continue
+        if p.is_file() and not p.name.endswith((".pyc", ".pyo")):
+            files.append(p)
+            latest_mtime = max(latest_mtime, p.stat().st_mtime)
+    if _ZIP_CACHE is not None and _ZIP_CACHE[0] == latest_mtime:
+        return _ZIP_CACHE[1], _ZIP_CACHE[2]
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for p in files:
+            arcname = "riesz-node/" + p.relative_to(client_dir).as_posix()
+            zi = zipfile.ZipInfo(arcname, date_time=(2026, 1, 1, 0, 0, 0))
+            zf.writestr(zi, p.read_bytes())
+    raw = buf.getvalue()
+    digest = hashlib.sha256(raw).hexdigest()
+    _ZIP_CACHE = (latest_mtime, raw, digest)
+    return raw, digest
+
+
+def render_bootstrap_py(origin: str) -> str:
+    """Self-contained zero-config cross-platform Python launcher for `riesz-node`."""
+    safe_origin = origin.rstrip("/")
+    _, client_hash = build_client_zip()
+    return f'''#!/usr/bin/env python3
+"""Zero-config cross-platform launcher for riesz-node (auto-cached venv + auto-update)."""
+import hashlib, os, pathlib, subprocess, sys, tempfile, urllib.request
+
+DEFAULT_SERVER = {safe_origin!r}
+CLIENT_HASH = {client_hash!r}
+
+def _cache_dir():
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or str(pathlib.Path.home())
+        return pathlib.Path(base) / "riesz-node"
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    return (pathlib.Path(xdg) if xdg else pathlib.Path.home() / ".cache") / "riesz-node"
+
+def _venv_bin(venv_dir, name):
+    if sys.platform == "win32":
+        return venv_dir / "Scripts" / f"{{name}}.exe"
+    return venv_dir / "bin" / name
+
+def _main():
+    if sys.version_info < (3, 10):
+        raise SystemExit("riesz-node 需要 Python 3.10 或更高版本。")
+    args = list(sys.argv[1:])
+    if args and args[0] == "--":
+        args = args[1:]
+    server = DEFAULT_SERVER
+    for i, a in enumerate(args):
+        if a == "--server" and i + 1 < len(args):
+            server = args[i + 1].rstrip("/")
+        elif a.startswith("--server="):
+            server = a.split("=", 1)[1].rstrip("/")
+    cache = _cache_dir()
+    venv_dir = cache / "venv"
+    stamp = cache / "client.sha256"
+    exe = _venv_bin(venv_dir, "riesz-node")
+    pip = _venv_bin(venv_dir, "pip")
+    had_exe = exe.exists()
+    if not had_exe:
+        print("[riesz-node] 首次运行，正在初始化本地虚拟环境…", flush=True)
+        cache.mkdir(parents=True, exist_ok=True)
+        subprocess.check_call([sys.executable, "-m", "venv", str(venv_dir)])
+    need_install = not had_exe or not stamp.exists() or stamp.read_text(encoding="utf-8").strip() != CLIENT_HASH
+    if need_install:
+        print("[riesz-node] 正在从服务器拉取并安装最新客户端…", flush=True)
+        zip_url = f"{{server}}/api/nodes/client.zip"
+        with tempfile.TemporaryDirectory() as td:
+            zpath = pathlib.Path(td) / "riesz-node.zip"
+            urllib.request.urlretrieve(zip_url, zpath)
+            if server == DEFAULT_SERVER:
+                actual = hashlib.sha256(zpath.read_bytes()).hexdigest()
+                if actual != CLIENT_HASH:
+                    raise SystemExit(f"[riesz-node] 客户端包校验失败（期望 {{CLIENT_HASH[:12]}}，实际 {{actual[:12]}}）")
+            if had_exe:
+                subprocess.check_call([str(pip), "install", "--quiet", "--no-deps", "--force-reinstall", str(zpath)])
+            else:
+                subprocess.check_call([str(pip), "install", "--quiet", str(zpath)])
+        stamp.write_text(CLIENT_HASH, encoding="utf-8")
+    if not args or args[0] not in ("connect", "pair", "devices"):
+        cmd = [str(exe), "connect"]
+        if not any(a == "--server" or a.startswith("--server=") for a in args):
+            cmd += ["--server", server]
+        cmd += args
+    else:
+        cmd = [str(exe)] + args
+    raise SystemExit(subprocess.call(cmd))
+
+_main()
+'''
