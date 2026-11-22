@@ -7,7 +7,7 @@ import { copyText } from "@/lib/clipboard";
 import { relativeTime } from "@/lib/format";
 import { storage } from "@/lib/storage";
 import { useIsMobile } from "@/lib/useIsMobile";
-import { sessionTitle, useApp } from "@/store/app";
+import { useApp } from "@/store/app";
 import { toast, useUi } from "@/store/ui";
 import { notesForSession, useNotes, type Note, type NoteColor } from "./store";
 
@@ -48,15 +48,11 @@ function initialBox(): Box {
 
 function NoteCard({
   note,
-  showSession,
   highlighted,
 }: {
   note: Note;
-  showSession: boolean;
   highlighted: boolean;
 }) {
-  const sessions = useApp((s) => s.sessions);
-  const navigate = useUi((s) => s.navigate);
   const remove = useNotes((s) => s.remove);
   const cardRef = useRef<HTMLElement | null>(null);
 
@@ -64,7 +60,6 @@ function NoteCard({
     if (highlighted) cardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [highlighted]);
 
-  const srcSession = note.sessionId ? sessions[note.sessionId] : undefined;
   const onCopy = async () => {
     const text = note.title ? `${note.title}\n\n${note.content}` : note.content;
     if (await copyText(text)) toast("已复制便签", "success");
@@ -80,16 +75,6 @@ function NoteCard({
           {note.title && <div className="rz-note-card-title">{note.title}</div>}
           <div className="rz-note-card-sub">
             <span>{relativeTime(note.updatedAt || note.createdAt)}</span>
-            {showSession && note.sessionId && (
-              <button
-                type="button"
-                className="rz-note-session"
-                onClick={() => navigate({ view: "session", sessionId: note.sessionId })}
-                title="跳转到来源会话"
-              >
-                {srcSession ? sessionTitle(srcSession) : note.sessionId.slice(0, 8)}
-              </button>
-            )}
           </div>
         </div>
         <div className="rz-note-card-actions">
@@ -119,11 +104,9 @@ export function NotesWindow() {
   const items = useNotes((s) => s.items);
   const open = useNotes((s) => s.open);
   const minimized = useNotes((s) => s.minimized);
-  const scope = useNotes((s) => s.scope);
   const focusNoteId = useNotes((s) => s.focusNoteId);
   const setOpen = useNotes((s) => s.setOpen);
   const setMinimized = useNotes((s) => s.setMinimized);
-  const setScope = useNotes((s) => s.setScope);
   const clearFocus = useNotes((s) => s.clearFocus);
   const create = useNotes((s) => s.create);
 
@@ -138,23 +121,16 @@ export function NotesWindow() {
   const [saving, setSaving] = useState(false);
 
   const sessionId = route.view === "session" ? route.sessionId : null;
-  const sessionItems = useMemo(
+  const visible = useMemo(
     () => (sessionId ? notesForSession(items, sessions, sessionId) : []),
     [items, sessions, sessionId],
   );
-  const effectiveScope: "session" | "all" = sessionId ? scope : "all";
-  const visible = effectiveScope === "session" ? sessionItems : items;
-  const showScopeTabs = Boolean(sessionId && (items.length !== sessionItems.length || sessionItems.length > 0));
 
-  // If the highlighted note lives in another session, switch to "all" automatically so it is visible.
   useEffect(() => {
     if (!focusNoteId || !open) return;
-    if (effectiveScope === "session" && !sessionItems.some((n) => n.id === focusNoteId) && items.some((n) => n.id === focusNoteId)) {
-      setScope("all");
-    }
     const timer = window.setTimeout(() => clearFocus(), 2600);
     return () => window.clearTimeout(timer);
-  }, [focusNoteId, open, effectiveScope, sessionItems, items, setScope, clearFocus]);
+  }, [focusNoteId, open, clearFocus]);
 
   // Keep floating window inside viewport when the browser resizes.
   useEffect(() => {
@@ -163,7 +139,7 @@ export function NotesWindow() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  if (!open) return null;
+  if (!open || !sessionId) return null;
 
   const startDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (isMobile || e.button !== 0) return;
@@ -261,25 +237,6 @@ export function NotesWindow() {
 
       {!minimized && (
         <>
-          {showScopeTabs && (
-            <div className="rz-notes-tabs">
-              <button
-                type="button"
-                className={effectiveScope === "session" ? "on" : ""}
-                onClick={() => setScope("session")}
-              >
-                本会话{sessionItems.length > 0 ? ` (${sessionItems.length})` : ""}
-              </button>
-              <button
-                type="button"
-                className={effectiveScope === "all" ? "on" : ""}
-                onClick={() => setScope("all")}
-              >
-                全部{items.length > 0 ? ` (${items.length})` : ""}
-              </button>
-            </div>
-          )}
-
           {adding && (
             <div className="rz-note-form">
               <input
@@ -327,15 +284,12 @@ export function NotesWindow() {
 
           <div className="rz-notes-body">
             {visible.length === 0 ? (
-              <div className="rz-notes-empty dim">
-                {effectiveScope === "session" && items.length > 0 ? "本会话暂无便签，可切到「全部」查看" : "暂无便签"}
-              </div>
+              <div className="rz-notes-empty dim">本会话暂无便签</div>
             ) : (
               visible.map((n) => (
                 <NoteCard
                   key={n.id}
                   note={n}
-                  showSession={effectiveScope === "all" && n.sessionId !== sessionId}
                   highlighted={n.id === focusNoteId}
                 />
               ))

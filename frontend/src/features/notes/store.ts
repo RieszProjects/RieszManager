@@ -3,7 +3,8 @@ import { create } from "zustand";
 import { api } from "@/api/client";
 import { socket } from "@/api/socket";
 import type { SessionSummary } from "@/api/types";
-import { toast } from "@/store/ui";
+import { useApp } from "@/store/app";
+import { toast, useUi } from "@/store/ui";
 
 export type NoteColor = "amber" | "sage" | "slate" | "rose";
 
@@ -44,7 +45,7 @@ export function sessionChain(sessions: Record<string, SessionSummary>, sessionId
 }
 
 export function notesForSession(items: Note[], sessions: Record<string, SessionSummary>, sessionId: string | null): Note[] {
-  if (!sessionId) return items;
+  if (!sessionId) return [];
   const chain = sessionChain(sessions, sessionId);
   return items.filter((n) => chain.has(n.sessionId));
 }
@@ -54,17 +55,15 @@ interface NotesStore {
   loaded: boolean;
   open: boolean;
   minimized: boolean;
-  scope: "session" | "all";
   focusNoteId: string | null;
   pulse: number;
 
   load: () => Promise<void>;
   setOpen: (open: boolean) => void;
-  toggleOpen: (preferScope?: "session" | "all") => void;
-  openNote: (noteId?: string | null, scope?: "session" | "all") => void;
+  toggleOpen: () => void;
+  openNote: (noteId?: string | null) => void;
   clearFocus: () => void;
   setMinimized: (minimized: boolean) => void;
-  setScope: (scope: "session" | "all") => void;
   create: (input: NoteInput) => Promise<Note>;
   update: (id: string, input: Partial<Pick<Note, "title" | "content" | "color">>) => Promise<void>;
   remove: (id: string) => Promise<void>;
@@ -76,7 +75,6 @@ export const useNotes = create<NotesStore>((set, get) => ({
   loaded: false,
   open: false,
   minimized: false,
-  scope: "session",
   focusNoteId: null,
   pulse: 0,
 
@@ -85,21 +83,19 @@ export const useNotes = create<NotesStore>((set, get) => ({
     set({ items: res.notes ?? [], loaded: true });
   },
   setOpen: (open) => set((s) => ({ open, minimized: open ? false : s.minimized })),
-  toggleOpen: (preferScope) =>
+  toggleOpen: () =>
     set((s) => {
       if (s.open && !s.minimized) return { open: false };
-      return { open: true, minimized: false, ...(preferScope ? { scope: preferScope } : {}) };
+      return { open: true, minimized: false };
     }),
-  openNote: (noteId, scope) =>
-    set((s) => ({
+  openNote: (noteId) =>
+    set(() => ({
       open: true,
       minimized: false,
       focusNoteId: noteId ?? null,
-      scope: scope ?? s.scope,
     })),
   clearFocus: () => set({ focusNoteId: null }),
   setMinimized: (minimized) => set({ minimized }),
-  setScope: (scope) => set({ scope }),
   create: async (input) => {
     const res = await api<{ note: Note }>("notes", { body: input });
     await get().load();
@@ -133,6 +129,11 @@ export function startNotes(): void {
     if (event.ev !== "notes") return;
     load();
     if (event.action === "create" && event.note) {
+      const route = useUi.getState().route;
+      const activeSid = route.view === "session" ? route.sessionId : null;
+      if (!activeSid) return;
+      const chain = sessionChain(useApp.getState().sessions, activeSid);
+      if (!chain.has(event.note.sessionId)) return;
       const store = useNotes.getState();
       useNotes.setState({ pulse: Date.now() });
       if (!store.open || store.minimized) {

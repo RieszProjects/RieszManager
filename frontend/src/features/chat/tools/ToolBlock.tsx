@@ -369,7 +369,7 @@ function NoteShortcut({ tool }: { tool: ToolBlockType }) {
   const noteId = explicitId || resultMatch?.[1] || null;
   if (tool.result?.isError) return null;
   return (
-    <button type="button" className="rz-child-link" onClick={() => openNote(noteId, "session")}>
+    <button type="button" className="rz-child-link" onClick={() => openNote(noteId)}>
       <StickyNote size={13} />
       <span>在便签窗口查看{title ? `「${title}」` : ""}</span>
       <ChevronRight size={13} />

@@ -14,7 +14,6 @@ import { useSchedules } from "../schedules/store";
 import { Composer } from "../composer/Composer";
 import { MobileHeaderButtons } from "../layout/MobileHeaderButtons";
 import { RightDock, RightPanelButton } from "../layout/RightDock";
-import { NotesButton } from "../notes/NotesButton";
 import { NodesButton } from "../nodes/NodesButton";
 
 type DayPart = "night" | "morning" | "noon" | "afternoon" | "evening";
@@ -265,7 +264,6 @@ export function HomeView() {
         {isMobile && <MobileHeaderButtons side="left" />}
         <div className="rz-spacer" />
         <NodesButton />
-        <NotesButton />
       </header>
       <div className="rz-home-stage">
         <Mascot pose="sleepy" className="rz-home-mascot" />
@@ -296,7 +294,6 @@ export function ProjectView({ projectId }: { projectId: string }) {
           <div className="rz-chat-sub dim mono clamp-1">{project?.path}</div>
         </div>
         <NodesButton />
-        <NotesButton />
         {isMobile ? <MobileHeaderButtons side="right" /> : <RightPanelButton />}
       </header>
       <div className="rz-chat-row">
