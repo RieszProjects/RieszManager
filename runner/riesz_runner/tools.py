@@ -42,7 +42,7 @@ INSTRUCTIONS = ("Riesz Manager 托管着这个会话。这里的工具可以定�
                 "给别的会话发消息、开新会话、查看别的会话的状态和回复、把文件发给用户、"
                 "用 note_write 给用户写便签（持续显示在网页顶栏的浮动便签窗口里，不随上下文覆盖）、"
                 "以及当用户把自己的本地电脑节点绑定到本会话时，通过 node_info/node_exec/node_push/node_pull 在该电脑上执行命令和互传文件。"
-                "如果同时挂载了 `browser`（chrome-devtools-mcp）服务器，操作服务器浏览器请直接用它，无需走 browser_task。")
+                "如果同时挂载了 `browser`（chrome-devtools-mcp）服务器，可直接用它操作服务器常驻浏览器。")
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 DAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 MIN_PREFIX = 6
@@ -408,11 +408,6 @@ HARNESS_IDS = ("claude", "codex", "dsh", "gemini", "antigravity")
 SUBAGENT_PREFACE = ("[子任务，来自 {name} 会话 {caller}；这条消息是另一个 agent 发的，不是用户本人。"
                     "做完后在最后一条回复里写清结果]\n\n{task}")
 FOLLOW_UP = "[来自 {name} 会话 {caller}（你是它的子代理）]\n\n{text}"
-BROWSER_PREFACE = ("[浏览器任务，来自 {name} 会话 {caller}；这条消息是另一个 agent 发的，不是用户本人]\n"
-                   "用 Claude in Chrome 在用户的浏览器里完成下面的任务。需要用户本人决定的操作（提交表单、发消息或邮件、"
-                   "付款、删除、修改账号设置、输入密码等）不要做，在回复里写清需要用户确认什么。"
-                   "做完后在最后一条回复里写清结果，要的数据原样给出。\n\n任务：{task}")
-BROWSER_MODEL, BROWSER_EFFORT, BROWSER_MODE = "claude-opus-5-5", "medium", "auto"     # the user's choice (11-20)
 _background: set[asyncio.Task[Any]] = set()
 
 
@@ -717,16 +712,6 @@ async def subagent_send(call: Call, a: dict[str, Any]) -> str:
     return f"子代理 {child[:8]}（{_harness_name(hub, child)}）：\n\n{reply}"
 
 
-async def browser_task(call: Call, a: dict[str, Any]) -> str:
-    task = str(a.get("task") or "").strip()
-    if not task:
-        raise ToolError("task 不能为空")
-    text = BROWSER_PREFACE.format(name=_harness_name(call.hub, call.session_id), caller=call.session_id[:8], task=task)
-    child = await _start_child(call, "claude", text, "浏览器任务：" + task, mode=BROWSER_MODE, model=BROWSER_MODEL,
-                               effort=BROWSER_EFFORT, browser=True, sync_wait=True, stop_after=True)
-    return await _reply_when_done(call, child, True, "浏览器任务")
-
-
 # ---- bound local computer nodes (nodes.py) --------------------------------------------------
 
 def _session_cwd(call: Call) -> Path:
@@ -846,13 +831,6 @@ TOOLS: list[Tool] = [
          {"agent_id": {"type": "string", "description": "subagent_start 返回的 agent_id"},
           "message": {"type": "string"}, "wait": {"type": "boolean", "description": "是否等它做完（默认 true）"}},
          subagent_send, required=("agent_id", "message")),
-    Tool("browser_task",
-         "让一个开着 Claude in Chrome 的 Claude Code 会话，在用户自己的浏览器里（带用户的登录状态）替你完成任务，"
-         "并把结果返回给你：查网页、读需要登录的页面、抄数据、截图等。它会出现在你的子代理列表里；"
-         "提交、发送、付款、删除这类要用户本人决定的操作它不会做，会在结果里说明。"
-         "最多等 8 分钟，超过的话先返回，做完后结果会作为一条消息发给你。",
-         {"task": {"type": "string", "description": "要在浏览器里做的事，写清楚网址、要找什么、结果要什么格式"}},
-         browser_task, required=("task",)),
     Tool("send_file",
          "把文件发给用户：图片、PDF、文档、表格、任何文件都行，会显示在用户的对话里（图片直接显示，其他文件可以点开查看或下载）。"
          "想让用户看一个文件时用它，不要只在回复里写路径或 file:// 链接。",
