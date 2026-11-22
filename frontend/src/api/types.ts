@@ -282,6 +282,7 @@ export interface ApiRoute {
 export interface HarnessMode {
   id: string;
   name: string;
+  tier?: "readonly" | "ask" | "edits" | "auto" | "full" | string;
   description?: string;
 }
 

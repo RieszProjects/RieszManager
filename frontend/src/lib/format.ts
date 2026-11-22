@@ -77,13 +77,28 @@ export function modelLabel(model: string | null | undefined): string {
   return model;
 }
 
-export const PERMISSION_MODES: { value: string; label: string; hint: string }[] = [
-  { value: "default", label: "逐项确认", hint: "每次编辑和命令都请求许可" },
-  { value: "acceptEdits", label: "自动接受编辑", hint: "文件编辑自动通过，命令仍需确认" },
-  { value: "plan", label: "计划模式", hint: "只读调研，先给出计划" },
-  { value: "auto", label: "自动模式", hint: "由分类器判断风险，安全操作自动执行" },
-  { value: "bypassPermissions", label: "跳过权限", hint: "不再询问任何权限（危险）" },
+export const PERMISSION_MODES: { value: string; label: string; hint: string; tier: string }[] = [
+  { value: "default", label: "逐项确认", hint: "每次编辑和命令都请求许可", tier: "ask" },
+  { value: "acceptEdits", label: "自动接受编辑", hint: "文件编辑自动通过，命令仍需确认", tier: "edits" },
+  { value: "plan", label: "计划模式", hint: "只读调研，先给出计划", tier: "readonly" },
+  { value: "auto", label: "自动模式", hint: "由分类器判断风险，安全操作自动执行", tier: "auto" },
+  { value: "bypassPermissions", label: "跳过权限", hint: "不再询问任何权限（危险）", tier: "full" },
 ];
+
+const FALLBACK_TIERS: Record<string, string> = {
+  plan: "readonly", "read-only": "readonly",
+  default: "ask",
+  acceptEdits: "edits", "accept-edits": "edits", autoEdit: "edits",
+  auto: "auto", "workspace-write": "auto",
+  bypassPermissions: "full", "rz-bypass": "full", "full-access": "full", "danger-full-access": "full", yolo: "full",
+};
+
+export function modeTier(mode: string | null | undefined, options?: { id: string; tier?: string }[] | null): string {
+  if (!mode) return "ask";
+  const fromOption = options?.find((m) => m.id === mode)?.tier;
+  if (fromOption) return fromOption;
+  return PERMISSION_MODES.find((m) => m.value === mode)?.tier ?? FALLBACK_TIERS[mode] ?? "ask";
+}
 
 export function permissionLabel(mode: string | null | undefined): string {
   return PERMISSION_MODES.find((m) => m.value === mode)?.label ?? "逐项确认";

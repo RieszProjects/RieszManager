@@ -446,10 +446,10 @@
 .rz-chip span { overflow: hidden; text-overflow: ellipsis; }
 .rz-chip:hover:not(:disabled) { color: var(--text); border-color: var(--line); background: var(--bg3); }
 .rz-chip:disabled { opacity: 0.5; cursor: default; }
-.rz-chip.mode-acceptEdits { color: var(--sage-strong); border-color: rgba(147, 168, 140, 0.3); }
-.rz-chip.mode-plan { color: #9fb6c2; border-color: rgba(138, 163, 176, 0.35); }
-.rz-chip.mode-auto { color: var(--amber-strong); border-color: rgba(198, 150, 107, 0.3); }
-.rz-chip.mode-bypassPermissions { color: #e09a8e; border-color: rgba(196, 110, 98, 0.45); }
+.rz-chip.tier-edits { color: var(--sage-strong); border-color: rgba(147, 168, 140, 0.3); }
+.rz-chip.tier-readonly { color: #9fb6c2; border-color: rgba(138, 163, 176, 0.35); }
+.rz-chip.tier-auto { color: var(--amber-strong); border-color: rgba(198, 150, 107, 0.3); }
+.rz-chip.tier-full { color: #e09a8e; border-color: rgba(196, 110, 98, 0.45); }
 .rz-send.MuiIconButton-root {
   width: 34px; height: 34px; border-radius: 10px; background: var(--amber); color: #1b130c; margin-left: 2px;
 }
@@ -938,9 +938,6 @@ body.rz-dragging, body.rz-dragging * { cursor: grabbing !important; user-select:
 /* Sessions of other harnesses (Codex, DeepSeek Harness). */
 .rz-tag.harness { color: #9fb6c2; background: rgba(138, 163, 176, 0.12); border-color: rgba(138, 163, 176, 0.32); }
 .rz-tag.harness-dsh { color: #a9b3dc; background: rgba(120, 136, 204, 0.12); border-color: rgba(120, 136, 204, 0.32); }
-.rz-chip.mode-read-only { color: #9fb6c2; border-color: rgba(138, 163, 176, 0.35); }
-.rz-chip.mode-workspace-write { color: var(--sage-strong); border-color: rgba(147, 168, 140, 0.3); }
-.rz-chip.mode-full-access, .rz-chip.mode-danger-full-access { color: #e09a8e; border-color: rgba(196, 110, 98, 0.45); }
 .rz-patch-file { margin: 6px 0 2px; font-size: 12px; display: flex; gap: 6px; align-items: center; }
 .rz-patch-file .kind { color: var(--text3); }
 .rz-route-head { line-height: 30px !important; font-size: 12px !important; color: var(--amber-strong) !important; background: var(--bg2) !important; }
@@ -951,8 +948,6 @@ body.rz-dragging, body.rz-dragging * { cursor: grabbing !important; user-select:
 .rz-key-main { min-width: 0; }
 .rz-key-form { display: flex; flex-direction: column; gap: 10px; padding: 0 0 14px; }
 .rz-tag.harness-gemini { color: #c3b2e0; background: rgba(160, 136, 204, 0.12); border-color: rgba(160, 136, 204, 0.32); }
-.rz-chip.mode-yolo { color: #e09a8e; border-color: rgba(196, 110, 98, 0.45); }
-.rz-chip.mode-autoEdit { color: var(--sage-strong); border-color: rgba(147, 168, 140, 0.3); }
 .rz-reload-wait { margin-left: 8px; font-size: 11.5px; color: var(--amber-strong); white-space: nowrap; cursor: default; }
 .rz-tag.harness-antigravity { color: #9fc4e8; background: rgba(110, 160, 214, 0.12); border-color: rgba(110, 160, 214, 0.32); }
 

@@ -3,7 +3,7 @@ import { ListItemText, ListSubheader, Menu, MenuItem } from "@mui/material";
 import { Bot, Check, ChevronDown, Cpu, LoaderCircle, Shield } from "lucide-react";
 import { useState } from "react";
 import type { ApiRoute, HarnessInfo, HarnessMode, ModelInfo } from "@/api/types";
-import { modelLabel, PERMISSION_MODES, permissionLabel } from "@/lib/format";
+import { modelLabel, modeTier, PERMISSION_MODES, permissionLabel } from "@/lib/format";
 import { harnessLabel } from "@/lib/harnesses";
 
 interface ModeProps {
@@ -21,12 +21,13 @@ export function ModePicker({ value, allowBypass, onChange, disabled, options }: 
     ? options.map((m) => ({ value: m.id, label: m.name, hint: m.description ?? "" }))
     : PERMISSION_MODES.filter((m) => allowBypass || m.value !== "bypassPermissions");
   const current = value ?? (options ? options[0]?.id ?? "" : "default");
+  const tier = modeTier(current, options);
   const label = options ? modes.find((m) => m.value === current)?.label ?? current : permissionLabel(current);
   return (
     <>
       <button
         type="button"
-        className={`rz-chip mode-${current}`}
+        className={`rz-chip mode-${current} tier-${tier}`}
         disabled={disabled}
         onClick={(e) => setAnchor(e.currentTarget)}
         title="权限模式（Shift+Tab 切换）"
