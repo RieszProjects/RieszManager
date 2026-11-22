@@ -5,7 +5,7 @@ import type { ToolBlock as ToolBlockType, ToolResult } from "@/api/types";
 import { CodeBlock } from "@/components/CodeBlock";
 import { DiffView, diffStats, patchHunks, type Hunk, type PatchChange } from "@/components/DiffView";
 import { shortPath } from "@/lib/format";
-import { harnessLabel } from "@/lib/harnesses";
+import { useHarnessLabel } from "@/lib/harnesses";
 import { useNotes } from "@/features/notes/store";
 import { useSubagentLists } from "@/features/sessions/SessionSubagents";
 import { Markdown } from "@/components/Markdown";
@@ -346,13 +346,14 @@ function ChildSessionLink({ tool }: { tool: ToolBlockType }) {
   const agentId = String(input.agent_id ?? "");
   const found = [...(list ?? [])].reverse().find((a) => a.sessionId &&
     (kind === "subagent_send" ? agentId && a.sessionId.startsWith(agentId) : a.description === wanted));
+  const harnessName = useHarnessLabel(found?.harness);
   if (!found?.sessionId) return null;
   const target = found.sessionId;
   return (
     <button type="button" className="rz-child-link" onClick={() => navigate({ view: "session", sessionId: target })}>
       {found.via === "browser" ? <Globe size={13} /> : <Workflow size={13} />}
       <span>打开{found.via === "browser" ? "浏览器任务" : "子代理"}会话</span>
-      {found.via === "riesz" && found.harness && <span className={`rz-tag harness-${found.harness} rz-subagent-tag`}>{harnessLabel(found.harness)}</span>}
+      {found.via === "riesz" && found.harness && <span className={`rz-tag harness-${found.harness} rz-subagent-tag`}>{harnessName}</span>}
       <ChevronRight size={13} />
     </button>
   );

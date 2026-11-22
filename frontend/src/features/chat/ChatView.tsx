@@ -14,7 +14,7 @@ import { StatusDot } from "@/components/StatusDot";
 import { copyText } from "@/lib/clipboard";
 import { clockTime } from "@/lib/format";
 import { handOff } from "@/lib/handoff";
-import { harnessLabel, resumeCommand, routeTag, useHarnesses } from "@/lib/harnesses";
+import { harnessLabel, resumeCommand, useHarnessLabel, useHarnesses, useRouteTag } from "@/lib/harnesses";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { sessionTitle, useApp } from "@/store/app";
 import { useOrganize } from "@/store/organize";
@@ -220,7 +220,8 @@ export function ChatView({ sessionId }: { sessionId: string }) {
 
   const state = data?.state ?? null;
   const harness = state?.harness ?? summary?.harness;
-  const apiTag = routeTag(state?.api ?? summary?.api, harness);
+  const harnessName = useHarnessLabel(harness);
+  const apiTag = useRouteTag(state?.api ?? summary?.api, harness);
   const keepAlive = Boolean(state?.keepAlive ?? summary?.keepAlive);
   const items = data?.items ?? [];
   const project = projects.find((p) => p.id === projectId);
@@ -328,7 +329,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
             <div className="rz-chat-title-text"><EditableTitle sessionId={sessionId} title={sessionTitle(summary)} /></div>
             <div className="rz-chat-sub">
               <StatusDot live={live} size={7} />
-              {harness && <span className={`rz-tag harness harness-${harness}`}>{harnessLabel(harness)}</span>}
+              {harness && <span className={`rz-tag harness harness-${harness}`}>{harnessName}</span>}
               {apiTag && <span className="rz-tag harness">{apiTag}</span>}
 
               {project && <span className="clamp-1">{project.name}</span>}

@@ -9,7 +9,7 @@ import { create } from "zustand";
 import { api } from "@/api/client";
 import type { LiveInfo, SessionSummary } from "@/api/types";
 import { relativeTime } from "@/lib/format";
-import { harnessLabel } from "@/lib/harnesses";
+import { harnessLabel, useHarnesses } from "@/lib/harnesses";
 import { useNowSeconds, useTick } from "@/lib/useNow";
 import { useUi } from "@/store/ui";
 
@@ -131,6 +131,7 @@ export function SessionSubagents({ session, live }: { session: SessionSummary; l
   const navigate = useUi((s) => s.navigate);
   const current = useUi((s) => (s.subagent?.sessionId === sessionId ? s.subagent : null));
   const now = useNowSeconds();
+  useHarnesses();
   const [olderShown, setOlderShown] = useState(false);
   const { running, recent, older } = useMemo(() => split(list ?? [], live, now), [list, live, now]);
 

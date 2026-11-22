@@ -22,6 +22,7 @@ import { NewSessionDialog } from "@/features/sessions/NewSessionDialog";
 import { RenameDialog } from "@/features/sessions/RenameDialog";
 import { ServerBrowser } from "@/features/browser/ServerBrowser";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
+import { preloadHarnesses } from "@/lib/harnesses";
 import { setupPresence } from "@/lib/presence";
 import { syncPush } from "@/lib/push";
 import { useApp } from "@/store/app";
@@ -37,6 +38,7 @@ function useLiveData(enabled: boolean) {
     void app.loadConfig().catch(() => undefined);
     void app.loadProjects().catch(() => undefined);
     void app.loadSessions().catch(() => undefined);
+    preloadHarnesses();
     void useOrganize.getState().load().catch(() => undefined);
     const offEvent = socket.onEvent((event) => {
       useApp.getState().handleEvent(event);

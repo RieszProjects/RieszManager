@@ -1,5 +1,5 @@
 /** Harnesses (Claude Code, Codex, DeepSeek Harness), the model APIs each can run on, and their models. */
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { api } from "@/api/client";
 import type { ApiRoute, HarnessInfo, ModelInfo } from "@/api/types";
 
@@ -14,7 +14,14 @@ export function harnessMeta(id: string | null | undefined): HarnessInfo | undefi
 /** A short name for tags and placeholders. */
 export function harnessLabel(id: string | null | undefined): string {
   const meta = known.get(id ?? "claude");
-  return meta?.label ?? meta?.name ?? (id && id !== "claude" ? id : "Claude Code");
+  if (meta) return meta.label ?? meta.name;
+  if (!id || id === "claude") return "Claude Code";
+  return id[0].toUpperCase() + id.slice(1);
+}
+
+/** Reactive label: updates once `/api/harnesses` arrives (only re-renders if this harness's label changes). */
+export function useHarnessLabel(id: string | null | undefined): string {
+  return useSyncExternalStore(subscribeKnown, () => harnessLabel(id));
 }
 
 /** The terminal command that continues a session, or null when the harness has none by session id. */
@@ -27,12 +34,19 @@ const TTL = 5 * 60 * 1000;
 let listed: Promise<HarnessInfo[]> | null = null;
 let listedAt = 0;
 const listeners = new Set<(list: HarnessInfo[]) => void>();
+const metaListeners = new Set<() => void>();
+
+function subscribeKnown(fn: () => void): () => void {
+  metaListeners.add(fn);
+  return () => metaListeners.delete(fn);
+}
 
 function fetchHarnesses(force = false): Promise<HarnessInfo[]> {
   if (force || !listed || Date.now() - listedAt > TTL) {
     listedAt = Date.now();
     listed = api<{ harnesses: HarnessInfo[] }>("harnesses").then((r) => {
       for (const h of r.harnesses ?? []) known.set(h.id, h);
+      metaListeners.forEach((fn) => fn());
       return r.harnesses ?? [];
     }).catch(() => {
       listed = null;
@@ -41,6 +55,11 @@ function fetchHarnesses(force = false): Promise<HarnessInfo[]> {
     void listed.then((l) => listeners.forEach((fn) => fn(l)));
   }
   return listed;
+}
+
+/** Eagerly load harness metadata at app startup so tags have canonical labels right away. */
+export function preloadHarnesses(): void {
+  void fetchHarnesses();
 }
 
 /** Ask again (after API keys changed in the settings). */
@@ -105,4 +124,9 @@ export function routeTag(route: string | null | undefined, harness?: string | nu
   const provider = route.split(":")[0];
   if (known.get(harness ?? "claude")?.routes?.[0]?.id === route) return null;   // the harness's own default route
   return `${PROVIDER_NAMES[provider] ?? provider} API`;
+}
+
+/** Reactive route tag: updates once `/api/harnesses` arrives. */
+export function useRouteTag(route: string | null | undefined, harness?: string | null): string | null {
+  return useSyncExternalStore(subscribeKnown, () => routeTag(route, harness));
 }

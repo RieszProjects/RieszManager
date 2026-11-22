@@ -7,7 +7,7 @@ import { useSchedules } from "@/features/schedules/store";
 import { copyText } from "@/lib/clipboard";
 import { setKeepAlive } from "@/lib/keepAlive";
 import { relativeTime } from "@/lib/format";
-import { harnessLabel, routeTag } from "@/lib/harnesses";
+import { useHarnessLabel, useRouteTag } from "@/lib/harnesses";
 import { sessionTitle, useApp } from "@/store/app";
 import { useOrganize } from "@/store/organize";
 import { toast, useUi } from "@/store/ui";
@@ -77,6 +77,8 @@ function SessionRowImpl({ session, showProject, active, allSubagents }: Props) {
   const scheduled = useSchedules((s) => s.items.some((x) => x.sessionId === session.sessionId && x.enabled));
   const agents = useSessionSubagents(session, live);
   const agentsShown = agents.has && (agents.active > 0 || Boolean(allSubagents));
+  const harnessName = useHarnessLabel(session.harness);
+  const apiTag = useRouteTag(session.api, session.harness);
   return (
     <>
     <div className={`rz-session-row${active ? " active" : ""}${archived ? " archived" : ""}${agentsShown ? " has-agents" : ""}`}>
@@ -90,8 +92,8 @@ function SessionRowImpl({ session, showProject, active, allSubagents }: Props) {
             : <StatusDot live={live} size={7} />}
         </div>
         <div className="rz-session-row-sub">
-          {session.harness && <span className={`rz-tag harness harness-${session.harness}`}>{harnessLabel(session.harness)}</span>}
-          {routeTag(session.api, session.harness) && <span className="rz-tag harness">{routeTag(session.api, session.harness)}</span>}
+          {session.harness && <span className={`rz-tag harness harness-${session.harness}`}>{harnessName}</span>}
+          {apiTag && <span className="rz-tag harness">{apiTag}</span>}
           {archived && <span className="rz-tag muted">已归档</span>}
           {showProject && projectName && <span className="rz-session-project clamp-1">{projectName}</span>}
           <span className="dim">{relativeTime(session.mtime)}</span>
