@@ -49,11 +49,160 @@ def _text(block: Any) -> str:
     return ""
 
 
+def _normalize_questions(raw_questions: Any) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for q in raw_questions or ():
+        if not isinstance(q, dict):
+            continue
+        opts = []
+        for o in q.get("options") or ():
+            if isinstance(o, str):
+                opts.append({"label": o})
+            elif isinstance(o, dict):
+                opts.append({"label": str(o.get("label") or o.get("title") or o.get("const") or ""),
+                             **({"description": o["description"]} if o.get("description") else {})})
+        out.append({
+            "question": str(q.get("question") or ""),
+            "multiSelect": bool(q.get("is_multi_select") or q.get("multiSelect")),
+            "options": opts,
+        })
+    return out
+
+
+def _elicitation_fields(schema: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Convert an ACP form elicitation JSON Schema into (AskUserQuestion items, field descriptors)."""
+    props = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+    # Pair `<k>_other` string fields with their parent option field `<k>` (Antigravity's ask_question shape).
+    paired_other: set[str] = set()
+    for key, prop in props.items():
+        if not isinstance(prop, dict):
+            continue
+        other_key = f"{key}_other"
+        other_prop = props.get(other_key)
+        has_choices = bool(prop.get("oneOf") or prop.get("enum") or
+                           (prop.get("type") == "array" and isinstance(prop.get("items"), dict) and
+                            (prop["items"].get("anyOf") or prop["items"].get("enum"))))
+        if has_choices and isinstance(other_prop, dict) and other_prop.get("type") == "string":
+            paired_other.add(other_key)
+
+    questions: list[dict[str, Any]] = []
+    fields: list[dict[str, Any]] = []
+    for key, prop in props.items():
+        if key in paired_other or not isinstance(prop, dict):
+            continue
+        ptype = prop.get("type")
+        title = str(prop.get("title") or prop.get("description") or key)
+        other_key = f"{key}_other" if f"{key}_other" in paired_other else None
+        options: list[dict[str, Any]] = []
+        label_to_const: dict[str, Any] = {}
+        multi = False
+        if ptype == "array":
+            multi = True
+            items = prop.get("items") if isinstance(prop.get("items"), dict) else {}
+            if isinstance(items.get("anyOf"), list):
+                for item in items["anyOf"]:
+                    if isinstance(item, dict):
+                        label = str(item.get("title") or item.get("const") or "")
+                        options.append({"label": label})
+                        label_to_const[label] = item.get("const", label)
+            elif isinstance(items.get("enum"), list):
+                for val in items["enum"]:
+                    label = str(val)
+                    options.append({"label": label})
+                    label_to_const[label] = val
+        elif isinstance(prop.get("oneOf"), list):
+            for item in prop["oneOf"]:
+                if isinstance(item, dict):
+                    label = str(item.get("title") or item.get("const") or "")
+                    options.append({"label": label})
+                    label_to_const[label] = item.get("const", label)
+        elif isinstance(prop.get("enum"), list):
+            for val in prop["enum"]:
+                label = str(val)
+                options.append({"label": label})
+                label_to_const[label] = val
+        elif ptype == "boolean":
+            options = [{"label": "是"}, {"label": "否"}]
+            label_to_const = {"是": True, "否": False, "true": True, "false": False}
+
+        questions.append({"id": key, "question": title, "multiSelect": multi, "options": options})
+        fields.append({"id": key, "question": title, "type": ptype, "multi": multi,
+                       "otherKey": other_key, "labelToConst": label_to_const})
+    return questions, fields
+
+
+def _elicitation_content(fields: list[dict[str, Any]], answers: dict[str, Any]) -> dict[str, Any]:
+    """Map AskUserQuestion answers back to ACP CreateElicitationResult.content."""
+    content: dict[str, Any] = {}
+    for field in fields:
+        key = field["id"]
+        given = answers.get(key)
+        if given is None:
+            given = answers.get(field["question"])
+        picked = given if isinstance(given, list) else ([given] if given not in (None, "") else [])
+        picked = [str(v) for v in picked if str(v).strip()]
+        if not picked:
+            continue
+        label_map: dict[str, Any] = field["labelToConst"]
+        other_key: str | None = field["otherKey"]
+        if field["multi"]:
+            selected: list[Any] = []
+            customs: list[str] = []
+            for item in picked:
+                if item in label_map:
+                    selected.append(label_map[item])
+                else:
+                    customs.append(item)
+            if selected:
+                content[key] = selected
+            if customs:
+                if other_key:
+                    content[other_key] = ", ".join(customs)
+                else:
+                    content.setdefault(key, []).extend(customs)
+        elif label_map:
+            selected_val = None
+            customs = []
+            for item in picked:
+                if item in label_map and selected_val is None:
+                    selected_val = label_map[item]
+                else:
+                    customs.append(item)
+            if selected_val is not None:
+                content[key] = selected_val
+            if customs:
+                if other_key:
+                    content[other_key] = ", ".join(customs)
+                elif selected_val is None:
+                    content[key] = ", ".join(customs)
+        else:
+            raw_text = ", ".join(picked)
+            if field["type"] == "integer":
+                try:
+                    content[key] = int(raw_text)
+                except ValueError:
+                    content[key] = raw_text
+            elif field["type"] == "number":
+                try:
+                    content[key] = float(raw_text)
+                except ValueError:
+                    content[key] = raw_text
+            else:
+                content[key] = raw_text
+    return content
+
+
 def tool_input(call: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     """(tool name, input) for an ACP tool call, shaped like the web app's tool cards."""
     kind = call.get("kind") or "other"
     title = str(call.get("title") or "")
-    raw = call.get("rawInput") if isinstance(call.get("rawInput"), dict) else {}
+    call_name = str(call.get("name") or "")
+    raw = call.get("rawInput") if isinstance(call.get("rawInput"), dict) else (
+        call.get("args") if isinstance(call.get("args"), dict) else {})
+    if call_name == "ask_question" or title == "Run ask_question":
+        if isinstance(raw.get("questions"), list):
+            return "AskUserQuestion", {"questions": _normalize_questions(raw["questions"])}
+        return "AskUserQuestion", {"questions": []}
     locations = [loc.get("path") for loc in call.get("locations") or () if isinstance(loc, dict) and loc.get("path")]
     diffs = [c for c in call.get("content") or () if isinstance(c, dict) and c.get("type") == "diff"]
     if kind == "execute":
@@ -69,7 +218,7 @@ def tool_input(call: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         return "Grep", {"pattern": raw.get("pattern") or title, **raw}
     if kind == "fetch":
         return "WebFetch", {"url": raw.get("url") or title, **raw}
-    return title or KIND_TOOLS.get(kind, "Tool"), {**raw} if raw else ({"title": title} if title else {})
+    return title or call_name or KIND_TOOLS.get(kind, "Tool"), {**raw} if raw else ({"title": title} if title else {})
 
 
 def tool_output(call: dict[str, Any]) -> str:
@@ -87,7 +236,7 @@ class AcpDriver(Driver):
     """One session of an ACP agent. Subclasses give the command (`argv`) and their modes."""
 
     harness = "acp"
-    capabilities = Capabilities(queue=True, approve_for_session=True, user_questions=False, model_switch="next-turn",
+    capabilities = Capabilities(queue=True, approve_for_session=True, user_questions=True, model_switch="next-turn",
                                 effort_switch="none")
     default_modes: list[Mode] = []
     # Work the agent starts by itself (a background task finished, its own timer fired) counts as a turn of
@@ -111,6 +260,7 @@ class AcpDriver(Driver):
         self._open: dict[str, float] = {}           # tool calls started and not finished: id -> when
         self._last_update = 0.0                     # when the last session/update came (monotonic)
         self._autonomous = False                    # working on its own, without a prompt of ours
+        self._elicitation_answers: dict[str, dict[str, str]] = {}  # toolCallId -> {question: formatted answer}
 
     @property
     def pid(self) -> int | None:
@@ -148,7 +298,8 @@ class AcpDriver(Driver):
         self.alive = True
         self.started_at = time.time()
         try:
-            init = await self.peer.request("initialize", {"protocolVersion": PROTOCOL_VERSION, "clientCapabilities": {},
+            init = await self.peer.request("initialize", {"protocolVersion": PROTOCOL_VERSION,
+                                                          "clientCapabilities": {"elicitation": {"form": {}}},
                                                           "clientInfo": {"name": "riesz-manager", "version": "1"}}, timeout=120)
             self.agent = init or {}
             if self.session_id and (self.agent.get("agentCapabilities") or {}).get("loadSession"):
@@ -430,13 +581,15 @@ class AcpDriver(Driver):
         item, block = found
         if call.get("kind"):
             self._kinds[tid] = call["kind"]
-        if call.get("content") or call.get("kind") or call.get("rawInput"):
+        if call.get("content") or call.get("kind") or call.get("rawInput") or call.get("args"):
             name, inp = tool_input({**call, "kind": self._kinds.get(tid, "other"), "title": call.get("title") or block["input"].get("title")})
             if inp and (name != "Tool" or block["name"] == "Tool"):
                 block["name"], block["input"] = name, inp
         status = call.get("status")
         if status in ("completed", "failed"):
-            block["result"] = tool_result(tool_output(call), error=status == "failed")
+            answered = self._elicitation_answers.pop(tid, None)
+            structured = {"answers": answered} if answered else None
+            block["result"] = tool_result(tool_output(call), error=status == "failed", structured=structured)
             self._open.pop(tid, None)
             if self.tasks.pop(tid, None) is not None:
                 asyncio.get_running_loop().create_task(self.emit_state())    # a background call finished
@@ -511,6 +664,41 @@ class AcpDriver(Driver):
 
     async def _request(self, method: str, params: Any) -> Any:
         p = params or {}
+        if method == "elicitation/create":
+            mode = p.get("mode") or "form"
+            if mode != "form":
+                raise JsonRpcError(-32601, f"unsupported elicitation mode: {mode}")
+            schema = p.get("requestedSchema") if isinstance(p.get("requestedSchema"), dict) else {}
+            questions, fields = _elicitation_fields(schema)
+            if not questions:
+                return {"action": "decline"}
+            request_id = f"acp-{uuidlib.uuid4().hex[:12]}"
+            tool_call_id = p.get("toolCallId")
+            answer = await self.ask({
+                "requestId": request_id,
+                "toolName": "AskUserQuestion",
+                "toolUseId": tool_call_id,
+                "input": {"questions": questions},
+                "title": p.get("message"),
+                "question": True,
+            })
+            if answer.get("cancelled"):
+                return {"action": "cancel"}
+            if not answer.get("allow"):
+                return {"action": "decline"}
+            raw_answers = answer.get("answers") or {}
+            content = _elicitation_content(fields, raw_answers)
+            if tool_call_id:
+                summary: dict[str, str] = {}
+                for field in fields:
+                    val = raw_answers.get(field["id"]) or raw_answers.get(field["question"])
+                    if isinstance(val, list):
+                        summary[field["question"]] = ", ".join(str(x) for x in val if str(x).strip())
+                    elif val:
+                        summary[field["question"]] = str(val)
+                if summary:
+                    self._elicitation_answers[str(tool_call_id)] = summary
+            return {"action": "accept", "content": content}
         if method == "session/request_permission":
             call = p.get("toolCall") or {}
             self._tool({**call, "status": None})

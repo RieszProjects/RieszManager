@@ -612,10 +612,11 @@ class Harnesses:
         updated = body.get("updatedInput") if isinstance(body.get("updatedInput"), dict) else {}
         if isinstance(updated.get("answers"), dict):
             # The web app answers AskUserQuestion by question text ("a, b"); drivers want ids and lists.
-            by_text = {str(q.get("question")): q.get("id") for q in (pending.entry.get("input") or {}).get("questions") or ()}
+            q_by_text = {str(q.get("question")): q for q in (pending.entry.get("input") or {}).get("questions") or () if isinstance(q, dict)}
             for question, value in updated["answers"].items():
-                qid = by_text.get(str(question), question)
-                answers[qid] = [v.strip() for v in str(value).split(", ") if v.strip()]
+                q_obj = q_by_text.get(str(question)) or {}
+                qid = q_obj.get("id") or question
+                answers[qid] = _split_question_answers(str(value), q_obj.get("options") or ())
         self._active[session_id] = time.time()
         return driver.answer_permission(request_id, allow=allow, scope=scope, message=body.get("message"), answers=answers)
 
@@ -868,6 +869,35 @@ def _short_reply(item: dict[str, Any]) -> bool:
     if any(b.get("type") == "tool" for b in blocks):
         return False
     return sum(len(b.get("text") or "") for b in blocks if b.get("type") == "text") < 200
+
+
+def _split_question_answers(value: str, options: Any) -> list[str]:
+    """Split PermissionCard's `, `-joined AskUserQuestion value without breaking option labels containing `, `."""
+    rest = value.strip()
+    if not rest:
+        return []
+    labels = sorted(
+        {str(o.get("label")) for o in (options or ()) if isinstance(o, dict) and o.get("label")},
+        key=len, reverse=True,
+    )
+    out: list[str] = []
+    while rest:
+        matched = next((lbl for lbl in labels if rest == lbl or rest.startswith(lbl + ", ")), None)
+        if matched is not None:
+            out.append(matched)
+            rest = rest[len(matched) + 2:].strip() if len(rest) > len(matched) else ""
+            continue
+        # If none of the remaining text starts with a known option, keep it intact unless a later segment matches one.
+        idx = rest.find(", ")
+        if idx == -1 or not any((", " + lbl) in rest for lbl in labels):
+            if rest:
+                out.append(rest)
+            break
+        piece = rest[:idx].strip()
+        if piece:
+            out.append(piece)
+        rest = rest[idx + 2:].strip()
+    return out
 
 
 async def _nowhere(driver: Driver, event: dict[str, Any]) -> None:

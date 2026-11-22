@@ -134,7 +134,7 @@ function AskQuestion({ req }: { req: PermissionRequest }) {
     setPicked((p) => {
       const cur = p[q.question] ?? [];
       if (q.multiSelect) return { ...p, [q.question]: cur.includes(label) ? cur.filter((l) => l !== label) : [...cur, label] };
-      return { ...p, [q.question]: [label] };
+      return { ...p, [q.question]: cur.includes(label) ? [] : [label] };
     });
   const ready = questions.every((q) => (picked[q.question]?.length ?? 0) > 0 || (other[q.question] ?? "").trim());
   const submit = async () => {
@@ -154,21 +154,23 @@ function AskQuestion({ req }: { req: PermissionRequest }) {
         <div key={q.question} className="rz-question">
           {q.header && <div className="rz-question-header">{q.header}</div>}
           <div className="rz-question-text">{q.question}</div>
-          <div className="rz-options">
-            {q.options.map((o) => {
-              const on = picked[q.question]?.includes(o.label);
-              return (
-                <button key={o.label} type="button" className={`rz-option${on ? " on" : ""}`} onClick={() => toggle(q, o.label)}>
-                  <span className="rz-option-label">{o.label}</span>
-                  {o.description && <span className="rz-option-desc">{o.description}</span>}
-                </button>
-              );
-            })}
-          </div>
+          {q.options.length > 0 && (
+            <div className="rz-options">
+              {q.options.map((o) => {
+                const on = picked[q.question]?.includes(o.label);
+                return (
+                  <button key={o.label} type="button" className={`rz-option${on ? " on" : ""}`} onClick={() => toggle(q, o.label)}>
+                    <span className="rz-option-label">{o.label}</span>
+                    {o.description && <span className="rz-option-desc">{o.description}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <TextField
             fullWidth
             size="small"
-            placeholder="其他（自行输入）"
+            placeholder={q.options.length > 0 ? "其他（自行输入）" : "请输入回答"}
             value={other[q.question] ?? ""}
             onChange={(e) => setOther((s) => ({ ...s, [q.question]: e.target.value }))}
           />

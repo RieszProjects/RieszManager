@@ -184,6 +184,68 @@ class LateReplayTest(unittest.IsolatedAsyncioTestCase):
                                  ("user", "now"), ("assistant", "echo: now [0 images, default]")])
 
 
+class ElicitationTest(unittest.IsolatedAsyncioTestCase):
+    """Antigravity ask_question arrives over ACP elicitation/create and always asks the user (even in rz-bypass)."""
+
+    async def test_ask_question_elicitation_in_bypass_mode(self):
+        env = {**os.environ, "FAKE_ACP_MODES": "agy"}
+        driver = AntigravityDriver(agy=AGENT, cwd=tempfile.mkdtemp(), sink=Events(), env=env, mode="rz-bypass")
+        self.addAsyncCleanup(driver.stop)
+        await driver.start()
+        self.assertTrue(driver.capabilities.user_questions)
+        await driver.send("question")
+        deadline = time.time() + 10
+        while not driver.permissions:
+            self.assertLess(time.time(), deadline, "elicitation/create must prompt the user even in rz-bypass")
+            await asyncio.sleep(0.02)
+        [request_id] = driver.permissions
+        req = driver.permissions[request_id].entry
+        self.assertEqual(req["toolName"], "AskUserQuestion")
+        qs = req["input"]["questions"]
+        self.assertEqual([q["id"] for q in qs], ["q1", "q2"])
+        self.assertEqual([o["label"] for o in qs[0]["options"]], ["Red, warm", "Blue"])
+        self.assertFalse(qs[0]["multiSelect"])
+        self.assertTrue(qs[1]["multiSelect"])
+        # Simulate frontend comma-joined answer via harnesses._split_question_answers
+        from riesz_runner.harnesses import _split_question_answers
+        a1 = _split_question_answers("Red, warm", qs[0]["options"])
+        a2 = _split_question_answers("Tea, custom drink", qs[1]["options"])
+        self.assertEqual(a1, ["Red, warm"])
+        self.assertEqual(a2, ["Tea", "custom drink"])
+        driver.answer_permission(request_id, allow=True, answers={"q1": a1, "q2": a2})
+        while not driver.sink.of("result"):
+            self.assertLess(time.time(), deadline)
+            await asyncio.sleep(0.02)
+        await driver.flush()
+        self.assertEqual(driver.tasks, {}, "ask_question must not become a fake background task")
+        reply = driver.last_assistant_text()
+        self.assertIn('"action": "accept"', reply)
+        self.assertIn('"q1": "1"', reply)
+        self.assertIn('"q2": ["1"]', reply)
+        self.assertIn('"q2_other": "custom drink"', reply)
+        tool = next(b for i in driver.items.items for b in i.get("blocks") or () if b.get("type") == "tool")
+        self.assertEqual(tool["name"], "AskUserQuestion")
+        self.assertEqual(tool["result"]["structured"]["answers"], {"Pick color": "Red, warm", "Pick drinks": "Tea, custom drink"})
+
+    async def test_ask_question_declined(self):
+        env = {**os.environ, "FAKE_ACP_MODES": "agy"}
+        driver = AntigravityDriver(agy=AGENT, cwd=tempfile.mkdtemp(), sink=Events(), env=env, mode="rz-bypass")
+        self.addAsyncCleanup(driver.stop)
+        await driver.start()
+        await driver.send("question")
+        deadline = time.time() + 10
+        while not driver.permissions:
+            self.assertLess(time.time(), deadline)
+            await asyncio.sleep(0.02)
+        [request_id] = driver.permissions
+        driver.answer_permission(request_id, allow=False)
+        while not driver.sink.of("result"):
+            self.assertLess(time.time(), deadline)
+            await asyncio.sleep(0.02)
+        await driver.flush()
+        self.assertIn('"action": "decline"', driver.last_assistant_text())
+
+
 class ModelsTest(unittest.TestCase):
     def test_signed_out(self):
         self.assertEqual(agy_models("Fetching available models...\nError: Please sign in to view available models."), [])

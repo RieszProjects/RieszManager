@@ -34,11 +34,11 @@ def update(sid, u):
     send({"method": "session/update", "params": {"sessionId": sid, "update": u}})
 
 
-def ask(params):
+def ask(params, method="session/request_permission"):
     next_id[0] += 1
     ev = threading.Event()
     pending[next_id[0]] = [ev, None]
-    send({"id": next_id[0], "method": "session/request_permission", "params": params})
+    send({"id": next_id[0], "method": method, "params": params})
     ev.wait()
     return pending.pop(next_id[0])[1]
 
@@ -63,6 +63,26 @@ def prompt(rid, p):
                      "status": "completed" if chosen.startswith("proceed") else "failed",
                      "content": [{"type": "content", "content": {"type": "text", "text": f"chose {chosen}"}}]})
         update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": f"done {chosen}"}})
+    elif text == "question":
+        call = {"toolCallId": "tq1", "name": "ask_question", "title": "Run ask_question", "kind": "other", "status": "in_progress",
+                "args": {"questions": [
+                    {"question": "Pick color", "is_multi_select": False, "options": ["Red, warm", "Blue"]},
+                    {"question": "Pick drinks", "is_multi_select": True, "options": ["Tea", "Coffee"]},
+                ]}}
+        update(sid, {"sessionUpdate": "tool_call", **call})
+        ans = ask({
+            "sessionId": sid, "toolCallId": "tq1", "mode": "form", "message": "The agent has 2 questions.",
+            "requestedSchema": {"type": "object", "properties": {
+                "q1": {"type": "string", "title": "Pick color",
+                       "oneOf": [{"const": "1", "title": "Red, warm"}, {"const": "2", "title": "Blue"}]},
+                "q1_other": {"type": "string", "title": "Other"},
+                "q2": {"type": "array", "title": "Pick drinks",
+                       "items": {"anyOf": [{"const": "1", "title": "Tea"}, {"const": "2", "title": "Coffee"}]}},
+                "q2_other": {"type": "string", "title": "Other"},
+            }},
+        }, method="elicitation/create")
+        update(sid, {"sessionUpdate": "tool_call_update", "toolCallId": "tq1", "status": "completed"})
+        update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": f"answers: {json.dumps(ans, sort_keys=True)}"}})
     elif text == "bg":
         # Like Antigravity: a long command goes on after the turn has ended, then reports.
         update(sid, {"sessionUpdate": "tool_call", "toolCallId": "t3", "title": "make paper", "kind": "execute", "status": "in_progress"})

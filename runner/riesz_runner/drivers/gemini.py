@@ -44,7 +44,7 @@ def settings_file(state_dir: Path) -> str:
 
 class GeminiDriver(AcpDriver):
     harness = "gemini"
-    capabilities = Capabilities(queue=True, approve_for_session=True, model_switch="next-turn", effort_switch="none")
+    capabilities = Capabilities(queue=True, approve_for_session=True, user_questions=True, model_switch="next-turn", effort_switch="none")
     default_modes = MODES
 
     def __init__(self, *, gemini: str = "gemini", settings: str | None = None, **kwargs: Any) -> None:
