@@ -167,6 +167,7 @@ export const useNodes = create<NodesStore>((set, get) => ({
   remove: async (id) => {
     const res = await api<NodesSnapshot>(`nodes/${id}/delete`, { body: {} });
     get().apply(res);
+    toast("已移除设备并作废其配对密钥", "info");
   },
 
   bind: async (nodeId, sessionId, mode) => {

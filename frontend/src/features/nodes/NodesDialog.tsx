@@ -2,7 +2,7 @@
 import {
   Button, Checkbox, Dialog, DialogContent, DialogTitle, FormControlLabel, IconButton, TextField, Tooltip,
 } from "@mui/material";
-import { Check, Copy, Laptop, Link2Off, Plus, Power, RefreshCw, ShieldAlert, Square, Trash2, X } from "lucide-react";
+import { Check, Copy, Laptop, Link2Off, Plus, Power, RefreshCw, Square, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { copyText } from "@/lib/clipboard";
 import { toast } from "@/store/ui";
@@ -38,7 +38,6 @@ function CmdItem({ cmd, onKill }: { cmd: NodeCommand; onKill: () => void }) {
 
 function DeviceCard({ d }: { d: NodeDevice }) {
   const kick = useNodes((s) => s.kick);
-  const revoke = useNodes((s) => s.revoke);
   const remove = useNodes((s) => s.remove);
   const unbind = useNodes((s) => s.unbind);
   const killCommand = useNodes((s) => s.killCommand);
@@ -53,21 +52,16 @@ function DeviceCard({ d }: { d: NodeDevice }) {
           <span className="dim">
             {d.os || d.platform || "未知系统"}
             {d.ephemeral ? " · 临时" : ""}
-            {d.revoked ? " · 已吊销" : d.online ? ` · 权限上限 ${NODE_MODE_LABEL[d.maxMode ?? "auto"]}` : " · 离线"}
+            {d.revoked ? " · 已失效" : d.online ? ` · 权限上限 ${NODE_MODE_LABEL[d.maxMode ?? "auto"]}` : " · 离线"}
           </span>
         </div>
         <div className="rz-node-card-actions">
           {d.online && (
-            <Tooltip title="断开连接">
+            <Tooltip title="断开连接（保留配对，可重连）">
               <IconButton size="small" onClick={() => void kick(d.id)}><Power size={15} /></IconButton>
             </Tooltip>
           )}
-          {!d.revoked && !d.ephemeral && (
-            <Tooltip title="吊销设备密钥">
-              <IconButton size="small" onClick={() => void revoke(d.id)}><ShieldAlert size={15} /></IconButton>
-            </Tooltip>
-          )}
-          <Tooltip title="删除记录">
+          <Tooltip title="移除设备（断开并作废配对密钥）">
             <IconButton size="small" className="rz-danger" onClick={() => void remove(d.id)}><Trash2 size={15} /></IconButton>
           </Tooltip>
         </div>
