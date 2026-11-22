@@ -2,7 +2,7 @@
 import {
   Button, Checkbox, Dialog, DialogContent, DialogTitle, FormControlLabel, IconButton, TextField, Tooltip,
 } from "@mui/material";
-import { Check, Copy, Laptop, Link2Off, Plus, Power, ShieldAlert, Square, Trash2, X } from "lucide-react";
+import { Check, Copy, Laptop, Link2Off, Plus, Power, RefreshCw, ShieldAlert, Square, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { copyText } from "@/lib/clipboard";
 import { toast } from "@/store/ui";
@@ -112,6 +112,9 @@ export function NodesDialog() {
   const devices = useNodes((s) => s.devices);
   const approvals = useNodes((s) => s.approvals);
   const pairings = useNodes((s) => s.pairings);
+  const downloadToken = useNodes((s) => s.downloadToken);
+  const downloadTokenPinned = useNodes((s) => s.downloadTokenPinned);
+  const rotateDownloadToken = useNodes((s) => s.rotateDownloadToken);
   const createPairing = useNodes((s) => s.createPairing);
   const resolveApproval = useNodes((s) => s.resolveApproval);
 
@@ -120,6 +123,10 @@ export function NodesDialog() {
   const [busy, setBusy] = useState(false);
 
   const origin = typeof window !== "undefined" ? window.location.origin : "https://your-server";
+  const bootstrapUrl = downloadToken
+    ? `${origin}/api/nodes/bootstrap.py?token=${encodeURIComponent(downloadToken)}`
+    : `${origin}/api/nodes/bootstrap.py?token=<loading>`;
+  const oneLiner = `python -c "import urllib.request; exec(urllib.request.urlopen('${bootstrapUrl}').read())"`;
 
   const onCreatePair = async () => {
     setBusy(true);
@@ -179,16 +186,25 @@ export function NodesDialog() {
           </p>
           <div className="rz-node-pair-box" style={{ marginTop: 0, marginBottom: 12 }}>
             <div className="rz-node-pair-code">
-              <span style={{ fontSize: 12.5, fontWeight: 600 }}>跨平台一键启动（可存进快捷脚本，换系统免配置）</span>
+              <span style={{ fontSize: 12.5, fontWeight: 600 }}>跨平台一键启动（含下载口令，未带口令返回 404；可存进快捷脚本）</span>
               <span className="dim">需 Python 3.10+</span>
             </div>
             <div className="rz-node-pair-cmd">
-              <code className="mono">{`python -c "import urllib.request; exec(urllib.request.urlopen('${origin}/api/nodes/bootstrap.py').read())"`}</code>
+              <code className="mono">{oneLiner}</code>
               <Tooltip title="复制一键启动命令">
-                <IconButton size="small" onClick={() => copyCmd(`python -c "import urllib.request; exec(urllib.request.urlopen('${origin}/api/nodes/bootstrap.py').read())"`)}>
-                  <Copy size={14} />
-                </IconButton>
+                <span>
+                  <IconButton size="small" disabled={!downloadToken} onClick={() => copyCmd(oneLiner)}>
+                    <Copy size={14} />
+                  </IconButton>
+                </span>
               </Tooltip>
+              {!downloadTokenPinned && (
+                <Tooltip title="重置下载口令（旧链接将立即失效）">
+                  <IconButton size="small" onClick={() => void rotateDownloadToken().catch((e) => toast((e as Error).message, "error"))}>
+                    <RefreshCw size={14} />
+                  </IconButton>
+                </Tooltip>
+              )}
             </div>
           </div>
           <div className="rz-nodes-pair-form">
@@ -207,7 +223,7 @@ export function NodesDialog() {
             const extra = p.ephemeral
               ? `--code ${p.code} --ephemeral`
               : `--code ${p.code}${p.label ? ` --name "${p.label}"` : ""}`;
-            const cmd = `python -c "import urllib.request; exec(urllib.request.urlopen('${origin}/api/nodes/bootstrap.py').read())" -- ${extra}`;
+            const cmd = `${oneLiner} -- ${extra}`;
             return (
               <div key={p.code} className="rz-node-pair-box">
                 <div className="rz-node-pair-code">

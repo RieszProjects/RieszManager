@@ -91,9 +91,13 @@ export const NODE_MODE_LABEL: Record<NodeMode, string> = {
 interface NodesStore extends NodesSnapshot {
   loaded: boolean;
   open: boolean;
+  downloadToken: string;
+  downloadTokenPinned: boolean;
   setOpen: (open: boolean) => void;
   apply: (snap: Partial<NodesSnapshot>) => void;
   load: () => Promise<void>;
+  loadDownloadToken: () => Promise<void>;
+  rotateDownloadToken: () => Promise<void>;
   createPairing: (label: string, ephemeral: boolean) => Promise<NodePairing>;
   kick: (id: string) => Promise<void>;
   revoke: (id: string) => Promise<void>;
@@ -110,8 +114,15 @@ export const useNodes = create<NodesStore>((set, get) => ({
   pairings: [],
   loaded: false,
   open: false,
+  downloadToken: "",
+  downloadTokenPinned: false,
 
-  setOpen: (open) => set({ open }),
+  setOpen: (open) => {
+    set({ open });
+    if (open && !get().downloadToken) {
+      void get().loadDownloadToken().catch(() => undefined);
+    }
+  },
   apply: (snap) =>
     set((s) => ({
       devices: snap.devices ?? s.devices,
@@ -123,6 +134,17 @@ export const useNodes = create<NodesStore>((set, get) => ({
   load: async () => {
     const res = await api<NodesSnapshot>("nodes");
     get().apply(res);
+  },
+
+  loadDownloadToken: async () => {
+    const res = await api<{ token: string; pinned: boolean }>("nodes/download-token");
+    set({ downloadToken: res.token || "", downloadTokenPinned: Boolean(res.pinned) });
+  },
+
+  rotateDownloadToken: async () => {
+    const res = await api<{ token: string; pinned: boolean }>("nodes/download-token/rotate", { body: {} });
+    set({ downloadToken: res.token || "", downloadTokenPinned: Boolean(res.pinned) });
+    toast("已重置下载口令，旧链接立即失效", "success");
   },
 
   createPairing: async (label, ephemeral) => {

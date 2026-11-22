@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
+import os
 import re
+import secrets
 from typing import Any
 from urllib.parse import quote
 
@@ -230,10 +233,75 @@ async def node_register(request: HttpRequest) -> HttpResponse:
         return HttpResponse(await resp.read(), status=resp.status, content_type="application/json")
 
 
+_cached_download_token: str | None = None
+
+
+def _get_node_download_token() -> tuple[str, bool]:
+    """Return `(token, pinned_in_env)` for gating `/api/nodes/bootstrap.py` and `/api/nodes/client.zip`."""
+    global _cached_download_token
+    env_tok = (getattr(settings, "NODE_DOWNLOAD_TOKEN", "") or "").strip()
+    if env_tok:
+        return env_tok, True
+    if _cached_download_token:
+        return _cached_download_token, False
+    path = settings.DATA_DIR / "node_download_token"
+    if path.exists():
+        raw = path.read_text(encoding="utf-8").strip()
+        if raw:
+            _cached_download_token = raw
+            return raw, False
+    tok = secrets.token_urlsafe(24)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(tok + "\n", encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+    _cached_download_token = tok
+    return tok, False
+
+
+def _rotate_node_download_token() -> str:
+    global _cached_download_token
+    if (getattr(settings, "NODE_DOWNLOAD_TOKEN", "") or "").strip():
+        raise ApiError(400, "下载口令已在 .env (RIESZ_NODE_DOWNLOAD_TOKEN) 中固定，请直接修改 .env")
+    path = settings.DATA_DIR / "node_download_token"
+    tok = secrets.token_urlsafe(24)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(tok + "\n", encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+    _cached_download_token = tok
+    return tok
+
+
+def _check_download_token(request: HttpRequest) -> str | None:
+    """Validate secret download token from `?token=` or `X-Riesz-Download-Token`. Returns token if valid."""
+    expected, _ = _get_node_download_token()
+    provided = (request.GET.get("token") or request.headers.get("X-Riesz-Download-Token") or "").strip()
+    if not provided or not hmac.compare_digest(provided, expected):
+        return None
+    return expected
+
+
+@require_http_methods(["GET"])
+@api_view()
+async def node_download_token(request: HttpRequest) -> HttpResponse:
+    tok, pinned = _get_node_download_token()
+    return ok({"token": tok, "pinned": pinned})
+
+
+@require_http_methods(["POST"])
+@api_view()
+async def node_download_token_rotate(request: HttpRequest) -> HttpResponse:
+    tok = _rotate_node_download_token()
+    return ok({"token": tok, "pinned": False})
+
+
 @csrf_exempt
 @require_http_methods(["GET"])
 async def node_client_zip(request: HttpRequest) -> HttpResponse:
-    """Serve installable `riesz-node.zip` archive for zero-config installs (`uvx` / `pip` / `bootstrap.py`)."""
+    """Serve installable `riesz-node.zip` archive (hidden behind secret download token)."""
+    if not _check_download_token(request):
+        return HttpResponse("Not Found", status=404, content_type="text/plain")
     try:
         resp = await runner.request("GET", "/v1/nodes/client.zip", timeout=60)
     except runner.RunnerUnavailable:
@@ -241,26 +309,33 @@ async def node_client_zip(request: HttpRequest) -> HttpResponse:
     async with resp:
         data = await resp.read()
         out = HttpResponse(data, status=resp.status, content_type=resp.headers.get("Content-Type", "application/zip"))
-        for hdr in ("Content-Disposition", "X-Riesz-Client-Hash", "Cache-Control"):
+        for hdr in ("Content-Disposition", "X-Riesz-Client-Hash"):
             if resp.headers.get(hdr):
                 out[hdr] = resp.headers[hdr]
+        out["Cache-Control"] = "no-store"
         return out
 
 
 @csrf_exempt
 @require_http_methods(["GET"])
 async def node_bootstrap_py(request: HttpRequest) -> HttpResponse:
-    """Serve zero-config cross-platform Python launcher pre-populated with this server's public origin."""
-    proto = request.headers.get("X-Forwarded-Proto") or request.scheme or "https"
-    host = request.get_host()
-    origin = f"{proto}://{host}"
+    """Serve zero-config cross-platform Python launcher (hidden behind secret download token)."""
+    tok = _check_download_token(request)
+    if not tok:
+        return HttpResponse("Not Found", status=404, content_type="text/plain")
+    origin = (getattr(settings, "PUBLIC_ORIGIN", "") or "").rstrip("/")
+    if not origin:
+        proto = request.headers.get("X-Forwarded-Proto") or request.scheme or "https"
+        origin = f"{proto}://{request.get_host()}"
     try:
-        resp = await runner.request("GET", "/v1/nodes/bootstrap.py", params={"origin": origin}, timeout=30)
+        resp = await runner.request("GET", "/v1/nodes/bootstrap.py", params={"origin": origin, "token": tok}, timeout=30)
     except runner.RunnerUnavailable:
         return _unavailable()
     async with resp:
-        return HttpResponse(await resp.read(), status=resp.status,
-                            content_type=resp.headers.get("Content-Type", "text/x-python"))
+        out = HttpResponse(await resp.read(), status=resp.status,
+                           content_type=resp.headers.get("Content-Type", "text/x-python"))
+        out["Cache-Control"] = "no-store"
+        return out
 
 
 @csrf_exempt

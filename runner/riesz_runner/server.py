@@ -1685,11 +1685,12 @@ async def nodes_client_zip(request: web.Request) -> web.Response:
 
 async def nodes_bootstrap_py(request: web.Request) -> web.Response:
     origin = request.query.get("origin") or "https://your-server"
+    token = request.query.get("token") or ""
     try:
-        script = await asyncio.to_thread(render_bootstrap_py, origin)
+        script = await asyncio.to_thread(render_bootstrap_py, origin, token=token)
     except NodeError as exc:
         return _err(404, str(exc))
-    return web.Response(text=script, content_type="text/x-python", headers={"Cache-Control": "no-cache"})
+    return web.Response(text=script, content_type="text/x-python", headers={"Cache-Control": "no-store"})
 
 
 async def nodes_ws(request: web.Request) -> web.WebSocketResponse:

@@ -946,7 +946,7 @@ def build_client_zip() -> tuple[bytes, str]:
     return raw, digest
 
 
-def render_bootstrap_py(origin: str) -> str:
+def render_bootstrap_py(origin: str, *, token: str = "") -> str:
     """Self-contained zero-config cross-platform Python launcher for `riesz-node`."""
     safe_origin = origin.rstrip("/")
     _, client_hash = build_client_zip()
@@ -956,6 +956,7 @@ import hashlib, os, pathlib, subprocess, sys, tempfile, urllib.request
 
 DEFAULT_SERVER = {safe_origin!r}
 CLIENT_HASH = {client_hash!r}
+DOWNLOAD_TOKEN = {token!r}
 
 def _cache_dir():
     if sys.platform == "win32":
@@ -968,6 +969,12 @@ def _venv_bin(venv_dir, name):
     if sys.platform == "win32":
         return venv_dir / "Scripts" / f"{{name}}.exe"
     return venv_dir / "bin" / name
+
+def _download(url, dest):
+    headers = {{"X-Riesz-Download-Token": DOWNLOAD_TOKEN}} if DOWNLOAD_TOKEN else {{}}
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        dest.write_bytes(resp.read())
 
 def _main():
     if sys.version_info < (3, 10):
@@ -997,7 +1004,7 @@ def _main():
         zip_url = f"{{server}}/api/nodes/client.zip"
         with tempfile.TemporaryDirectory() as td:
             zpath = pathlib.Path(td) / "riesz-node.zip"
-            urllib.request.urlretrieve(zip_url, zpath)
+            _download(zip_url, zpath)
             if server == DEFAULT_SERVER:
                 actual = hashlib.sha256(zpath.read_bytes()).hexdigest()
                 if actual != CLIENT_HASH:

@@ -6,16 +6,16 @@ Supports Windows (PowerShell / cmd), WSL, macOS, and Linux.
 
 ## Zero-Config One-Liner (No git, no manual install)
 
-Run on any machine with Python 3.10+ (auto-creates a cached venv, auto-updates when the server updates, and interactively asks for your pairing code on first run):
+Run on any machine with Python 3.10+ using the command copied from the Riesz Manager web UI ("本地电脑" dialog, gated by your private download token — requests without a valid token return `404`):
 
 ```bash
-python -c "import urllib.request; exec(urllib.request.urlopen('https://your-riesz-host/api/nodes/bootstrap.py').read())"
+python -c "import urllib.request; exec(urllib.request.urlopen('https://your-riesz-host/api/nodes/bootstrap.py?token=<YOUR_TOKEN>').read())"
 ```
 
 Or with `uv`:
 
 ```bash
-uvx --from https://your-riesz-host/api/nodes/client.zip riesz-node connect --server https://your-riesz-host
+uvx --from 'https://your-riesz-host/api/nodes/client.zip?token=<YOUR_TOKEN>' riesz-node connect --server https://your-riesz-host
 ```
 
 ## Per-Session Directory Isolation

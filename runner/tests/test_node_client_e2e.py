@@ -391,11 +391,17 @@ class RealClientServerE2ETest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("riesz-node/riesz_node/tui.py", names)
         self.assertFalse(any("tests/" in n or "__pycache__" in n for n in names))
 
-        r_boot = await self.client.get("/v1/nodes/bootstrap.py?origin=https://demo.invalid", headers={"Authorization": "Bearer tok-e2e"})
+        r_boot = await self.client.get(
+            "/v1/nodes/bootstrap.py?origin=https://demo.invalid&token=secret-dl-tok",
+            headers={"Authorization": "Bearer tok-e2e"},
+        )
         self.assertEqual(r_boot.status, 200)
+        self.assertEqual(r_boot.headers.get("Cache-Control"), "no-store")
         boot_src = await r_boot.text()
         compile(boot_src, "bootstrap.py", "exec")
         self.assertIn("https://demo.invalid", boot_src)
+        self.assertIn("secret-dl-tok", boot_src)
+        self.assertIn("X-Riesz-Download-Token", boot_src)
 
         # Start agent with NO startup --dir presets (roots=[]) and bind 2 sessions to isolated dirs
         dir_a = self.client_dir / "proj_a"

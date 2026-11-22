@@ -9,6 +9,8 @@ urlpatterns = [
     path("uploads", views.upload),
     path("transcribe", transcribe.transcribe),
     path("nodes/register", views.node_register),
+    path("nodes/download-token", views.node_download_token),
+    path("nodes/download-token/rotate", views.node_download_token_rotate),
     path("nodes/client.zip", views.node_client_zip),
     path("nodes/bootstrap.py", views.node_bootstrap_py),
     re_path(r"^nodes/transfer/(?P<token>[A-Za-z0-9_-]{16,128})$", views.node_transfer),
