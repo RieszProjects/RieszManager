@@ -1,13 +1,15 @@
-/** Management dialog for pairing, inspecting, kicking/revoking, and monitoring local computer nodes. */
+/** Session-scoped dialog for pairing, renaming, monitoring, and disconnecting local computer nodes. */
 import {
-  Button, Checkbox, Dialog, DialogContent, DialogTitle, FormControlLabel, IconButton, TextField, Tooltip,
+  Button, Dialog, DialogContent, DialogTitle, IconButton, MenuItem, Select, TextField, Tooltip,
 } from "@mui/material";
-import { Check, Copy, Laptop, Link2Off, Plus, Power, RefreshCw, Square, Trash2, X } from "lucide-react";
+import { Check, Copy, Laptop, Pencil, Plus, Power, RefreshCw, Square, X } from "lucide-react";
 import { useState } from "react";
 import { copyText } from "@/lib/clipboard";
+import { sessionTitle as getSessionTitle, useApp } from "@/store/app";
 import { toast } from "@/store/ui";
-import { NODE_MODE_LABEL, type NodeCommand, type NodeDevice, useNodes } from "./store";
+import { NODE_MODE_LABEL, type LiveNodeInfo, type NodeCommand, type NodeMode, useNodes } from "./store";
 
+const ALL_MODES: NodeMode[] = ["readonly", "ask", "auto", "full"];
 const RISK_TEXT: Record<string, string> = { low: "低风险", medium: "中风险", high: "高风险" };
 
 function CmdItem({ cmd, onKill }: { cmd: NodeCommand; onKill: () => void }) {
@@ -15,9 +17,10 @@ function CmdItem({ cmd, onKill }: { cmd: NodeCommand; onKill: () => void }) {
   return (
     <div className={`rz-node-cmd status-${cmd.status}`}>
       <div className="rz-node-cmd-head" onClick={() => setExpanded((e) => !e)}>
-        <span className="rz-node-cmd-status">{cmd.status === "running" ? "⏳" : cmd.status === "done" ? "✓" : cmd.status === "killed" ? "⊘" : "✗"}</span>
+        <span className="rz-node-cmd-status">
+          {cmd.status === "running" ? "⏳" : cmd.status === "done" ? "✓" : cmd.status === "killed" ? "⊘" : "✗"}
+        </span>
         <span className="mono clamp-1 rz-node-cmd-text">{cmd.command}</span>
-        <span className="dim">{cmd.sessionTitle}</span>
         {cmd.status === "running" && (
           <Tooltip title="终止该命令">
             <IconButton size="small" onClick={(e) => { e.stopPropagation(); onKill(); }} className="rz-danger">
@@ -36,64 +39,93 @@ function CmdItem({ cmd, onKill }: { cmd: NodeCommand; onKill: () => void }) {
   );
 }
 
-function DeviceCard({ d }: { d: NodeDevice }) {
+function NodeCard({ n }: { n: LiveNodeInfo }) {
   const kick = useNodes((s) => s.kick);
-  const remove = useNodes((s) => s.remove);
-  const unbind = useNodes((s) => s.unbind);
+  const rename = useNodes((s) => s.rename);
+  const setMode = useNodes((s) => s.setMode);
   const killCommand = useNodes((s) => s.killCommand);
-  const cmds = [...d.runningCommands, ...d.recentCommands.slice().reverse()].slice(0, 8);
+  const [editingName, setEditingName] = useState(false);
+  const [draftName, setDraftName] = useState(n.name);
+
+  const cmds = [...n.runningCommands, ...n.recentCommands.slice().reverse()].slice(0, 8);
+  const maxRank = ALL_MODES.indexOf(n.maxMode ?? "full");
+  const allowedModes = ALL_MODES.slice(0, (maxRank >= 0 ? maxRank : ALL_MODES.length - 1) + 1);
+
+  const saveRename = async () => {
+    const trimmed = draftName.trim();
+    setEditingName(false);
+    if (!trimmed || trimmed === n.name) return;
+    try {
+      await rename(n.id, trimmed);
+    } catch (err) {
+      toast((err as Error).message, "error");
+    }
+  };
 
   return (
-    <div className={`rz-node-card${d.online ? " online" : ""}${d.revoked ? " revoked" : ""}`}>
+    <div className="rz-node-card online">
       <div className="rz-node-card-head">
-        <span className={`rz-node-dot${d.online ? " on" : ""}`} />
+        <span className="rz-node-dot on" />
         <div className="rz-node-card-title">
-          <strong>{d.name}</strong>
-          <span className="dim">
-            {d.os || d.platform || "未知系统"}
-            {d.ephemeral ? " · 临时" : ""}
-            {d.revoked ? " · 已失效" : d.online ? ` · 权限上限 ${NODE_MODE_LABEL[d.maxMode ?? "auto"]}` : " · 离线"}
-          </span>
-        </div>
-        <div className="rz-node-card-actions">
-          {d.online && (
-            <Tooltip title="断开连接（保留配对，可重连）">
-              <IconButton size="small" onClick={() => void kick(d.id)}><Power size={15} /></IconButton>
-            </Tooltip>
+          {editingName ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <TextField
+                size="small"
+                value={draftName}
+                onChange={(e) => setDraftName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void saveRename();
+                  if (e.key === "Escape") setEditingName(false);
+                }}
+                autoFocus
+                sx={{ "& input": { py: 0.4, fontSize: 13 } }}
+              />
+              <IconButton size="small" onClick={() => void saveRename()}><Check size={14} /></IconButton>
+              <IconButton size="small" onClick={() => setEditingName(false)}><X size={14} /></IconButton>
+            </div>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <strong>{n.name}</strong>
+              <Tooltip title="修改节点名称（下次重连本会话自动沿用）">
+                <IconButton size="small" onClick={() => { setDraftName(n.name); setEditingName(true); }}>
+                  <Pencil size={12} />
+                </IconButton>
+              </Tooltip>
+            </div>
           )}
-          <Tooltip title="移除设备（断开并作废配对密钥）">
-            <IconButton size="small" className="rz-danger" onClick={() => void remove(d.id)}><Trash2 size={15} /></IconButton>
+          <span className="dim">{n.os || n.platform || "未知系统"}</span>
+        </div>
+        <div className="rz-node-card-actions" style={{ gap: 6 }}>
+          <Select
+            size="small"
+            value={n.mode}
+            onChange={(e) => void setMode(n.id, e.target.value as NodeMode).catch((err) => toast((err as Error).message, "error"))}
+            sx={{ fontSize: 12, "& .MuiSelect-select": { py: 0.4, px: 1.2 } }}
+          >
+            {allowedModes.map((m) => (
+              <MenuItem key={m} value={m} sx={{ fontSize: 12.5 }}>{NODE_MODE_LABEL[m]}</MenuItem>
+            ))}
+          </Select>
+          <Tooltip title="断开连接（立刻销毁本次临时连接）">
+            <IconButton size="small" className="rz-danger" onClick={() => void kick(n.id)}>
+              <Power size={15} />
+            </IconButton>
           </Tooltip>
         </div>
       </div>
 
-      {d.online && (
-        <div className="rz-node-meta">
-          {d.note && <div>备注：{d.note}</div>}
-          <div className="mono dim">
-            {d.dirs.length ? `默认目录：${d.dirs.join("  |  ")}` : "目录授权：按绑定会话在电脑端单独选择"}
-          </div>
+      <div className="rz-node-meta">
+        {n.note && <div>备注：{n.note}</div>}
+        <div className="mono dim">
+          {n.dirs.length
+            ? `允许目录：${n.dirs.join("  |  ")}`
+            : "⚠ 尚未在电脑端选择允许目录（请在电脑端按 e 添加目录）"}
         </div>
-      )}
-
-      {d.bindings.length > 0 && (
-        <div className="rz-node-bindings">
-          <span className="dim">已绑定会话：</span>
-          {d.bindings.map((b) => (
-            <span key={b.sessionId} className="rz-node-bind-tag" title={b.dirs?.length ? `允许目录：${b.dirs.join(" ; ")}` : undefined}>
-              <span>
-                {b.sessionTitle} ({NODE_MODE_LABEL[b.mode]}
-                {b.dirs?.length ? ` · ${b.dirs.join(", ")}` : ""})
-              </span>
-              <button type="button" title="解绑" onClick={() => void unbind(d.id, b.sessionId)}><Link2Off size={11} /></button>
-            </span>
-          ))}
-        </div>
-      )}
+      </div>
 
       {cmds.length > 0 && (
         <div className="rz-node-cmds">
-          {cmds.map((c) => <CmdItem key={c.id} cmd={c} onKill={() => void killCommand(d.id, c.id)} />)}
+          {cmds.map((c) => <CmdItem key={c.id} cmd={c} onKill={() => void killCommand(n.id, c.id)} />)}
         </div>
       )}
     </div>
@@ -101,9 +133,9 @@ function DeviceCard({ d }: { d: NodeDevice }) {
 }
 
 export function NodesDialog() {
-  const open = useNodes((s) => s.open);
-  const setOpen = useNodes((s) => s.setOpen);
-  const devices = useNodes((s) => s.devices);
+  const sessionId = useNodes((s) => s.dialogSessionId);
+  const openForSession = useNodes((s) => s.openForSession);
+  const nodes = useNodes((s) => s.nodes);
   const approvals = useNodes((s) => s.approvals);
   const pairings = useNodes((s) => s.pairings);
   const downloadToken = useNodes((s) => s.downloadToken);
@@ -111,10 +143,17 @@ export function NodesDialog() {
   const rotateDownloadToken = useNodes((s) => s.rotateDownloadToken);
   const createPairing = useNodes((s) => s.createPairing);
   const resolveApproval = useNodes((s) => s.resolveApproval);
+  const summary = useApp((s) => (sessionId ? s.sessions[sessionId] : undefined));
 
-  const [label, setLabel] = useState("");
-  const [ephemeral, setEphemeral] = useState(false);
+  const [mode, setMode] = useState<NodeMode>("auto");
   const [busy, setBusy] = useState(false);
+
+  if (!sessionId) return null;
+
+  const myNodes = nodes.filter((n) => n.sessionId === sessionId);
+  const myApprovals = approvals.filter((a) => a.sessionId === sessionId);
+  const myPairings = pairings.filter((p) => p.sessionId === sessionId);
+  const sessionTitle = summary ? getSessionTitle(summary) : sessionId.slice(0, 8);
 
   const origin = typeof window !== "undefined" ? window.location.origin : "https://your-server";
   const bootstrapUrl = downloadToken
@@ -125,9 +164,8 @@ export function NodesDialog() {
   const onCreatePair = async () => {
     setBusy(true);
     try {
-      await createPairing(label, ephemeral);
-      setLabel("");
-      toast("已生成 5 分钟有效的一次性配对码", "success");
+      await createPairing(sessionId, mode);
+      toast("已为本会话生成 5 分钟有效的一次性配对码", "success");
     } catch (err) {
       toast((err as Error).message, "error");
     } finally {
@@ -137,27 +175,27 @@ export function NodesDialog() {
 
   const copyCmd = (cmd: string) => {
     void copyText(cmd);
-    toast("命令已复制", "success");
+    toast("已复制", "success");
   };
 
   return (
-    <Dialog open={open} onClose={() => setOpen(false)} maxWidth="md" fullWidth>
+    <Dialog open onClose={() => openForSession(null)} maxWidth="md" fullWidth>
       <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1, pr: 6 }}>
         <Laptop size={18} />
-        <span>本地电脑节点（riesz-node）</span>
-        <IconButton size="small" onClick={() => setOpen(false)} sx={{ position: "absolute", right: 12, top: 12 }}>
+        <span>本地电脑 · {sessionTitle}</span>
+        <span className="dim mono" style={{ fontSize: 12 }}>({sessionId.slice(0, 8)})</span>
+        <IconButton size="small" onClick={() => openForSession(null)} sx={{ position: "absolute", right: 12, top: 12 }}>
           <X size={18} />
         </IconButton>
       </DialogTitle>
       <DialogContent dividers className="rz-nodes-dialog">
-        {approvals.length > 0 && (
+        {myApprovals.length > 0 && (
           <section className="rz-nodes-section">
-            <h4>待审批指令（{approvals.length}）</h4>
-            {approvals.map((ap) => (
+            <h4>待审批指令（{myApprovals.length}）</h4>
+            {myApprovals.map((ap) => (
               <div key={ap.id} className="rz-node-approval-card">
                 <div className="rz-node-approval-head">
                   <strong>[{ap.nodeName}]</strong>
-                  <span className="dim">会话：{ap.sessionTitle}</span>
                   <span className={`rz-tag risk-${ap.risk}`}>{RISK_TEXT[ap.risk] ?? ap.risk}</span>
                 </div>
                 <pre className="mono rz-node-approval-cmd">{ap.command}</pre>
@@ -174,18 +212,74 @@ export function NodesDialog() {
         )}
 
         <section className="rz-nodes-section">
-          <h4>配对新电脑</h4>
+          <h4>本会话已连接的电脑（{myNodes.length}）</h4>
+          {myNodes.length === 0 ? (
+            <div className="dim" style={{ fontSize: 13 }}>
+              当前会话还没有连接本地电脑。在下方生成一次性配对码并在电脑端运行命令即可直连到此会话（仅本会话可见，断开即彻底失效）。
+            </div>
+          ) : (
+            <div className="rz-nodes-list">
+              {myNodes.map((n) => <NodeCard key={n.id} n={n} />)}
+            </div>
+          )}
+        </section>
+
+        <section className="rz-nodes-section">
+          <h4>接入本地电脑到此会话</h4>
           <p className="dim" style={{ margin: "0 0 10px", fontSize: 12.5 }}>
-            电脑端主动发起加密反向连接（Ed25519 验签），断开即解绑；启动无需预选目录，可在电脑端界面里为每个绑定会话单独选目录。
+            每次连接都是独立的一次性加密通道（不保存私钥、服务端不记录设备，断开即销毁）；仅本会话能看到并调用。同一电脑再次绑定本会话时，会自动恢复上次授权的目录与自定义名称。
           </p>
-          <div className="rz-node-pair-box" style={{ marginTop: 0, marginBottom: 12 }}>
+          <div className="rz-nodes-pair-form">
+            <Select
+              size="small"
+              value={mode}
+              onChange={(e) => setMode(e.target.value as NodeMode)}
+              sx={{ minWidth: 160, fontSize: 13 }}
+            >
+              {ALL_MODES.map((m) => (
+                <MenuItem key={m} value={m} sx={{ fontSize: 13 }}>初始权限：{NODE_MODE_LABEL[m]}</MenuItem>
+              ))}
+            </Select>
+            <Button variant="contained" size="small" startIcon={<Plus size={15} />} disabled={busy} onClick={onCreatePair}>
+              生成一次性配对码
+            </Button>
+          </div>
+
+          {myPairings.map((p) => {
+            const cmd = `${oneLiner} -- --code ${p.code}`;
+            return (
+              <div key={p.code} className="rz-node-pair-box">
+                <div className="rz-node-pair-code">
+                  <span className="mono">{p.code}</span>
+                  <Tooltip title="只复制配对码">
+                    <IconButton size="small" onClick={() => copyCmd(p.code)}><Copy size={13} /></IconButton>
+                  </Tooltip>
+                  <span className="dim" style={{ marginLeft: "auto" }}>
+                    直连本会话 · {NODE_MODE_LABEL[p.mode]} · 一次性 · 5 分钟有效
+                  </span>
+                </div>
+                <div className="rz-node-pair-cmd">
+                  <code className="mono">{cmd}</code>
+                  <Tooltip title="复制含配对码的一键命令">
+                    <span>
+                      <IconButton size="small" disabled={!downloadToken} onClick={() => copyCmd(cmd)}>
+                        <Copy size={14} />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                </div>
+              </div>
+            );
+          })}
+
+          <div className="rz-node-pair-box" style={{ marginTop: 12 }}>
             <div className="rz-node-pair-code">
-              <span style={{ fontSize: 12.5, fontWeight: 600 }}>跨平台一键启动（含下载口令，未带口令返回 404；可存进快捷脚本）</span>
+              <span style={{ fontSize: 12.5, fontWeight: 600 }}>通用一键启动命令（可存进快捷脚本，启动后输入配对码）</span>
               <span className="dim">需 Python 3.10+</span>
             </div>
             <div className="rz-node-pair-cmd">
               <code className="mono">{oneLiner}</code>
-              <Tooltip title="复制一键启动命令">
+              <Tooltip title="复制通用一键启动命令">
                 <span>
                   <IconButton size="small" disabled={!downloadToken} onClick={() => copyCmd(oneLiner)}>
                     <Copy size={14} />
@@ -201,49 +295,6 @@ export function NodesDialog() {
               )}
             </div>
           </div>
-          <div className="rz-nodes-pair-form">
-            <TextField size="small" label="设备名称（可选）" placeholder="如 win-pc / macbook"
-              value={label} onChange={(e) => setLabel(e.target.value)} sx={{ flex: 1 }} />
-            <FormControlLabel
-              control={<Checkbox size="small" checked={ephemeral} onChange={(e) => setEphemeral(e.target.checked)} />}
-              label={<span style={{ fontSize: 12.5 }}>临时模式（断开即删）</span>}
-            />
-            <Button variant="contained" size="small" startIcon={<Plus size={15} />} disabled={busy} onClick={onCreatePair}>
-              生成配对码
-            </Button>
-          </div>
-
-          {pairings.map((p) => {
-            const extra = p.ephemeral
-              ? `--code ${p.code} --ephemeral`
-              : `--code ${p.code}${p.label ? ` --name "${p.label}"` : ""}`;
-            const cmd = `${oneLiner} -- ${extra}`;
-            return (
-              <div key={p.code} className="rz-node-pair-box">
-                <div className="rz-node-pair-code">
-                  <span className="mono">{p.code}</span>
-                  <span className="dim">{p.ephemeral ? "临时 · 一次性" : "永久配对 · 一次性"} · 5 分钟有效</span>
-                </div>
-                <div className="rz-node-pair-cmd">
-                  <code className="mono">{cmd}</code>
-                  <Tooltip title="复制命令">
-                    <IconButton size="small" onClick={() => copyCmd(cmd)}><Copy size={14} /></IconButton>
-                  </Tooltip>
-                </div>
-              </div>
-            );
-          })}
-        </section>
-
-        <section className="rz-nodes-section">
-          <h4>已注册设备（{devices.filter((d) => d.online).length} 在线 / {devices.length} 总计）</h4>
-          {devices.length === 0 ? (
-            <div className="dim" style={{ fontSize: 13 }}>还没有配对任何本地电脑。生成配对码并在电脑上运行 `riesz-node connect` 即可连上来。</div>
-          ) : (
-            <div className="rz-nodes-list">
-              {devices.map((d) => <DeviceCard key={d.id} d={d} />)}
-            </div>
-          )}
         </section>
       </DialogContent>
     </Dialog>

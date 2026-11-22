@@ -107,16 +107,19 @@ class NodeEndToEndTest(unittest.IsolatedAsyncioTestCase):
         await self.client.close()
         self.tmp.cleanup()
 
-    async def _pair_and_connect(self, *, ephemeral: bool = False, max_mode: str = "auto"):
-        r = await self.client.post("/v1/nodes/pair", json={"label": "win-pc", "ephemeral": ephemeral}, headers=self.headers)
+    async def _pair_and_connect(self, *, session_id: str | None = None, name: str = "win-pc", mode: str = "auto", max_mode: str = "auto"):
+        sid = session_id or self.sid
+        r = await self.client.post("/v1/nodes/pair", json={"sessionId": sid, "mode": mode}, headers=self.headers)
         self.assertEqual(r.status, 200)
         code = (await r.json())["pairing"]["code"]
         seed, pub = ed.generate_keypair()
         r2 = await self.client.post("/v1/nodes/register", json={
-            "code": code, "publicKey": ed.b64u_encode(pub), "name": "win-pc", "os": "Windows 11", "platform": "win32",
+            "code": code, "publicKey": ed.b64u_encode(pub), "name": name, "os": "Windows 11", "platform": "win32",
         }, headers=self.headers)
         self.assertEqual(r2.status, 200)
-        node_id = (await r2.json())["nodeId"]
+        reg = await r2.json()
+        node_id = reg["nodeId"]
+        self.assertEqual(reg["sessionId"], sid)
         # Reusing the same pairing code must fail
         r_dup = await self.client.post("/v1/nodes/register", json={
             "code": code, "publicKey": ed.b64u_encode(pub),
@@ -130,15 +133,16 @@ class NodeEndToEndTest(unittest.IsolatedAsyncioTestCase):
         sig = ed.b64u_encode(ed.sign(seed, payload))
         await ws.send_json({
             "type": "hello", "nodeId": node_id, "signature": sig,
-            "name": "win-pc", "os": "Windows 11", "platform": "win32",
+            "name": name, "os": "Windows 11", "platform": "win32",
             "dirs": ["D:\\Sandbox"], "maxMode": max_mode, "note": "RTX GPU",
         })
         welcome = await ws.receive_json()
         self.assertEqual(welcome["type"], "welcome")
-        return node_id, seed, ws
+        self.assertEqual(welcome["sessionId"], sid)
+        return node_id, welcome["name"], seed, ws
 
     async def test_bad_signature_rejected(self):
-        r = await self.client.post("/v1/nodes/pair", json={"label": "pc"}, headers=self.headers)
+        r = await self.client.post("/v1/nodes/pair", json={"sessionId": self.sid}, headers=self.headers)
         code = (await r.json())["pairing"]["code"]
         _, pub = ed.generate_keypair()
         other_seed, _ = ed.generate_keypair()
@@ -152,8 +156,36 @@ class NodeEndToEndTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(err["type"], "auth_error")
         await ws.close()
 
-    async def test_bind_exec_approval_and_transfer(self):
-        node_id, _, ws = await self._pair_and_connect(max_mode="auto")
+    async def test_session_isolation_conflict_naming_rename_and_ephemeral_cleanup(self):
+        sid_other = "99999999-2222-4333-8444-555555555555"
+        hub = self.app[HUB]
+        n1, name1, _, ws1 = await self._pair_and_connect(session_id=self.sid, name="win-pc")
+        n2, name2, _, ws2 = await self._pair_and_connect(session_id=self.sid, name="win-pc")
+        try:
+            # Second client with same name in same session gets automatic suffix
+            self.assertEqual(name1, "win-pc")
+            self.assertEqual(name2, "win-pc-2")
+            # Strictly isolated: sid_other sees ZERO nodes!
+            self.assertEqual(hub.nodes.session_nodes(sid_other), [])
+            self.assertEqual(len(hub.nodes.session_nodes(self.sid)), 2)
+
+            # Rename n2 from web API
+            r_ren = await self.client.post(f"/v1/nodes/{n2}/rename", json={"name": "gpu-box"}, headers=self.headers)
+            self.assertEqual(r_ren.status, 200)
+            msg = await ws2.receive_json()
+            self.assertEqual(msg, {"type": "renamed", "name": "gpu-box"})
+        finally:
+            await ws1.close()
+            await ws2.close()
+        for _ in range(30):
+            if not hub.nodes.snapshot()["nodes"]:
+                break
+            await asyncio.sleep(0.02)
+        # Disconnecting completely removes ephemeral nodes from server memory
+        self.assertEqual(hub.nodes.snapshot()["nodes"], [])
+
+    async def test_exec_approval_and_transfer(self):
+        node_id, _, _, ws = await self._pair_and_connect(mode="auto", max_mode="auto")
         hub = self.app[HUB]
 
         async def node_loop():
@@ -162,9 +194,7 @@ class NodeEndToEndTest(unittest.IsolatedAsyncioTestCase):
                     break
                 data = json.loads(msg.data)
                 t = data.get("type")
-                if t == "bind_request":
-                    await ws.send_json({"type": "bind_response", "bindId": data["bindId"], "allow": True, "mode": data["mode"]})
-                elif t == "exec":
+                if t == "exec":
                     await ws.send_json({"type": "exec_chunk", "cmdId": data["cmdId"], "data": "hello from pc\n"})
                     await ws.send_json({"type": "exec_done", "cmdId": data["cmdId"], "exitCode": 0})
                 elif t == "file_pull_from_server":
@@ -184,10 +214,6 @@ class NodeEndToEndTest(unittest.IsolatedAsyncioTestCase):
 
         task = asyncio.create_task(node_loop())
         try:
-            # Bind session
-            r = await self.client.post(f"/v1/nodes/{node_id}/bind", json={"sessionId": self.sid, "mode": "auto"}, headers=self.headers)
-            self.assertEqual(r.status, 200)
-
             # Readonly command auto-passes with zero LLM calls
             res = await hub.nodes.exec_command(self.sid, command="git status")
             self.assertEqual(res["exitCode"], 0)
@@ -227,8 +253,11 @@ class NodeEndToEndTest(unittest.IsolatedAsyncioTestCase):
             await ws.close()
             await task
 
-        # Disconnecting clears active bindings
-        self.assertEqual(hub.nodes.session_bindings(self.sid), [])
+        for _ in range(30):
+            if not hub.nodes.session_nodes(self.sid):
+                break
+            await asyncio.sleep(0.02)
+        self.assertEqual(hub.nodes.session_nodes(self.sid), [])
 
 
 if __name__ == "__main__":

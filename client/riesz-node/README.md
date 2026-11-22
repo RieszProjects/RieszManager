@@ -1,32 +1,27 @@
 # riesz-node
 
-Cross-platform reverse-connected local computer node client for **Riesz Manager**.
+Cross-platform ephemeral, session-scoped local computer node client for **Riesz Manager**.
 
 Supports Windows (PowerShell / cmd), WSL, macOS, and Linux.
 
-## Zero-Config One-Liner (No git, no manual install)
+## Security & Session Isolation
 
-Run on any machine with Python 3.10+ using the command copied from the Riesz Manager web UI ("本地电脑" dialog, gated by your private download token — requests without a valid token return `404`):
+- **Zero persistent keys on disk**: every launch generates a fresh in-memory Ed25519 keypair and pairs directly to **one specific session** using a short-lived, single-use pairing code.
+- **Strictly session-scoped**: only the paired session can see or invoke this client. Closing the client destroys the connection and drops all server state immediately.
+- **Local convenience memory (`prefs.json`)**: stores only non-sensitive per-session preferences (previously authorized directories and custom display name) so re-binding a session you have used before automatically restores its directories and name (with automatic conflict suffixes if another client in the same session uses the same name).
+
+## Zero-Config One-Liner
+
+Copy the one-liner from inside any Riesz Manager session ("本地电脑" dialog, protected by your private download token):
 
 ```bash
 python -c "import urllib.request as u; exec(u.urlopen(u.Request('https://your-riesz-host/api/nodes/bootstrap.py?token=<YOUR_TOKEN>', headers={'User-Agent': 'riesz-node/1'})).read())"
 ```
 
-Or with `uv`:
-
-```bash
-uvx --from 'https://your-riesz-host/api/nodes/client.zip?token=<YOUR_TOKEN>' riesz-node connect --server https://your-riesz-host
-```
-
-## Per-Session Directory Isolation
-
-You do **not** have to choose `--dir` at startup. When a session requests to bind to your computer, the TUI lets you pick or browse (`浏览目录…`) the exact directory (or directories) allowed for **that specific session**. Different sessions are strictly isolated to their own granted directories, and you can press `e` at any time to edit a bound session's directories.
-
 ## Shortcuts in TUI
 
-- `y` / `Ctrl+Y`: approve bind request (authorizing the entered/picked directories) or pending command
-- `n`: reject bind request or pending command
-- `e`: edit allowed directories of the selected bound session
+- `e`: add/remove multiple allowed directories (with folder browser, parent navigation & Windows drive switcher)
+- `r`: rename this client process (synced to web UI and remembered for this session)
+- `y` / `n`: approve or reject pending command / local high-risk confirmation
 - `k`: kill the currently selected running command
-- `u`: unbind the currently selected session
 - `Ctrl+Q`: kill running commands, disconnect, and exit

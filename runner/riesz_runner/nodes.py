@@ -1,9 +1,12 @@
-"""Reverse-connected personal computer nodes (`riesz-node`).
+"""Ephemeral, session-scoped reverse-connected personal computer nodes (`riesz-node`).
 
-A personal computer initiates an outbound WSS connection (`/ws/node` -> `/v1/nodes/ws`),
-authenticates via Ed25519 challenge-response (paired through a short-lived one-time code),
-stays in standby until explicitly bound to a specific session (with computer-side consent),
-and exposes controlled command execution + streaming file transfer to that session's MCP tools.
+Every client launch is completely independent and stateless on the server:
+- A web session generates a short-lived, single-use pairing code bound strictly to THAT session.
+- The local computer client creates a fresh in-memory Ed25519 keypair (never written to disk),
+  exchanges the pairing code via `POST /api/nodes/register`, and opens `/ws/node` authenticated by
+  Ed25519 challenge-response.
+- Only the bound session (and its handoff chain) can see or invoke that node.
+- Disconnecting immediately destroys the connection and drops all server-side state for it.
 """
 
 from __future__ import annotations
@@ -12,7 +15,6 @@ import asyncio
 import contextlib
 import hashlib
 import io
-import json
 import logging
 import os
 import secrets
@@ -41,7 +43,7 @@ MAX_TRANSFER_BYTES = 200 * 1024 * 1024
 MAX_CMD_OUTPUT_CHARS = 128 * 1024
 MAX_CMD_HISTORY = 50
 APPROVAL_TIMEOUT = 300.0
-BIND_TIMEOUT = 120.0
+PENDING_CONN_TTL = 60.0
 TRANSFER_TTL = 180.0
 
 
@@ -55,25 +57,39 @@ def _cap_mode(requested: str, ceiling: str) -> str:
     return req if MODE_RANK[req] <= MODE_RANK[ceil] else ceil
 
 
+def _clean_name(raw: str, fallback: str = "local-pc") -> str:
+    name = " ".join(str(raw or "").strip().split())[:48]
+    return name or fallback
+
+
 @dataclass
 class PairingCode:
     code: str
-    label: str
-    ephemeral: bool
+    session_id: str
+    session_title: str
+    harness: str
+    project: str
+    mode: str
     created_at: float
     expires_at: float
     failures: int = 0
 
 
 @dataclass
-class SessionBinding:
+class PendingConnection:
+    """Short-lived (60s) single-use ticket created by `register_node` until `/ws/node` handshakes."""
+    node_id: str
+    public_key: bytes
     session_id: str
     session_title: str
     harness: str
     project: str
     mode: str
-    bound_at: float
-    dirs: list[str] = field(default_factory=list)
+    name: str
+    os_name: str
+    platform: str
+    hostname: str
+    expires_at: float
 
 
 @dataclass
@@ -94,8 +110,8 @@ class CommandRun:
     output: str = ""
     future: asyncio.Future[dict[str, Any]] | None = None
 
-    def summary(self, *, include_output: bool = True) -> dict[str, Any]:
-        out: dict[str, Any] = {
+    def summary(self) -> dict[str, Any]:
+        return {
             "id": self.id,
             "nodeId": self.node_id,
             "sessionId": self.session_id,
@@ -109,10 +125,8 @@ class CommandRun:
             "startedAt": self.started_at,
             "endedAt": self.ended_at,
             "exitCode": self.exit_code,
+            "output": self.output[-16384:],
         }
-        if include_output:
-            out["output"] = self.output[-8000:]
-        return out
 
 
 @dataclass
@@ -151,7 +165,7 @@ class TransferTicket:
     token: str
     transfer_id: str
     node_id: str
-    direction: str       # "push" (server -> node, GET) | "pull" (node -> server, POST)
+    direction: str       # "push" (server -> node) | "pull" (node -> server)
     server_path: Path
     node_path: str
     size: int | None
@@ -164,18 +178,20 @@ class TransferTicket:
 @dataclass
 class LiveNode:
     node_id: str
-    ws: web.WebSocketResponse
     name: str
     os_name: str
     platform: str
     hostname: str
-    dirs: list[str]
+    session_id: str
+    session_title: str
+    harness: str
+    project: str
+    mode: str
     max_mode: str
+    dirs: list[str]
     note: str
-    version: str
     connected_at: float
-    bindings: dict[str, SessionBinding] = field(default_factory=dict)
-    pending_binds: dict[str, asyncio.Future[dict[str, Any]]] = field(default_factory=dict)
+    ws: web.WebSocketResponse
     commands: dict[str, CommandRun] = field(default_factory=dict)
     history: list[CommandRun] = field(default_factory=list)
     _last_chunk_broadcast: float = 0.0
@@ -186,42 +202,20 @@ class LiveNode:
         await self.ws.send_str(json.dumps(msg, ensure_ascii=False))
 
 
+import json  # noqa: E402
+
+
 class NodeManager:
+    """In-memory manager for ephemeral, session-scoped local computer nodes."""
+
     def __init__(self, hub: Hub) -> None:
         self.hub = hub
-        self.path = hub.cfg.state_dir / "nodes.json"
-        self._devices: dict[str, dict[str, Any]] = {}
-        self._ephemeral_devices: dict[str, dict[str, Any]] = {}
         self._pairings: dict[str, PairingCode] = {}
+        self._pending: dict[str, PendingConnection] = {}
         self._live: dict[str, LiveNode] = {}
         self._approvals: dict[str, PendingApproval] = {}
         self._transfers: dict[str, TransferTicket] = {}
         self._register_failures: list[float] = []
-        self._load()
-
-    # ---- persistence --------------------------------------------------------
-
-    def _load(self) -> None:
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            return
-        except (ValueError, OSError):
-            log.warning("could not read %s", self.path)
-            return
-        devices = data.get("devices") if isinstance(data, dict) else None
-        if isinstance(devices, dict):
-            self._devices = {k: v for k, v in devices.items() if isinstance(v, dict)}
-
-    def _save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"devices": self._devices}, ensure_ascii=False, indent=1), encoding="utf-8")
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, self.path)
-
-    def _device(self, node_id: str) -> dict[str, Any] | None:
-        return self._devices.get(node_id) or self._ephemeral_devices.get(node_id)
 
     def _broadcast_soon(self) -> None:
         try:
@@ -233,107 +227,187 @@ class NodeManager:
     async def broadcast(self) -> None:
         await self.hub.broadcast_global({"ev": "nodes", **self.snapshot()})
 
-    # ---- pairing & device lifecycle ----------------------------------------
+    # ---- session chain & unique naming --------------------------------------
 
-    def _prune_pairings(self) -> None:
+    def _chain(self, session_id: str) -> list[str]:
+        seen = [session_id]
+        cur = session_id
+        for _ in range(12):
+            s = self.hub.session_summary(cur) or {}
+            prev = s.get("handoffFrom")
+            if not prev or prev in seen:
+                break
+            seen.append(str(prev))
+            cur = str(prev)
+        return seen
+
+    def _same_session(self, sid_a: str, sid_b: str) -> bool:
+        if sid_a == sid_b:
+            return True
+        return sid_b in self._chain(sid_a) or sid_a in self._chain(sid_b)
+
+    def session_nodes(self, session_id: str) -> list[LiveNode]:
+        """All live nodes bound strictly to `session_id` (including its handoff chain)."""
+        return [live for live in self._live.values() if self._same_session(session_id, live.session_id)]
+
+    def _unique_name(self, session_id: str, desired: str, *, exclude_node_id: str | None = None) -> str:
+        base = _clean_name(desired)
+        used = {
+            live.name.lower()
+            for live in self.session_nodes(session_id)
+            if live.node_id != exclude_node_id
+        }
+        if base.lower() not in used:
+            return base
+        for i in range(2, 100):
+            cand = f"{base[:42]}-{i}"
+            if cand.lower() not in used:
+                return cand
+        return f"{base[:38]}-{secrets.token_hex(2)}"
+
+    # ---- pairing & ephemeral registration -----------------------------------
+
+    def _prune(self) -> None:
         now = time.time()
-        expired = [c for c, p in self._pairings.items() if p.expires_at <= now or p.failures >= MAX_PAIR_FAILURES]
-        for c in expired:
-            self._pairings.pop(c, None)
+        for c, p in list(self._pairings.items()):
+            if p.expires_at <= now or p.failures >= MAX_PAIR_FAILURES:
+                self._pairings.pop(c, None)
+        for nid, pend in list(self._pending.items()):
+            if pend.expires_at <= now:
+                self._pending.pop(nid, None)
 
-    def create_pairing(self, *, label: str = "", ephemeral: bool = False, ttl: int = 300) -> dict[str, Any]:
-        self._prune_pairings()
+    def create_pairing(self, *, session_id: str, mode: str = "auto", ttl: int = 300) -> dict[str, Any]:
+        self._prune()
+        if not session_id:
+            raise NodeError("生成配对码必须指定会话 ID")
+        eff_mode = mode if mode in MODE_RANK else "auto"
+        summary = self.hub.session_summary(session_id) or {}
+        title = str(summary.get("title") or summary.get("firstMessage") or session_id[:8])[:80]
+        harness = str(summary.get("harness") or self.hub.harnesses.harness_of(session_id) or "claude")
+        project = str(summary.get("project") or "")
+
         ttl = max(60, min(int(ttl), 900))
         part1 = "".join(secrets.choice(PAIR_ALPHABET) for _ in range(4))
         part2 = "".join(secrets.choice(PAIR_ALPHABET) for _ in range(4))
         code = f"RZ-{part1}-{part2}"
         now = time.time()
-        pair = PairingCode(code=code, label=label.strip()[:60], ephemeral=bool(ephemeral),
-                           created_at=now, expires_at=now + ttl)
-        self._pairings[code] = pair
+        entry = PairingCode(
+            code=code, session_id=session_id, session_title=title,
+            harness=harness, project=project, mode=eff_mode,
+            created_at=now, expires_at=now + ttl,
+        )
+        self._pairings[code] = entry
         self._broadcast_soon()
-        return {"code": code, "label": pair.label, "ephemeral": pair.ephemeral,
-                "createdAt": pair.created_at, "expiresAt": pair.expires_at}
+        return {
+            "code": code,
+            "sessionId": session_id,
+            "sessionTitle": title,
+            "mode": eff_mode,
+            "createdAt": now,
+            "expiresAt": entry.expires_at,
+        }
 
-    def register_device(self, *, code: str, public_key: str, name: str = "", os_name: str = "",
-                        platform: str = "", hostname: str = "") -> dict[str, Any]:
-        """Consume a one-time pairing code and register the client's Ed25519 public key."""
+    def register_node(
+        self, *, code: str, public_key: str, name: str = "",
+        os_name: str = "", platform: str = "", hostname: str = "",
+    ) -> dict[str, Any]:
+        self._prune()
         now = time.time()
         self._register_failures = [t for t in self._register_failures if now - t < 60.0]
         if len(self._register_failures) >= 20:
-            raise NodeError("配对失败次数过多，请 1 分钟后再试")
-        self._prune_pairings()
+            raise NodeError("配对尝试失败次数过多，请 1 分钟后再试")
+
         norm_code = code.strip().upper()
         pair = self._pairings.get(norm_code)
         if pair is None:
             self._register_failures.append(now)
             for p in self._pairings.values():
                 p.failures += 1
-            self._prune_pairings()
             raise NodeError("配对码无效或已过期")
-        try:
-            pub_raw = ed.b64u_decode(public_key.strip())
-            if len(pub_raw) != 32:
-                raise ValueError("bad length")
-            ed._decode_point(pub_raw)
-        except Exception as exc:
-            raise NodeError("无效的 Ed25519 公钥") from exc
-        # Consume the one-time pairing code immediately.
-        self._pairings.pop(norm_code, None)
-        node_id = uuidlib.uuid4().hex[:16]
-        now = time.time()
-        clean_name = (name or pair.label or hostname or f"node-{node_id[:6]}").strip()[:60]
-        rec = {
-            "id": node_id,
-            "name": clean_name,
-            "publicKey": ed.b64u_encode(pub_raw),
-            "os": os_name.strip()[:80],
-            "platform": platform.strip()[:32],
-            "hostname": hostname.strip()[:80],
-            "ephemeral": pair.ephemeral,
-            "createdAt": now,
-            "lastSeen": now,
-            "revoked": False,
-        }
-        if pair.ephemeral:
-            self._ephemeral_devices[node_id] = rec
-        else:
-            self._devices[node_id] = rec
-            self._save()
-        self._broadcast_soon()
-        return {"nodeId": node_id, "name": clean_name, "ephemeral": pair.ephemeral}
 
-    async def kick_device(self, node_id: str) -> None:
+        try:
+            pub_bytes = ed.b64u_decode(public_key.strip())
+            if len(pub_bytes) != 32:
+                raise ValueError("bad length")
+        except Exception:
+            self._register_failures.append(now)
+            raise NodeError("无效的 Ed25519 公钥") from None
+
+        self._pairings.pop(norm_code, None)
+        node_id = secrets.token_hex(12)
+        default_name = _clean_name(name or hostname or "local-pc")
+        assigned_name = self._unique_name(pair.session_id, default_name)
+
+        self._pending[node_id] = PendingConnection(
+            node_id=node_id,
+            public_key=pub_bytes,
+            session_id=pair.session_id,
+            session_title=pair.session_title,
+            harness=pair.harness,
+            project=pair.project,
+            mode=pair.mode,
+            name=assigned_name,
+            os_name=os_name.strip()[:80],
+            platform=platform.strip()[:40],
+            hostname=hostname.strip()[:80],
+            expires_at=now + PENDING_CONN_TTL,
+        )
+        self._broadcast_soon()
+        return {
+            "nodeId": node_id,
+            "name": assigned_name,
+            "sessionId": pair.session_id,
+            "sessionTitle": pair.session_title,
+            "harness": pair.harness,
+            "project": pair.project,
+            "mode": pair.mode,
+        }
+
+    # ---- live node actions --------------------------------------------------
+
+    async def kick_node(self, node_id: str) -> None:
+        self._pending.pop(node_id, None)
         live = self._live.get(node_id)
         if live is None:
+            await self.broadcast()
             return
         with contextlib.suppress(Exception):
-            await live.send({"type": "kicked", "reason": "由网页端断开连接"})
+            await live.send({"type": "kicked", "reason": "已从网页端断开连接"})
         with contextlib.suppress(Exception):
             await live.ws.close(code=4000, message=b"kicked")
 
-    async def revoke_device(self, node_id: str) -> None:
-        rec = self._device(node_id)
-        if rec is None:
-            raise NodeError("未找到该节点")
-        rec["revoked"] = True
-        if node_id in self._devices:
-            self._save()
-        await self.kick_device(node_id)
+    async def rename_node(self, node_id: str, new_name: str, *, notify_client: bool = True) -> str:
+        live = self._live.get(node_id)
+        if live is None:
+            raise NodeError("该本地节点未在线")
+        cleaned = _clean_name(new_name, fallback="")
+        if not cleaned:
+            raise NodeError("节点名称不能为空")
+        final = self._unique_name(live.session_id, cleaned, exclude_node_id=node_id)
+        live.name = final
+        if notify_client:
+            with contextlib.suppress(Exception):
+                await live.send({"type": "renamed", "name": final})
         await self.broadcast()
+        return final
 
-    async def delete_device(self, node_id: str) -> None:
-        await self.kick_device(node_id)
-        removed = self._devices.pop(node_id, None) or self._ephemeral_devices.pop(node_id, None)
-        if removed is None:
-            raise NodeError("未找到该节点")
-        if node_id not in self._ephemeral_devices:
-            self._save()
+    async def set_mode(self, node_id: str, mode: str) -> str:
+        live = self._live.get(node_id)
+        if live is None:
+            raise NodeError("该本地节点未在线")
+        if mode not in MODE_RANK:
+            raise NodeError(f"不支持的权限模式：{mode}")
+        eff = _cap_mode(mode, live.max_mode)
+        live.mode = eff
+        with contextlib.suppress(Exception):
+            await live.send({"type": "mode_updated", "mode": eff})
         await self.broadcast()
+        return eff
 
     # ---- reverse WebSocket handler -----------------------------------------
 
     async def handle_ws(self, ws: web.WebSocketResponse) -> None:
+        self._prune()
         nonce = secrets.token_hex(32)
         ts = int(time.time())
         await ws.send_str(json.dumps({"type": "challenge", "nonce": nonce, "ts": ts}))
@@ -356,55 +430,62 @@ class NodeManager:
 
         node_id = str(hello.get("nodeId") or "").strip()
         sig_b64 = str(hello.get("signature") or "").strip()
-        rec = self._device(node_id)
-        if rec is None or rec.get("revoked"):
-            await ws.send_str(json.dumps({"type": "auth_error", "error": "设备未注册或已被吊销"}))
-            await ws.close(code=4401, message=b"unauthorized")
+        pend = self._pending.pop(node_id, None)
+        if pend is None or pend.expires_at <= time.time():
+            await ws.send_str(json.dumps({"type": "auth_error", "error": "连接凭证无效或已过期，请重新生成配对码"}))
+            await ws.close(code=4403, message=b"unauthorized")
             return
-        try:
-            pub = ed.b64u_decode(str(rec["publicKey"]))
-            sig = ed.b64u_decode(sig_b64)
-        except Exception:
-            await ws.send_str(json.dumps({"type": "auth_error", "error": "签名格式无效"}))
-            await ws.close(code=4401, message=b"bad signature")
-            return
+
         payload = f"riesz-node-auth:{node_id}:{nonce}:{ts}".encode("utf-8")
-        if not ed.verify(pub, payload, sig):
-            await ws.send_str(json.dumps({"type": "auth_error", "error": "Ed25519 身份验签失败"}))
-            await ws.close(code=4401, message=b"invalid signature")
+        try:
+            sig = ed.b64u_decode(sig_b64)
+            ok = ed.verify(pend.public_key, payload, sig)
+        except Exception:
+            ok = False
+        if not ok:
+            await ws.send_str(json.dumps({"type": "auth_error", "error": "签名校验失败"}))
+            await ws.close(code=4403, message=b"bad signature")
             return
 
-        # Replace any stale connection for the same device key.
-        old = self._live.get(node_id)
-        if old is not None:
-            with contextlib.suppress(Exception):
-                await old.ws.close(code=4001, message=b"replaced by new connection")
-
-        dirs = [str(d).strip() for d in (hello.get("dirs") or ()) if str(d).strip()][:20]
+        desired_name = str(hello.get("name") or pend.name).strip() or pend.name
+        final_name = self._unique_name(pend.session_id, desired_name)
         max_mode = str(hello.get("maxMode") or "auto")
         if max_mode not in MODE_RANK:
             max_mode = "auto"
-        name = str(hello.get("name") or rec["name"]).strip()[:60] or rec["name"]
-        os_name = str(hello.get("os") or rec.get("os") or "").strip()[:80]
-        platform = str(hello.get("platform") or rec.get("platform") or "").strip()[:32]
-        hostname = str(hello.get("hostname") or rec.get("hostname") or "").strip()[:80]
-        note = str(hello.get("note") or "").strip()[:240]
-        version = str(hello.get("version") or "1").strip()[:24]
-
-        now = time.time()
-        rec.update({"name": name, "os": os_name, "platform": platform, "hostname": hostname, "lastSeen": now})
-        if node_id in self._devices:
-            self._save()
+        eff_mode = _cap_mode(pend.mode, max_mode)
+        raw_dirs = hello.get("dirs")
+        dirs = [str(d).strip() for d in raw_dirs if str(d).strip()][:20] if isinstance(raw_dirs, list) else []
 
         live = LiveNode(
-            node_id=node_id, ws=ws, name=name, os_name=os_name, platform=platform,
-            hostname=hostname, dirs=dirs, max_mode=max_mode, note=note, version=version,
-            connected_at=now,
+            node_id=node_id,
+            name=final_name,
+            os_name=str(hello.get("os") or pend.os_name)[:80],
+            platform=str(hello.get("platform") or pend.platform)[:40],
+            hostname=str(hello.get("hostname") or pend.hostname)[:80],
+            session_id=pend.session_id,
+            session_title=pend.session_title,
+            harness=pend.harness,
+            project=pend.project,
+            mode=eff_mode,
+            max_mode=max_mode,
+            dirs=dirs,
+            note=str(hello.get("note") or "")[:300],
+            connected_at=time.time(),
+            ws=ws,
         )
         self._live[node_id] = live
-        await live.send({"type": "welcome", "nodeId": node_id, "name": name, "serverTime": now})
-        log.info("local node connected: %s (%s, %s, max=%s)", name, node_id, os_name, max_mode)
+        await live.send({
+            "type": "welcome",
+            "nodeId": node_id,
+            "name": live.name,
+            "sessionId": live.session_id,
+            "sessionTitle": live.session_title,
+            "harness": live.harness,
+            "project": live.project,
+            "mode": live.mode,
+        })
         await self.broadcast()
+        log.info("local node connected: %s (%s) -> session %s", live.name, node_id, live.session_id[:8])
 
         try:
             async for msg in ws:
@@ -424,25 +505,16 @@ class NodeManager:
         mtype = msg.get("type")
         if mtype == "ping":
             await live.send({"type": "pong", "t": msg.get("t")})
-        elif mtype == "bind_response":
-            bid = str(msg.get("bindId") or "")
-            fut = live.pending_binds.pop(bid, None)
-            if fut and not fut.done():
-                fut.set_result(msg)
-        elif mtype == "bind_update":
-            sid = str(msg.get("sessionId") or "")
-            b = live.bindings.get(sid)
-            if b is not None and isinstance(msg.get("dirs"), list):
-                b.dirs = [str(d).strip() for d in msg["dirs"] if str(d).strip()][:20]
-                await self.broadcast()
-        elif mtype == "roots_update":
+        elif mtype == "dirs_update":
             if isinstance(msg.get("dirs"), list):
                 live.dirs = [str(d).strip() for d in msg["dirs"] if str(d).strip()][:20]
                 await self.broadcast()
-        elif mtype == "unbind":
-            sid = str(msg.get("sessionId") or "")
-            if sid and live.bindings.pop(sid, None) is not None:
-                self._cancel_session_work(live, sid, "电脑端主动解除了会话绑定")
+        elif mtype == "rename":
+            raw = str(msg.get("name") or "").strip()
+            if raw:
+                final = self._unique_name(live.session_id, raw, exclude_node_id=live.node_id)
+                live.name = final
+                await live.send({"type": "renamed", "name": final})
                 await self.broadcast()
         elif mtype == "approval_response":
             aid = str(msg.get("approvalId") or "")
@@ -495,17 +567,6 @@ class NodeManager:
     async def _on_disconnect(self, live: LiveNode) -> None:
         if self._live.get(live.node_id) is live:
             self._live.pop(live.node_id, None)
-        rec = self._device(live.node_id)
-        if rec is not None:
-            rec["lastSeen"] = time.time()
-            if live.node_id in self._devices:
-                self._save()
-            elif rec.get("ephemeral"):
-                self._ephemeral_devices.pop(live.node_id, None)
-        for fut in list(live.pending_binds.values()):
-            if not fut.done():
-                fut.set_exception(NodeError(f"本地节点 {live.name} 已断开连接"))
-        live.pending_binds.clear()
         for run in list(live.commands.values()):
             run.status = "error"
             run.ended_at = time.time()
@@ -521,130 +582,35 @@ class NodeManager:
             if tk.node_id == live.node_id:
                 self._transfers.pop(tok, None)
                 if tk.future and not tk.future.done():
-                    tk.future.set_exception(NodeError(f"本地节点 {live.name} 在文件传输中途断开连接"))
-        live.bindings.clear()
-        log.info("local node disconnected: %s (%s)", live.name, live.node_id)
+                    tk.future.set_exception(NodeError(f"本地节点 {live.name} 在传输中途断开连接"))
         await self.broadcast()
+        log.info("local node disconnected & cleared: %s (%s)", live.name, live.node_id)
 
-    def _cancel_session_work(self, live: LiveNode, session_id: str, reason: str) -> None:
-        for aid, ap in list(self._approvals.items()):
-            if ap.node_id == live.node_id and ap.session_id == session_id:
-                self._approvals.pop(aid, None)
-                if not ap.future.done():
-                    ap.future.set_result(False)
-        for cid, run in list(live.commands.items()):
-            if run.session_id == session_id:
-                run.status = "killed"
-                run.ended_at = time.time()
-                live.commands.pop(cid, None)
-                if run.future and not run.future.done():
-                    run.future.set_exception(NodeError(reason))
-
-    # ---- session binding ----------------------------------------------------
-
-    async def bind_session(self, node_id: str, session_id: str, *, mode: str = "auto") -> dict[str, Any]:
-        live = self._live.get(node_id)
-        if live is None:
-            raise NodeError("该本地节点当前未在线")
-        eff_mode = _cap_mode(mode, live.max_mode)
-        summary = self.hub.session_summary(session_id) or {}
-        title = str(summary.get("customTitle") or summary.get("title") or summary.get("firstPrompt") or session_id[:8])[:80]
-        harness = str(summary.get("harness") or "claude")
-        project = str(summary.get("project") or "")
-
-        bind_id = uuidlib.uuid4().hex[:12]
-        fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
-        live.pending_binds[bind_id] = fut
-        await live.send({
-            "type": "bind_request",
-            "bindId": bind_id,
-            "sessionId": session_id,
-            "sessionTitle": title,
-            "harness": harness,
-            "project": project,
-            "mode": eff_mode,
-        })
-        try:
-            resp = await asyncio.wait_for(fut, timeout=BIND_TIMEOUT)
-        except asyncio.TimeoutError:
-            live.pending_binds.pop(bind_id, None)
-            raise NodeError("等待电脑端确认绑定超时") from None
-        if not resp.get("allow"):
-            reason = str(resp.get("reason") or "电脑端拒绝了绑定请求")
-            raise NodeError(reason)
-        agreed = _cap_mode(str(resp.get("mode") or eff_mode), live.max_mode)
-        resp_dirs = resp.get("dirs")
-        bound_dirs = [str(d).strip() for d in resp_dirs if str(d).strip()][:20] if isinstance(resp_dirs, list) else list(live.dirs)
-        binding = SessionBinding(
-            session_id=session_id, session_title=title, harness=harness,
-            project=project, mode=agreed, bound_at=time.time(), dirs=bound_dirs,
-        )
-        live.bindings[session_id] = binding
-        await self.broadcast()
-        return {
-            "nodeId": node_id, "nodeName": live.name, "sessionId": session_id,
-            "mode": agreed, "dirs": bound_dirs, "boundAt": binding.bound_at,
-        }
-
-    async def unbind_session(self, node_id: str, session_id: str) -> None:
-        live = self._live.get(node_id)
-        if live is None:
-            return
-        live.bindings.pop(session_id, None)
-        self._cancel_session_work(live, session_id, "会话已解除本地节点绑定")
-        with contextlib.suppress(Exception):
-            await live.send({"type": "unbind", "sessionId": session_id})
-        await self.broadcast()
-
-    def _chain(self, session_id: str) -> list[str]:
-        seen = [session_id]
-        cur = session_id
-        for _ in range(12):
-            s = self.hub.session_summary(cur) or {}
-            prev = s.get("handoffFrom")
-            if not prev or prev in seen:
-                break
-            seen.append(str(prev))
-            cur = str(prev)
-        return seen
-
-    def session_bindings(self, session_id: str) -> list[tuple[LiveNode, SessionBinding]]:
-        """All online nodes currently bound to `session_id` (also checking its handoff chain)."""
-        chain = self._chain(session_id)
-        out: list[tuple[LiveNode, SessionBinding]] = []
-        for live in self._live.values():
-            for sid in chain:
-                if sid in live.bindings:
-                    out.append((live, live.bindings[sid]))
-                    break
-        return out
-
-    def _resolve_bound(self, session_id: str, node_ref: str | None) -> tuple[LiveNode, SessionBinding]:
-        bound = self.session_bindings(session_id)
-        if not bound:
-            raise NodeError("当前会话未绑定任何在线的本地电脑节点。请让用户在 Riesz Manager 页面先将本机绑定到当前会话。")
+    def _resolve_node(self, session_id: str, node_ref: str | None = None) -> LiveNode:
+        nodes = self.session_nodes(session_id)
+        if not nodes:
+            raise NodeError("当前会话未连接任何本地电脑节点。请让用户在本会话中点击「本地电脑」生成配对码并连接。")
         if not node_ref:
-            if len(bound) == 1:
-                return bound[0]
-            names = "、".join(f"{n.name} ({n.node_id[:6]})" for n, _ in bound)
-            raise NodeError(f"当前会话绑定了多个本地节点，请用 node 参数指定：{names}")
+            if len(nodes) == 1:
+                return nodes[0]
+            names = ", ".join(n.name for n in nodes)
+            raise NodeError(f"当前会话连接了多个本地节点（{names}），请在 node 参数中指定节点名称。")
         ref = node_ref.strip().lower()
-        for live, b in bound:
-            if live.node_id.lower().startswith(ref) or live.name.lower() == ref:
-                return live, b
-        raise NodeError(f"当前会话未绑定名为 {node_ref} 的本地节点")
+        for n in nodes:
+            if n.node_id.lower().startswith(ref) or n.name.lower() == ref:
+                return n
+        raise NodeError(f"当前会话未连接名为 {node_ref} 的本地节点")
 
     # ---- approvals ----------------------------------------------------------
 
     async def _request_approval(
-        self, live: LiveNode, binding: SessionBinding, *,
-        action: str, command: str, cwd: str, decision: GuardDecision,
+        self, live: LiveNode, *, action: str, command: str, cwd: str, decision: GuardDecision,
     ) -> tuple[bool, str]:
         aid = f"na-{uuidlib.uuid4().hex[:12]}"
         fut: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
         ap = PendingApproval(
             id=aid, node_id=live.node_id, node_name=live.name,
-            session_id=binding.session_id, session_title=binding.session_title,
+            session_id=live.session_id, session_title=live.session_title,
             action=action, command=command, cwd=cwd,
             risk=decision.risk, reason=decision.reason, created_at=time.time(),
             future=fut,
@@ -680,31 +646,32 @@ class NodeManager:
     async def exec_command(
         self, session_id: str, *, command: str, cwd: str = "", timeout: int = 120, node_ref: str | None = None,
     ) -> dict[str, Any]:
-        live, binding = self._resolve_bound(session_id, node_ref)
+        live = self._resolve_node(session_id, node_ref)
         cmd_text = command.strip()
         if not cmd_text:
             raise NodeError("command 不能为空")
+        if not live.dirs:
+            raise NodeError(f"本地节点 {live.name} 尚未选择允许目录，请让用户在电脑端界面添加至少一个允许目录")
         timeout = max(5, min(int(timeout), 600))
-        allowed_dirs = binding.dirs or live.dirs
-        eff_cwd = cwd.strip() or (allowed_dirs[0] if allowed_dirs else "")
+        eff_cwd = cwd.strip() or live.dirs[0]
         decision = await evaluate_action(
-            mode=binding.mode, action="exec", command=cmd_text, cwd=eff_cwd,
-            allowed_dirs=allowed_dirs, node_os=live.os_name,
-            session_title=binding.session_title, credentials=self.hub.credentials,
+            mode=live.mode, action="exec", command=cmd_text, cwd=eff_cwd,
+            allowed_dirs=live.dirs, node_os=live.os_name,
+            session_title=live.session_title, credentials=self.hub.credentials,
         )
         if decision.decision == "deny":
             raise NodeError(f"已拒绝在本地节点 {live.name} 执行：{decision.reason}")
         approval_id: str | None = None
         if decision.decision == "ask":
-            ok, approval_id = await self._request_approval(live, binding, action="exec", command=cmd_text, cwd=eff_cwd, decision=decision)
+            ok, approval_id = await self._request_approval(live, action="exec", command=cmd_text, cwd=eff_cwd, decision=decision)
             if not ok:
                 raise NodeError(f"用户拒绝了在本地节点 {live.name} 执行该命令（{decision.reason}）")
 
         cmd_id = f"cmd-{uuidlib.uuid4().hex[:10]}"
         fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
         run = CommandRun(
-            id=cmd_id, node_id=live.node_id, session_id=binding.session_id,
-            session_title=binding.session_title, action="exec", command=cmd_text,
+            id=cmd_id, node_id=live.node_id, session_id=live.session_id,
+            session_title=live.session_title, action="exec", command=cmd_text,
             cwd=eff_cwd, risk=decision.risk, risk_reason=decision.reason,
             status="running", started_at=time.time(), future=fut,
         )
@@ -712,8 +679,6 @@ class NodeManager:
         await live.send({
             "type": "exec",
             "cmdId": cmd_id,
-            "sessionId": binding.session_id,
-            "sessionTitle": binding.session_title,
             "command": cmd_text,
             "cwd": eff_cwd,
             "timeout": timeout,
@@ -753,25 +718,28 @@ class NodeManager:
         self, session_id: str, *, server_path: Path, dest_path: str, node_ref: str | None = None,
     ) -> dict[str, Any]:
         self._prune_transfers()
-        live, binding = self._resolve_bound(session_id, node_ref)
+        live = self._resolve_node(session_id, node_ref)
+        if not live.dirs:
+            raise NodeError(f"本地节点 {live.name} 尚未选择允许目录，请让用户在电脑端界面添加至少一个允许目录")
         if not server_path.is_file():
             raise NodeError(f"服务器上找不到文件：{server_path}")
         size = server_path.stat().st_size
         if size > MAX_TRANSFER_BYTES:
             raise NodeError(f"文件超过 200MB 限制（{size} bytes）")
         sha = await asyncio.to_thread(_sha256_file, server_path)
-        allowed_dirs = binding.dirs or live.dirs
         decision = await evaluate_action(
-            mode=binding.mode, action="push", command=f"push {server_path.name} ({size}B) -> {dest_path}",
-            cwd=allowed_dirs[0] if allowed_dirs else "", allowed_dirs=allowed_dirs, node_os=live.os_name,
-            session_title=binding.session_title, credentials=self.hub.credentials,
+            mode=live.mode, action="push", command=f"push {server_path.name} ({size}B) -> {dest_path}",
+            cwd=live.dirs[0], allowed_dirs=live.dirs, node_os=live.os_name,
+            session_title=live.session_title, credentials=self.hub.credentials,
         )
         if decision.decision == "deny":
             raise NodeError(f"已拒绝推送文件到 {live.name}：{decision.reason}")
         if decision.decision == "ask":
-            ok, _ = await self._request_approval(live, binding, action="push",
-                                                 command=f"推送 {server_path.name} ({size}B) -> {dest_path}",
-                                                 cwd=dest_path, decision=decision)
+            ok, _ = await self._request_approval(
+                live, action="push",
+                command=f"推送 {server_path.name} ({size}B) -> {dest_path}",
+                cwd=dest_path, decision=decision,
+            )
             if not ok:
                 raise NodeError(f"用户拒绝了向 {live.name} 推送文件")
 
@@ -787,8 +755,6 @@ class NodeManager:
         await live.send({
             "type": "file_pull_from_server",
             "transferId": tid,
-            "sessionId": binding.session_id,
-            "sessionTitle": binding.session_title,
             "url": f"/api/nodes/transfer/{token}",
             "destPath": dest_path,
             "size": size,
@@ -809,19 +775,22 @@ class NodeManager:
         self, session_id: str, *, node_path: str, server_dest: Path, node_ref: str | None = None,
     ) -> dict[str, Any]:
         self._prune_transfers()
-        live, binding = self._resolve_bound(session_id, node_ref)
-        allowed_dirs = binding.dirs or live.dirs
+        live = self._resolve_node(session_id, node_ref)
+        if not live.dirs:
+            raise NodeError(f"本地节点 {live.name} 尚未选择允许目录，请让用户在电脑端界面添加至少一个允许目录")
         decision = await evaluate_action(
-            mode=binding.mode, action="pull", command=f"pull {node_path} -> {server_dest.name}",
-            cwd=allowed_dirs[0] if allowed_dirs else "", allowed_dirs=allowed_dirs, node_os=live.os_name,
-            session_title=binding.session_title, credentials=self.hub.credentials,
+            mode=live.mode, action="pull", command=f"pull {node_path} -> {server_dest.name}",
+            cwd=live.dirs[0], allowed_dirs=live.dirs, node_os=live.os_name,
+            session_title=live.session_title, credentials=self.hub.credentials,
         )
         if decision.decision == "deny":
             raise NodeError(f"已拒绝从 {live.name} 拉取文件：{decision.reason}")
         if decision.decision == "ask":
-            ok, _ = await self._request_approval(live, binding, action="pull",
-                                                 command=f"拉取 {node_path} -> {server_dest}",
-                                                 cwd=node_path, decision=decision)
+            ok, _ = await self._request_approval(
+                live, action="pull",
+                command=f"拉取 {node_path} -> {server_dest}",
+                cwd=node_path, decision=decision,
+            )
             if not ok:
                 raise NodeError(f"用户拒绝了从 {live.name} 拉取文件")
 
@@ -837,8 +806,6 @@ class NodeManager:
         await live.send({
             "type": "file_push_to_server",
             "transferId": tid,
-            "sessionId": binding.session_id,
-            "sessionTitle": binding.session_title,
             "url": f"/api/nodes/transfer/{token}",
             "srcPath": node_path,
         })
@@ -863,51 +830,49 @@ class NodeManager:
 
     # ---- snapshot -----------------------------------------------------------
 
-    def snapshot(self) -> dict[str, Any]:
-        self._prune_pairings()
-        devices = []
-        all_ids = list(self._devices) + [k for k in self._ephemeral_devices if k not in self._devices]
-        for nid in all_ids:
-            rec = self._device(nid)
-            if rec is None:
-                continue
-            live = self._live.get(nid)
-            devices.append({
-                "id": nid,
-                "name": live.name if live else rec["name"],
-                "os": live.os_name if live else rec.get("os", ""),
-                "platform": live.platform if live else rec.get("platform", ""),
-                "hostname": live.hostname if live else rec.get("hostname", ""),
-                "ephemeral": bool(rec.get("ephemeral")),
-                "revoked": bool(rec.get("revoked")),
-                "createdAt": rec.get("createdAt"),
-                "lastSeen": rec.get("lastSeen"),
-                "online": live is not None,
-                "connectedAt": live.connected_at if live else None,
-                "dirs": live.dirs if live else [],
-                "maxMode": live.max_mode if live else None,
-                "note": live.note if live else "",
-                "bindings": [
-                    {
-                        "sessionId": b.session_id, "sessionTitle": b.session_title,
-                        "harness": b.harness, "project": b.project,
-                        "mode": b.mode, "dirs": b.dirs or live.dirs, "boundAt": b.bound_at,
-                    }
-                    for b in (live.bindings.values() if live else ())
-                ],
-                "runningCommands": [c.summary() for c in (live.commands.values() if live else ())],
-                "recentCommands": [c.summary() for c in (live.history[-15:] if live else ())],
-            })
-        devices.sort(key=lambda d: (not d["online"], -(d["connectedAt"] or d["lastSeen"] or 0)))
-        return {
-            "devices": devices,
-            "approvals": [a.summary() for a in sorted(self._approvals.values(), key=lambda x: x.created_at)],
-            "pairings": [
-                {"code": p.code, "label": p.label, "ephemeral": p.ephemeral,
-                 "createdAt": p.created_at, "expiresAt": p.expires_at}
-                for p in self._pairings.values()
-            ],
-        }
+    def snapshot(self, session_id: str | None = None) -> dict[str, Any]:
+        self._prune()
+        live_list = self.session_nodes(session_id) if session_id else list(self._live.values())
+        live_list.sort(key=lambda n: -n.connected_at)
+        nodes = [
+            {
+                "id": n.node_id,
+                "name": n.name,
+                "os": n.os_name,
+                "platform": n.platform,
+                "hostname": n.hostname,
+                "sessionId": n.session_id,
+                "sessionTitle": n.session_title,
+                "harness": n.harness,
+                "project": n.project,
+                "mode": n.mode,
+                "maxMode": n.max_mode,
+                "dirs": list(n.dirs),
+                "note": n.note,
+                "connectedAt": n.connected_at,
+                "runningCommands": [c.summary() for c in n.commands.values()],
+                "recentCommands": [c.summary() for c in n.history[-15:]],
+            }
+            for n in live_list
+        ]
+        approvals = [
+            a.summary()
+            for a in sorted(self._approvals.values(), key=lambda x: x.created_at)
+            if not session_id or self._same_session(session_id, a.session_id)
+        ]
+        pairings = [
+            {
+                "code": p.code,
+                "sessionId": p.session_id,
+                "sessionTitle": p.session_title,
+                "mode": p.mode,
+                "createdAt": p.created_at,
+                "expiresAt": p.expires_at,
+            }
+            for p in self._pairings.values()
+            if not session_id or self._same_session(session_id, p.session_id)
+        ]
+        return {"nodes": nodes, "approvals": approvals, "pairings": pairings}
 
 
 def _sha256_file(path: Path) -> str:
@@ -1020,7 +985,7 @@ def _main():
             else:
                 subprocess.check_call([str(pip), "install", "--quiet", str(zpath)])
         stamp.write_text(CLIENT_HASH, encoding="utf-8")
-    if not args or args[0] not in ("connect", "pair", "devices"):
+    if not args or args[0] != "connect":
         cmd = [str(exe), "connect"]
         if not any(a == "--server" or a.startswith("--server=") for a in args):
             cmd += ["--server", server]

@@ -251,13 +251,14 @@ class RealClientServerE2ETest(unittest.IsolatedAsyncioTestCase):
         self.app = build_app(cfg)
         from riesz_runner import server as srv
         self.app.router.add_get("/ws/node", srv.nodes_ws)
+        self.app.router.add_post("/api/nodes/register", srv.nodes_register)
         self.app.router.add_get(r"/api/nodes/transfer/{token:[A-Za-z0-9_-]{16,128}}", srv.nodes_transfer_get)
         self.app.router.add_post(r"/api/nodes/transfer/{token:[A-Za-z0-9_-]{16,128}}", srv.nodes_transfer_post)
         orig_auth = self.app.middlewares[0]
 
         @web.middleware
         async def test_auth(request, handler):
-            if request.path.startswith(("/ws/node", "/api/nodes/transfer/")):
+            if request.path.startswith(("/ws/node", "/api/nodes/transfer/", "/api/nodes/register")):
                 return await handler(request)
             return await orig_auth(request, handler)
 
@@ -266,28 +267,35 @@ class RealClientServerE2ETest(unittest.IsolatedAsyncioTestCase):
         self.client = TestClient(self.server)
         await self.client.start_server()
         self.sid = "22222222-3333-4444-8555-666666666666"
+        self.orig_xdg = os.environ.get("XDG_CONFIG_HOME")
+        os.environ["XDG_CONFIG_HOME"] = str(root / "client_cfg")
 
     async def asyncTearDown(self) -> None:
+        if self.orig_xdg is None:
+            os.environ.pop("XDG_CONFIG_HOME", None)
+        else:
+            os.environ["XDG_CONFIG_HOME"] = self.orig_xdg
         await self.client.close()
         self.tmp.cleanup()
 
     async def test_real_agent_exec_kill_push_pull_and_local_confirm(self):
         hub = self.app[HUB]
-        pair = hub.nodes.create_pairing(label="test-laptop", ephemeral=False)
+        pair = hub.nodes.create_pairing(session_id=self.sid, mode="full")
         seed, pub = client_ed.generate_keypair()
-        reg = hub.nodes.register_device(
+        reg = hub.nodes.register_node(
             code=pair["code"], public_key=client_ed.b64u_encode(pub),
             name="test-laptop", os_name="Linux", platform="linux", hostname="laptop",
         )
         server_url = f"http://127.0.0.1:{self.server.port}"
-        device = {
-            "nodeId": reg["nodeId"], "name": reg["name"],
-            "server": server_url, "seed": client_ed.b64u_encode(seed),
-            "publicKey": client_ed.b64u_encode(pub), "ephemeral": False,
+        session = {
+            **reg,
+            "server": server_url,
+            "seed": client_ed.b64u_encode(seed),
+            "publicKey": client_ed.b64u_encode(pub),
         }
         agent = NodeAgent(
-            device=device, roots=[self.client_dir.resolve()],
-            max_mode="full", note="e2e test box", auto_accept_bind=False, interactive=True,
+            session=session, dirs=[self.client_dir.resolve()],
+            max_mode="full", note="e2e test box", interactive=True,
         )
         agent_task = asyncio.create_task(agent.run())
         try:
@@ -297,16 +305,7 @@ class RealClientServerE2ETest(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(0.02)
             self.assertEqual(agent.status, "online")
 
-            # Bind session (requires computer consent)
-            bind_task = asyncio.create_task(hub.nodes.bind_session(reg["nodeId"], self.sid, mode="full"))
-            for _ in range(100):
-                if agent.pending_binds:
-                    break
-                await asyncio.sleep(0.02)
-            await agent.respond_bind(agent.pending_binds[0], allow=True)
-            await bind_task
-
-            # 1. Normal command succeeds & env doesn't leak RIESZ_* vars
+            # 1. Normal command succeeds
             res = await hub.nodes.exec_command(self.sid, command="echo hello_riesz_node && pwd")
             self.assertEqual(res["exitCode"], 0)
             self.assertIn("hello_riesz_node", res["output"])
@@ -319,14 +318,12 @@ class RealClientServerE2ETest(unittest.IsolatedAsyncioTestCase):
 
             # 3. High-risk command triggers local_confirm at the computer (even after server approval!)
             exec_hi = asyncio.create_task(hub.nodes.exec_command(self.sid, command="eval 'echo hi'"))
-            # First approve on server side
             for _ in range(100):
                 if hub.nodes.snapshot()["approvals"]:
                     break
                 await asyncio.sleep(0.02)
             ap = hub.nodes.snapshot()["approvals"][0]
             await hub.nodes.resolve_approval(ap["id"], allow=True, decided_by="web")
-            # Now computer STILL intercepts with pending_local_confirms!
             for _ in range(100):
                 if agent.pending_local_confirms:
                     break
@@ -341,7 +338,7 @@ class RealClientServerE2ETest(unittest.IsolatedAsyncioTestCase):
             long_task = asyncio.create_task(hub.nodes.exec_command(self.sid, command="sleep 30"))
             cmd_id = None
             for _ in range(100):
-                running = hub.nodes.snapshot()["devices"][0]["runningCommands"]
+                running = hub.nodes.snapshot()["nodes"][0]["runningCommands"]
                 if running:
                     cmd_id = running[0]["id"]
                     break
@@ -354,7 +351,7 @@ class RealClientServerE2ETest(unittest.IsolatedAsyncioTestCase):
 
             # 5. Streaming push & pull with SHA-256 verification
             src_file = self.server_work / "pkg.bin"
-            payload = os.urandom(1024 * 512)  # 512KB binary blob
+            payload = os.urandom(1024 * 512)
             src_file.write_bytes(payload)
             pushed = await hub.nodes.push_file(self.sid, server_path=src_file, dest_path="sub/pkg.bin")
             self.assertEqual((self.client_dir / "sub" / "pkg.bin").read_bytes(), payload)
@@ -365,13 +362,14 @@ class RealClientServerE2ETest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(pulled_dest.read_bytes(), payload)
             self.assertEqual(pulled["sha256"], hashlib.sha256(payload).hexdigest())
 
-            # 6. Revoke from web kicks client and stops auto-reconnect
-            await hub.nodes.revoke_device(reg["nodeId"])
+            # 6. Kick from web disconnects client & completely clears it from server memory
+            await hub.nodes.kick_node(reg["nodeId"])
             for _ in range(100):
-                if agent.status == "kicked":
+                if agent.status == "kicked" and not hub.nodes.snapshot()["nodes"]:
                     break
                 await asyncio.sleep(0.02)
             self.assertEqual(agent.status, "kicked")
+            self.assertEqual(hub.nodes.snapshot()["nodes"], [])
         finally:
             await agent.stop()
             agent_task.cancel()
@@ -380,7 +378,9 @@ class RealClientServerE2ETest(unittest.IsolatedAsyncioTestCase):
             except asyncio.CancelledError:
                 pass
 
-    async def test_per_session_directory_isolation_and_client_distribution(self):
+    async def test_session_prefs_memory_conflict_names_and_client_distribution(self):
+        from riesz_node.agent import pair_session, prefs_file
+
         # Verify client.zip & bootstrap.py endpoints
         r_zip = await self.client.get("/v1/nodes/client.zip", headers={"Authorization": "Bearer tok-e2e"})
         self.assertEqual(r_zip.status, 200)
@@ -403,78 +403,89 @@ class RealClientServerE2ETest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("secret-dl-tok", boot_src)
         self.assertIn("X-Riesz-Download-Token", boot_src)
 
-        # Start agent with NO startup --dir presets (roots=[]) and bind 2 sessions to isolated dirs
+        # First connection to sid_a: no saved dirs yet -> update dirs + rename -> disconnect
         dir_a = self.client_dir / "proj_a"
         dir_b = self.client_dir / "proj_b"
         dir_a.mkdir()
         dir_b.mkdir()
         (dir_a / "a.txt").write_text("from-a", encoding="utf-8")
-        (dir_b / "b.txt").write_text("from-b", encoding="utf-8")
 
         hub = self.app[HUB]
-        pair = hub.nodes.create_pairing(label="iso-pc")
-        seed, pub = client_ed.generate_keypair()
-        reg = hub.nodes.register_device(code=pair["code"], public_key=client_ed.b64u_encode(pub), name="iso-pc")
-        device = {
-            "nodeId": reg["nodeId"], "name": reg["name"],
-            "server": f"http://127.0.0.1:{self.server.port}",
-            "seed": client_ed.b64u_encode(seed), "publicKey": client_ed.b64u_encode(pub),
-        }
-        agent = NodeAgent(device=device, roots=[], max_mode="full", interactive=True)
-        agent_task = asyncio.create_task(agent.run())
         sid_a = "aaaaaaaa-1111-4111-8111-111111111111"
         sid_b = "bbbbbbbb-2222-4222-8222-222222222222"
+        server_url = f"http://127.0.0.1:{self.server.port}"
+
+        p1 = hub.nodes.create_pairing(session_id=sid_a, mode="full")
+        s1 = await asyncio.to_thread(pair_session, server_url, p1["code"])
+        self.assertEqual(s1["dirs"], [])
+        self.assertFalse(s1["autoRestoredDirs"])
+        a1 = NodeAgent(session=s1, max_mode="full", interactive=True)
+        t1 = asyncio.create_task(a1.run())
         try:
             for _ in range(100):
-                if agent.status == "online":
+                if a1.status == "online":
                     break
                 await asyncio.sleep(0.02)
-
-            # Bind session A -> dir_a only
-            bt_a = asyncio.create_task(hub.nodes.bind_session(reg["nodeId"], sid_a, mode="full"))
-            for _ in range(100):
-                if agent.pending_binds:
-                    break
-                await asyncio.sleep(0.02)
-            await agent.respond_bind(agent.pending_binds[0], allow=True, dirs=[str(dir_a)])
-            res_ba = await bt_a
-            self.assertEqual(res_ba["dirs"], [str(dir_a.resolve())])
-
-            # Bind session B -> dir_b only
-            bt_b = asyncio.create_task(hub.nodes.bind_session(reg["nodeId"], sid_b, mode="full"))
-            for _ in range(100):
-                if agent.pending_binds:
-                    break
-                await asyncio.sleep(0.02)
-            await agent.respond_bind(agent.pending_binds[0], allow=True, dirs=[str(dir_b)])
-            await bt_b
-
-            # Session A can run in dir_a, but CANNOT access dir_b!
-            ok_a = await hub.nodes.exec_command(sid_a, command="cat a.txt")
-            self.assertEqual(ok_a["exitCode"], 0)
-            self.assertIn("from-a", ok_a["output"])
-            cross = await hub.nodes.exec_command(sid_a, command="pwd", cwd=str(dir_b))
-            self.assertEqual(cross["exitCode"], -1)
-            self.assertIn("白名单", cross["error"])
-
-            # Live update session A's dirs to include dir_b -> now allowed!
-            await agent.update_binding_dirs(sid_a, [str(dir_a), str(dir_b)])
+            # Without dirs, exec is blocked cleanly
+            with self.assertRaises(NodeError):
+                await hub.nodes.exec_command(sid_a, command="pwd")
+            # User picks dirs & renames client -> persisted in prefs.json (NO private keys!)
+            await a1.update_dirs([str(dir_a)])
+            await a1.rename("my-win-rig")
             for _ in range(50):
-                snap_b = hub.nodes.snapshot()["devices"][0]["bindings"]
-                a_entry = next((x for x in snap_b if x["sessionId"] == sid_a), None)
-                if a_entry and len(a_entry.get("dirs") or []) == 2:
+                ns = hub.nodes.session_nodes(sid_a)
+                if ns and ns[0].name == "my-win-rig" and ns[0].dirs:
                     break
                 await asyncio.sleep(0.02)
-            ok_ab = await hub.nodes.exec_command(sid_a, command="cat b.txt", cwd=str(dir_b))
-            self.assertEqual(ok_ab["exitCode"], 0)
-            self.assertIn("from-b", ok_ab["output"])
+            # Isolated from sid_b!
+            self.assertEqual(hub.nodes.session_nodes(sid_b), [])
         finally:
-            await agent.stop()
-            agent_task.cancel()
+            await a1.stop()
+            t1.cancel()
             try:
-                await agent_task
+                await t1
             except asyncio.CancelledError:
                 pass
+
+        # Verify ZERO private keys written to disk!
+        pf = prefs_file()
+        self.assertTrue(pf.is_file())
+        prefs_text = pf.read_text(encoding="utf-8")
+        self.assertNotIn("seed", prefs_text)
+        self.assertNotIn("publicKey", prefs_text)
+        self.assertFalse((pf.parent / "devices.json").exists())
+
+        # Re-pair same sid_a -> automatically restores dirs & custom name "my-win-rig"!
+        p2 = hub.nodes.create_pairing(session_id=sid_a, mode="full")
+        s2 = await asyncio.to_thread(pair_session, server_url, p2["code"])
+        self.assertTrue(s2["autoRestoredDirs"])
+        self.assertEqual(s2["dirs"], [dir_a.resolve()])
+        self.assertEqual(s2["name"], "my-win-rig")
+
+        a2 = NodeAgent(session=s2, max_mode="full", interactive=True)
+        t2 = asyncio.create_task(a2.run())
+        # Second simultaneous client for same sid_a gets conflict-free suffix "my-win-rig-2"!
+        p3 = hub.nodes.create_pairing(session_id=sid_a, mode="full")
+        s3 = await asyncio.to_thread(pair_session, server_url, p3["code"])
+        a3 = NodeAgent(session=s3, max_mode="full", interactive=True)
+        t3 = asyncio.create_task(a3.run())
+        try:
+            for _ in range(100):
+                if a2.status == "online" and a3.status == "online":
+                    break
+                await asyncio.sleep(0.02)
+            self.assertEqual({a2.name, a3.name}, {"my-win-rig", "my-win-rig-2"})
+            res = await hub.nodes.exec_command(sid_a, command="cat a.txt", node_ref="my-win-rig")
+            self.assertEqual(res["exitCode"], 0)
+            self.assertIn("from-a", res["output"])
+        finally:
+            for ag, tk in ((a2, t2), (a3, t3)):
+                await ag.stop()
+                tk.cancel()
+                try:
+                    await tk
+                except asyncio.CancelledError:
+                    pass
 
     async def test_pairing_bruteforce_rate_limit(self):
         hub = self.app[HUB]
@@ -482,11 +493,10 @@ class RealClientServerE2ETest(unittest.IsolatedAsyncioTestCase):
         pub_b64 = client_ed.b64u_encode(pub)
         for _ in range(20):
             with self.assertRaises(NodeError):
-                hub.nodes.register_device(code="RZ-0000-0000", public_key=pub_b64)
-        # 21st attempt hits global rate limit even if a valid code exists now
-        pair = hub.nodes.create_pairing(label="blocked")
+                hub.nodes.register_node(code="RZ-0000-0000", public_key=pub_b64)
+        pair = hub.nodes.create_pairing(session_id=self.sid)
         with self.assertRaises(NodeError) as ctx:
-            hub.nodes.register_device(code=pair["code"], public_key=pub_b64)
+            hub.nodes.register_node(code=pair["code"], public_key=pub_b64)
         self.assertIn("失败次数过多", str(ctx.exception))
 
 

@@ -743,15 +743,14 @@ def _resolve_server_path(call: Call, raw: str, *, for_write: bool = False) -> Pa
 
 
 async def node_info(call: Call, a: dict[str, Any]) -> str:
-    bound = call.hub.nodes.session_bindings(call.session_id)
-    if not bound:
-        return "当前会话尚未绑定任何在线的本地电脑节点。若需要操控用户的个人电脑，请提醒用户在 Riesz Manager 网页中将在线节点绑定到本会话。"
-    lines = ["当前会话已绑定的在线本地节点："]
-    for live, b in bound:
-        eff_dirs = b.dirs or live.dirs
-        dirs = "、".join(eff_dirs) if eff_dirs else "（尚未授权目录）"
+    nodes = call.hub.nodes.session_nodes(call.session_id)
+    if not nodes:
+        return "当前会话尚未连接任何本地电脑节点。若需要操控用户的个人电脑，请提醒用户在本会话中点击「本地电脑」生成配对码并连接。"
+    lines = ["当前会话已连接的本地电脑节点："]
+    for live in nodes:
+        dirs = "、".join(live.dirs) if live.dirs else "（尚未授权目录，等待用户在电脑端添加）"
         note = f" | 备注：{live.note}" if live.note else ""
-        lines.append(f"- {live.name} (id={live.node_id}, os={live.os_name or live.platform}, 权限={b.mode}, 本会话允许目录={dirs}{note})")
+        lines.append(f"- {live.name} (id={live.node_id}, os={live.os_name or live.platform}, 权限={live.mode}, 允许目录={dirs}{note})")
     lines.append("\n注意：本地电脑与服务器不在同一磁盘，且用户可随时断开；传文件请用 node_push / node_pull，执行命令用 node_exec。")
     return "\n".join(lines)
 

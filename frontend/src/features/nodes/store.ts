@@ -1,20 +1,10 @@
-/** State & API helpers for reverse-connected local computer nodes (`riesz-node`). */
+/** State & API helpers for ephemeral, session-scoped local computer nodes (`riesz-node`). */
 import { create } from "zustand";
 import { api } from "@/api/client";
 import { socket } from "@/api/socket";
 import { toast } from "@/store/ui";
 
 export type NodeMode = "readonly" | "ask" | "auto" | "full";
-
-export interface NodeBinding {
-  sessionId: string;
-  sessionTitle: string;
-  harness: string;
-  project: string;
-  mode: NodeMode;
-  dirs?: string[];
-  boundAt: number;
-}
 
 export interface NodeCommand {
   id: string;
@@ -33,22 +23,21 @@ export interface NodeCommand {
   output?: string;
 }
 
-export interface NodeDevice {
+export interface LiveNodeInfo {
   id: string;
   name: string;
   os: string;
   platform: string;
   hostname: string;
-  ephemeral: boolean;
-  revoked: boolean;
-  createdAt: number | null;
-  lastSeen: number | null;
-  online: boolean;
-  connectedAt: number | null;
+  sessionId: string;
+  sessionTitle: string;
+  harness: string;
+  project: string;
+  mode: NodeMode;
+  maxMode: NodeMode;
   dirs: string[];
-  maxMode: NodeMode | null;
   note: string;
-  bindings: NodeBinding[];
+  connectedAt: number;
   runningCommands: NodeCommand[];
   recentCommands: NodeCommand[];
 }
@@ -69,14 +58,15 @@ export interface NodeApproval {
 
 export interface NodePairing {
   code: string;
-  label: string;
-  ephemeral: boolean;
+  sessionId: string;
+  sessionTitle: string;
+  mode: NodeMode;
   createdAt: number;
   expiresAt: number;
 }
 
 export interface NodesSnapshot {
-  devices: NodeDevice[];
+  nodes: LiveNodeInfo[];
   approvals: NodeApproval[];
   pairings: NodePairing[];
 }
@@ -90,42 +80,41 @@ export const NODE_MODE_LABEL: Record<NodeMode, string> = {
 
 interface NodesStore extends NodesSnapshot {
   loaded: boolean;
-  open: boolean;
+  dialogSessionId: string | null;
   downloadToken: string;
   downloadTokenPinned: boolean;
-  setOpen: (open: boolean) => void;
+  openForSession: (sessionId: string | null) => void;
   apply: (snap: Partial<NodesSnapshot>) => void;
   load: () => Promise<void>;
   loadDownloadToken: () => Promise<void>;
   rotateDownloadToken: () => Promise<void>;
-  createPairing: (label: string, ephemeral: boolean) => Promise<NodePairing>;
+  createPairing: (sessionId: string, mode: NodeMode) => Promise<NodePairing>;
   kick: (id: string) => Promise<void>;
-  revoke: (id: string) => Promise<void>;
-  remove: (id: string) => Promise<void>;
-  bind: (nodeId: string, sessionId: string, mode: NodeMode) => Promise<void>;
-  unbind: (nodeId: string, sessionId: string) => Promise<void>;
+  rename: (id: string, name: string) => Promise<void>;
+  setMode: (id: string, mode: NodeMode) => Promise<void>;
   resolveApproval: (approvalId: string, allow: boolean) => Promise<void>;
   killCommand: (nodeId: string, cmdId: string) => Promise<void>;
 }
 
 export const useNodes = create<NodesStore>((set, get) => ({
-  devices: [],
+  nodes: [],
   approvals: [],
   pairings: [],
   loaded: false,
-  open: false,
+  dialogSessionId: null,
   downloadToken: "",
   downloadTokenPinned: false,
 
-  setOpen: (open) => {
-    set({ open });
-    if (open && !get().downloadToken) {
+  openForSession: (sessionId) => {
+    set({ dialogSessionId: sessionId });
+    if (sessionId && !get().downloadToken) {
       void get().loadDownloadToken().catch(() => undefined);
     }
   },
+
   apply: (snap) =>
     set((s) => ({
-      devices: snap.devices ?? s.devices,
+      nodes: snap.nodes ?? s.nodes,
       approvals: snap.approvals ?? s.approvals,
       pairings: snap.pairings ?? s.pairings,
       loaded: true,
@@ -147,8 +136,8 @@ export const useNodes = create<NodesStore>((set, get) => ({
     toast("已重置下载口令，旧链接立即失效", "success");
   },
 
-  createPairing: async (label, ephemeral) => {
-    const res = await api<NodesSnapshot & { pairing: NodePairing }>("nodes/pair", { body: { label, ephemeral } });
+  createPairing: async (sessionId, mode) => {
+    const res = await api<NodesSnapshot & { pairing: NodePairing }>("nodes/pair", { body: { sessionId, mode } });
     get().apply(res);
     return res.pairing;
   },
@@ -156,30 +145,19 @@ export const useNodes = create<NodesStore>((set, get) => ({
   kick: async (id) => {
     const res = await api<NodesSnapshot>(`nodes/${id}/kick`, { body: {} });
     get().apply(res);
+    toast("已断开该本地电脑连接", "info");
   },
 
-  revoke: async (id) => {
-    const res = await api<NodesSnapshot>(`nodes/${id}/revoke`, { body: {} });
+  rename: async (id, name) => {
+    const res = await api<NodesSnapshot>(`nodes/${id}/rename`, { body: { name } });
     get().apply(res);
-    toast("已吊销该设备密钥", "info");
+    toast("已更新节点名称", "success");
   },
 
-  remove: async (id) => {
-    const res = await api<NodesSnapshot>(`nodes/${id}/delete`, { body: {} });
+  setMode: async (id, mode) => {
+    const res = await api<NodesSnapshot>(`nodes/${id}/mode`, { body: { mode } });
     get().apply(res);
-    toast("已移除设备并作废其配对密钥", "info");
-  },
-
-  bind: async (nodeId, sessionId, mode) => {
-    const res = await api<NodesSnapshot>(`nodes/${nodeId}/bind`, { body: { sessionId, mode } });
-    get().apply(res);
-    toast("已绑定本地电脑节点", "success");
-  },
-
-  unbind: async (nodeId, sessionId) => {
-    const res = await api<NodesSnapshot>(`nodes/${nodeId}/unbind`, { body: { sessionId } });
-    get().apply(res);
-    toast("已解除节点绑定", "info");
+    toast(`权限模式已切换为「${NODE_MODE_LABEL[mode]}」`, "success");
   },
 
   resolveApproval: async (approvalId, allow) => {

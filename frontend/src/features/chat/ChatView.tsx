@@ -349,7 +349,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
               )}
             </div>
           </div>
-          <NodesButton />
+          <NodesButton sessionId={sessionId} />
           <NotesButton sessionId={sessionId} />
           <SessionMenu sessionId={sessionId} state={state} cwd={summary?.cwd ?? null} title={sessionTitle(summary)} keepAlive={keepAlive}
             harness={harness} />

@@ -1522,23 +1522,30 @@ async def browser_ws(request: web.Request) -> web.WebSocketResponse:
 # ---- local computer nodes (nodes.py) -----------------------------------------
 
 async def nodes_list(request: web.Request) -> web.Response:
-    return _json(request.app[HUB].nodes.snapshot())
+    sid = request.query.get("session") or None
+    return _json(request.app[HUB].nodes.snapshot(sid))
 
 
 async def nodes_pair(request: web.Request) -> web.Response:
     body = await _body(request) if request.can_read_body else {}
-    pair = request.app[HUB].nodes.create_pairing(
-        label=str(body.get("label") or ""),
-        ephemeral=bool(body.get("ephemeral")),
-        ttl=int(body.get("ttl") or 300),
-    )
+    sid = str(body.get("sessionId") or "")
+    if not _UUID_RE.match(sid):
+        return _err(400, "invalid sessionId")
+    try:
+        pair = request.app[HUB].nodes.create_pairing(
+            session_id=sid,
+            mode=str(body.get("mode") or "auto"),
+            ttl=int(body.get("ttl") or 300),
+        )
+    except NodeError as exc:
+        return _err(400, str(exc))
     return _json({"pairing": pair, **request.app[HUB].nodes.snapshot()})
 
 
 async def nodes_register(request: web.Request) -> web.Response:
     body = await _body(request)
     try:
-        res = request.app[HUB].nodes.register_device(
+        res = request.app[HUB].nodes.register_node(
             code=str(body.get("code") or ""),
             public_key=str(body.get("publicKey") or ""),
             name=str(body.get("name") or ""),
@@ -1551,47 +1558,22 @@ async def nodes_register(request: web.Request) -> web.Response:
     return _json(res)
 
 
-async def nodes_device_action(request: web.Request) -> web.Response:
+async def nodes_node_action(request: web.Request) -> web.Response:
     nodes = request.app[HUB].nodes
     nid = request.match_info["nid"]
     action = request.match_info["action"]
+    body = await _body(request) if request.can_read_body else {}
     try:
         if action == "kick":
-            await nodes.kick_device(nid)
-        elif action == "revoke":
-            await nodes.revoke_device(nid)
-        elif action == "delete":
-            await nodes.delete_device(nid)
+            await nodes.kick_node(nid)
+        elif action == "rename":
+            await nodes.rename_node(nid, str(body.get("name") or ""))
+        elif action == "mode":
+            await nodes.set_mode(nid, str(body.get("mode") or "auto"))
         else:
             return _err(404, "unknown action")
     except NodeError as exc:
-        return _err(404, str(exc))
-    return _json(nodes.snapshot())
-
-
-async def nodes_bind(request: web.Request) -> web.Response:
-    nodes = request.app[HUB].nodes
-    nid = request.match_info["nid"]
-    body = await _body(request)
-    sid = str(body.get("sessionId") or "")
-    if not _UUID_RE.match(sid):
-        return _err(400, "invalid sessionId")
-    mode = str(body.get("mode") or "auto")
-    try:
-        binding = await nodes.bind_session(nid, sid, mode=mode)
-    except NodeError as exc:
         return _err(400, str(exc))
-    return _json({"binding": binding, **nodes.snapshot()})
-
-
-async def nodes_unbind(request: web.Request) -> web.Response:
-    nodes = request.app[HUB].nodes
-    nid = request.match_info["nid"]
-    body = await _body(request)
-    sid = str(body.get("sessionId") or "")
-    if not _UUID_RE.match(sid):
-        return _err(400, "invalid sessionId")
-    await nodes.unbind_session(nid, sid)
     return _json(nodes.snapshot())
 
 
@@ -1798,9 +1780,7 @@ def build_app(cfg: Config) -> web.Application:
     r.add_get("/v1/nodes", nodes_list)
     r.add_post("/v1/nodes/pair", nodes_pair)
     r.add_post("/v1/nodes/register", nodes_register)
-    r.add_post(r"/v1/nodes/{nid:[0-9a-f]{1,32}}/{action:kick|revoke|delete}", nodes_device_action)
-    r.add_post(r"/v1/nodes/{nid:[0-9a-f]{1,32}}/bind", nodes_bind)
-    r.add_post(r"/v1/nodes/{nid:[0-9a-f]{1,32}}/unbind", nodes_unbind)
+    r.add_post(r"/v1/nodes/{nid:[0-9a-f]{1,32}}/{action:kick|rename|mode}", nodes_node_action)
     r.add_post(r"/v1/nodes/{nid:[0-9a-f]{1,32}}/commands/{cid:[A-Za-z0-9_-]{1,32}}/kill", nodes_command_kill)
     r.add_post(r"/v1/nodes/approvals/{aid:[A-Za-z0-9_-]{1,32}}/resolve", nodes_approval_resolve)
     r.add_get(r"/v1/nodes/transfer/{token:[A-Za-z0-9_-]{16,128}}", nodes_transfer_get)

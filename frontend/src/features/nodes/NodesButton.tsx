@@ -1,34 +1,36 @@
-/** AppBar button showing online local computer nodes and pending approvals. */
+/** Session AppBar button showing local computer nodes bound strictly to THIS session. */
 import { IconButton, Tooltip } from "@mui/material";
 import { Laptop } from "lucide-react";
 import { useNodes } from "./store";
 
-export function NodesButton() {
-  const devices = useNodes((s) => s.devices);
+export function NodesButton({ sessionId }: { sessionId: string }) {
+  const nodes = useNodes((s) => s.nodes);
   const approvals = useNodes((s) => s.approvals);
-  const open = useNodes((s) => s.open);
-  const setOpen = useNodes((s) => s.setOpen);
+  const dialogSessionId = useNodes((s) => s.dialogSessionId);
+  const openForSession = useNodes((s) => s.openForSession);
 
-  const online = devices.filter((d) => d.online).length;
-  const pending = approvals.length;
+  const mine = nodes.filter((n) => n.sessionId === sessionId);
+  const pending = approvals.filter((a) => a.sessionId === sessionId).length;
+  const isOpen = dialogSessionId === sessionId;
+
   const title = pending > 0
-    ? `本地节点（${online} 台在线 · ${pending} 条待审批）`
-    : online > 0
-      ? `本地节点（${online} 台在线）`
-      : "本地电脑节点（点击配对）";
+    ? `本会话本地电脑（${mine.length} 台已连 · ${pending} 条待审批）`
+    : mine.length > 0
+      ? `本会话本地电脑（${mine.length} 台已连）`
+      : "接入本地电脑到此会话";
 
   return (
     <Tooltip title={title}>
       <IconButton
         size="small"
-        onClick={() => setOpen(!open)}
+        onClick={() => openForSession(isOpen ? null : sessionId)}
         aria-label={title}
-        className={`rz-notes-btn${open ? " active" : ""}${pending > 0 ? " pulsing" : ""}`}
+        className={`rz-notes-btn${isOpen ? " active" : ""}${pending > 0 ? " pulsing" : ""}`}
       >
         <Laptop size={18} />
-        {(pending > 0 || online > 0) && (
+        {(pending > 0 || mine.length > 0) && (
           <span className={`rz-notes-badge${pending > 0 ? " danger" : " online"}`}>
-            {pending > 0 ? pending : online}
+            {pending > 0 ? pending : mine.length}
           </span>
         )}
       </IconButton>
