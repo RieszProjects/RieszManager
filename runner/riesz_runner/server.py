@@ -1363,6 +1363,23 @@ async def h_subagents(request: web.Request, hub: Hub, sid: str) -> web.Response:
     return _json({"subagents": hub.child_entries(sid)})
 
 
+async def h_subagent_items(request: web.Request, hub: Hub, sid: str) -> web.Response:
+    """Display items of a harness's built-in subagent (Antigravity invoke_subagent)."""
+    driver = hub.harnesses.drivers.get(sid)
+    parent_alive = bool(driver is not None and driver.alive)
+    result = await hub.agy_subagents.items(sid, request.match_info["aid"], parent_alive=parent_alive)
+    if result is None:
+        return _err(404, "unknown subagent")
+    items, mtime, running = result
+    before = request.query.get("before")
+    limit = min(int(request.query.get("limit", str(PAGE_ITEMS))), 1000)
+    if before is not None:
+        b = int(before)
+        items = [it for it in items if it["seq"] < b]
+    page = items[-limit:]
+    return _json({"items": page, "hasMore": len(items) > len(page), "mtime": mtime, "running": running})
+
+
 async def h_dismiss(request: web.Request, hub: Hub, sid: str) -> web.Response:
     await hub.clear_interrupted(sid)
     return _json({"ok": True})
@@ -1603,7 +1620,7 @@ def build_app(cfg: Config) -> web.Application:
         stop_session: h_stop, interrupt: h_interrupt, cancel_message: h_cancel, answer_permission: h_permission,
         set_model: h_model, set_mode: h_mode, set_effort: h_effort, rename_session: h_rename, set_api: h_set_api, handoff_session: h_handoff,
         fork_session: h_fork, keep_alive: h_keep_alive,
-        session_subagents: h_subagents, dismiss_interrupted: h_dismiss,
+        session_subagents: h_subagents, subagent_items: h_subagent_items, dismiss_interrupted: h_dismiss,
     })
     return app
 

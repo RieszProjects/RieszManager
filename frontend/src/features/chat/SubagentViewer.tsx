@@ -19,11 +19,13 @@ interface SubagentInfo {
   toolUseId: string | null;
   description: string;
   agentType: string;
+  running?: boolean;
 }
 
 interface Page {
   items: Item[];
   hasMore: boolean;
+  running?: boolean;
 }
 
 export function SubagentViewer() {
@@ -32,6 +34,7 @@ export function SubagentViewer() {
   const isMobile = useIsMobile();
   const state = useSessions((s) => (target ? (s.data[target.sessionId]?.state as SessionState | undefined) : undefined));
   const [agent, setAgent] = useState<SubagentInfo | null>(null);
+  const [liveStatus, setLiveStatus] = useState<boolean | undefined>(undefined);
   const [items, setItems] = useState<Item[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,11 +50,12 @@ export function SubagentViewer() {
     [state?.tasks, toolUseId],
   );
   const liveRunning = useApp((s) => Boolean(target && toolUseId && s.live[target.sessionId]?.agents?.includes(toolUseId)));
-  const running = Boolean(task && state?.alive) || liveRunning;
+  const running = liveStatus ?? agent?.running ?? (Boolean(task && state?.alive) || liveRunning);
 
   // Find the subagent of this tool call.
   useEffect(() => {
     setAgent(null);
+    setLiveStatus(undefined);
     setItems([]);
     setHasMore(false);
     setError(null);
@@ -84,6 +88,7 @@ export function SubagentViewer() {
       return [...older, ...page.items];
     });
     if (!olderLoaded.current) setHasMore(page.hasMore);
+    if (typeof page.running === "boolean") setLiveStatus(page.running);
   }, [target, agent]);
 
   useEffect(() => {

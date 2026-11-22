@@ -27,6 +27,7 @@ from .notes import Notes
 from .shares import Shares
 from .schedules import Scheduler
 from .subagents import SubagentStore
+from .agy_subagents import AgySubagentStore
 from .usage import UsageMonitor
 from .attention import LONG_TURN_SECONDS, describe_request, session_title
 from .store import SessionStore
@@ -61,6 +62,7 @@ class Hub:
         self.cfg = cfg
         self.store = SessionStore(cfg.projects_dir)
         self.subagents = SubagentStore(self.store)
+        self.agy_subagents = AgySubagentStore()
         self.projects = ProjectResolver(cfg)
         self.hosted: dict[str, ClaudeProcess] = {}
         self.live: dict[str, LiveProcess] = {}
@@ -757,6 +759,10 @@ class Hub:
                         "agentType": "浏览器任务" if browser else (HARNESSES[harness].name if harness in HARNESSES else "Claude Code"),
                         "via": "browser" if browser else "riesz", "harness": harness, "background": True,
                         "finished": not running, "running": running, "size": 0, "mtime": self._last_active(sid, pref)})
+        if self.harnesses.harness_of(parent) == "antigravity":
+            driver = self.harnesses.drivers.get(parent)
+            parent_alive = bool(driver is not None and driver.alive)
+            out.extend(self.agy_subagents.list(parent, parent_alive=parent_alive))
         return out
 
     def bins(self) -> dict[str, str | None]:

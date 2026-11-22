@@ -381,8 +381,10 @@ class Harnesses:
         driver = self.drivers.get(session_id)
         if driver is None or not driver.alive:
             return None
+        agents = (self.hub.agy_subagents.running_ids(session_id, parent_alive=True)
+                  if driver.harness == "antigravity" else [])
         return {"hosted": True, "busy": driver.busy, "pid": driver.pid, "waiting": bool(driver.permissions),
-                "agents": [], "harness": driver.harness}
+                "agents": agents, "harness": driver.harness}
 
     def summary(self, session_id: str) -> dict[str, Any]:
         rec = self.records[session_id]
@@ -709,7 +711,13 @@ class Harnesses:
         return True
 
     def working_ids(self) -> list[str]:
-        return [sid for sid, d in self.drivers.items() if d.alive and (d.busy or d.permissions or d.tasks)]
+        return [
+            sid for sid, d in self.drivers.items()
+            if d.alive and (
+                d.busy or d.permissions or d.tasks
+                or (d.harness == "antigravity" and self.hub.agy_subagents.has_running(sid, parent_alive=True))
+            )
+        ]
 
     def working(self) -> bool:
         return bool(self.working_ids())
@@ -722,12 +730,29 @@ class Harnesses:
     async def loop(self) -> None:
         """Stop drivers idle for the runner's idle timeout (like Claude Code processes); start the ones kept running."""
         failures: dict[str, tuple[float, int]] = {}
+        agy_seen: dict[str, tuple[int, tuple[str, ...]]] = {}
+        ticks = 0
         while True:
-            await asyncio.sleep(REAP_INTERVAL)
+            await asyncio.sleep(3.0)
+            ticks += 1
+            # Watch alive Antigravity sessions for built-in invoke_subagent starts/completions so the sidebar updates live.
+            for sid, driver in list(self.drivers.items()):
+                if not driver.alive or driver.harness != "antigravity":
+                    agy_seen.pop(sid, None)
+                    continue
+                entries = self.hub.agy_subagents.list(sid, parent_alive=True)
+                sig = (len(entries), tuple(a["agentId"] for a in entries if a["running"]))
+                if agy_seen.get(sid) != sig:
+                    agy_seen[sid] = sig
+                    await self.hub.broadcast_global({"ev": "session_live", "sessionId": sid, "live": self.live_info(sid)})
+                    await self.hub.broadcast_global({"ev": "sessions", "sessions": [self.summary(sid)], "removed": []})
+            if ticks % max(1, int(REAP_INTERVAL // 3)) != 0:
+                continue
             now = time.time()
             for sid, driver in list(self.drivers.items()):
                 rec = self.records.get(sid) or {}
-                if not driver.alive or driver.busy or driver.permissions or driver.tasks or rec.get("keepAlive"):
+                agy_busy = driver.harness == "antigravity" and self.hub.agy_subagents.has_running(sid, parent_alive=True)
+                if not driver.alive or driver.busy or driver.permissions or driver.tasks or agy_busy or rec.get("keepAlive"):
                     continue
                 if now - self._active.get(sid, now) > self.cfg.idle_timeout:
                     log.info("stopping idle %s session %s", driver.harness, sid[:8])
