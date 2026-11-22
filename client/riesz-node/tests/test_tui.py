@@ -178,8 +178,10 @@ class NodeTUITest(unittest.IsolatedAsyncioTestCase):
         agent = self._make_agent()
         d1 = self.root / "d1"
         d2 = self.root / "d2"
+        d3 = self.root / "d3"
         d1.mkdir()
         d2.mkdir()
+        d3.mkdir()
         agent.bindings["s3"] = BoundSession(
             session_id="s3", title="目录编辑测试", harness="claude", project="p",
             mode="auto", bound_at=time.time(), dirs=[d1],
@@ -190,12 +192,51 @@ class NodeTUITest(unittest.IsolatedAsyncioTestCase):
             await pilot.press("e")
             await pilot.pause(0.15)
             self.assertIsInstance(app.screen, EditDirsScreen)
-            app.screen.query_one("#edit-input", Input).value = f"{d1}; {d2}"
+            # Add two more directories via input + button
+            app.screen.query_one("#edit-input", Input).value = f"{d2}; {d3}"
+            await pilot.click("#edit-add")
+            await pilot.pause(0.1)
             await pilot.click("#edit-save")
             await pilot.pause(0.15)
-            self.assertEqual(agent.bindings["s3"].dirs, [d1.resolve(), d2.resolve()])
+            self.assertEqual(agent.bindings["s3"].dirs, [d1.resolve(), d2.resolve(), d3.resolve()])
             self.assertEqual(self.sent[-1]["type"], "bind_update")
-            self.assertEqual(self.sent[-1]["dirs"], [str(d1.resolve()), str(d2.resolve())])
+            self.assertEqual(self.sent[-1]["dirs"], [str(d1.resolve()), str(d2.resolve()), str(d3.resolve())])
+
+    async def test_tui_edit_default_dirs_and_dir_picker_parent_nav(self):
+        from riesz_node.tui import DirPickerScreen
+
+        agent = self._make_agent()
+        sub = self.root / "nested" / "leaf"
+        sub.mkdir(parents=True)
+        other = self.root / "other"
+        other.mkdir()
+        agent.roots = [sub]
+
+        app = NodeTUI(agent, auto_connect=False)
+        async with app.run_test(size=(120, 36)) as pilot:
+            # With 0 bindings, clicking "改目录 (e)" opens default dirs manager
+            await pilot.click("#btn-edit-dirs")
+            await pilot.pause(0.15)
+            self.assertIsInstance(app.screen, EditDirsScreen)
+            # Open DirPickerScreen, navigate UP twice (leaf -> nested -> root), then append
+            await pilot.click("#edit-browse")
+            await pilot.pause(0.15)
+            self.assertIsInstance(app.screen, DirPickerScreen)
+            await pilot.click("#pick-up")
+            await pilot.pause(0.1)
+            self.assertEqual(app.screen.tree_root, sub.parent)
+            await pilot.click("#pick-up")
+            await pilot.pause(0.1)
+            self.assertEqual(app.screen.tree_root, self.root)
+            await pilot.click("#pick-add")
+            await pilot.pause(0.15)
+            self.assertIsInstance(app.screen, EditDirsScreen)
+            # Also add `other` and save
+            app.screen.query_one("#edit-input", Input).value = str(other)
+            await pilot.click("#edit-save")
+            await pilot.pause(0.15)
+            self.assertEqual(agent.roots, [sub.resolve(), self.root.resolve(), other.resolve()])
+            self.assertEqual(self.sent[-1]["type"], "roots_update")
 
 
 if __name__ == "__main__":

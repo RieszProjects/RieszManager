@@ -435,6 +435,10 @@ class NodeManager:
             if b is not None and isinstance(msg.get("dirs"), list):
                 b.dirs = [str(d).strip() for d in msg["dirs"] if str(d).strip()][:20]
                 await self.broadcast()
+        elif mtype == "roots_update":
+            if isinstance(msg.get("dirs"), list):
+                live.dirs = [str(d).strip() for d in msg["dirs"] if str(d).strip()][:20]
+                await self.broadcast()
         elif mtype == "unbind":
             sid = str(msg.get("sessionId") or "")
             if sid and live.bindings.pop(sid, None) is not None:

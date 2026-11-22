@@ -1,9 +1,10 @@
-"""Multi-panel Textual TUI for `riesz-node` with per-session interactive directory selection."""
+"""Multi-panel Textual TUI for `riesz-node` with interactive multi-directory selection."""
 
 from __future__ import annotations
 
 import asyncio
 import os
+import string
 from datetime import datetime
 from pathlib import Path
 
@@ -11,10 +12,10 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, DirectoryTree, Footer, Header, Input, Label, ListItem, ListView, RichLog, Static
+from textual.widgets import Button, DataTable, DirectoryTree, Footer, Header, Input, Label, ListItem, ListView, RichLog, Static, Tree
 
 from .agent import CommandEntry, NodeAgent
-from .policy import PolicyError, parse_dir_list
+from .policy import PolicyError, normalize_roots, parse_dir_list
 
 STATUS_ICON = {"running": "⏳", "confirming": "🔒", "done": "✓", "error": "✗", "killed": "⊘", "denied": "⛔"}
 RISK_LABEL = {"low": "低", "medium": "中", "high": "高"}
@@ -24,133 +25,277 @@ def _fmt_time(ts: float) -> str:
     return datetime.fromtimestamp(ts).strftime("%H:%M:%S")
 
 
+def _list_fs_roots() -> list[Path]:
+    """Return available drive roots on Windows or `/` on POSIX."""
+    if os.name == "nt":
+        drives: list[Path] = []
+        for ch in string.ascii_uppercase:
+            p = Path(f"{ch}:\\")
+            try:
+                if p.exists():
+                    drives.append(p)
+            except OSError:
+                continue
+        return drives or [Path.home()]
+    return [Path("/")]
+
+
 class FolderOnlyTree(DirectoryTree):
     def filter_paths(self, paths):  # type: ignore[override]
-        return [p for p in paths if p.is_dir()]
+        out = []
+        for p in paths:
+            try:
+                if p.is_dir():
+                    out.append(p)
+            except OSError:
+                continue
+        return out
 
 
-class DirPickerScreen(ModalScreen[Path | None]):
-    """Interactive folder tree modal to pick an allowed directory without typing paths."""
+class DirPickerScreen(ModalScreen[tuple[str, Path] | None]):
+    """Interactive folder tree modal with parent navigation, drive switching, and add/replace modes."""
 
     CSS = """
     DirPickerScreen { align: center middle; }
     #picker-box {
-        width: 82%;
-        max-width: 96;
-        height: 80%;
+        width: 86%;
+        max-width: 104;
+        height: 84%;
         background: $surface;
         border: heavy $primary;
         padding: 1 2;
     }
     #picker-title { text-style: bold; margin-bottom: 1; }
-    #picker-current { color: $text-muted; margin-bottom: 1; }
+    #picker-nav { height: auto; margin-bottom: 1; }
+    #picker-nav Button { margin-right: 1; min-width: 6; }
+    #picker-current { color: $accent; margin-bottom: 1; }
     #picker-tree { height: 1fr; border: solid $panel; margin-bottom: 1; }
     #picker-actions { height: auto; }
     #picker-actions Button { margin-right: 1; }
     """
-    BINDINGS = [Binding("escape", "cancel", "取消")]
+    BINDINGS = [
+        Binding("escape", "cancel", "取消"),
+        Binding("backspace", "go_up", "上一级"),
+    ]
 
-    def __init__(self, start_path: Path) -> None:
+    def __init__(self, start_path: Path, *, allow_replace: bool = True) -> None:
         super().__init__()
-        self.start_path = start_path if start_path.is_dir() else Path.home()
-        self.chosen: Path = self.start_path
+        self.tree_root: Path = start_path if start_path.is_dir() else Path.home()
+        self.chosen: Path = self.tree_root
+        self.allow_replace = allow_replace
+        self._fs_roots = _list_fs_roots()
 
     def compose(self) -> ComposeResult:
         with Vertical(id="picker-box"):
-            yield Static("选择要授权给该会话的本地目录（点击或方向键选中）", id="picker-title")
-            yield Static(f"当前选中：{self.chosen}", id="picker-current")
-            yield FolderOnlyTree(str(self.start_path), id="picker-tree")
+            yield Static("浏览并选择要授权的本地目录（支持返回上一级 / 切换盘符）", id="picker-title")
+            with Horizontal(id="picker-nav"):
+                yield Button("⬆ 上一级", variant="default", id="pick-up")
+                yield Button("🏠 主目录", variant="default", id="pick-home")
+                for idx, root in enumerate(self._fs_roots):
+                    yield Button(str(root), variant="default", id=f"pick-root-{idx}")
+            yield Static(self._status_line(), id="picker-current")
+            yield FolderOnlyTree(str(self.tree_root), id="picker-tree")
             with Horizontal(id="picker-actions"):
-                yield Button("选择此目录", variant="success", id="pick-ok")
-                yield Button("切到用户主目录", variant="default", id="pick-home")
+                yield Button("追加此目录（多目录）", variant="success", id="pick-add")
+                if self.allow_replace:
+                    yield Button("仅用此目录（替换）", variant="primary", id="pick-replace")
                 yield Button("取消", variant="error", id="pick-cancel")
+
+    def _status_line(self) -> str:
+        return f"当前浏览：{self.tree_root}   |   已选中：{self.chosen}"
+
+    def _set_root(self, new_root: Path) -> None:
+        try:
+            if not new_root.is_dir():
+                return
+        except OSError:
+            return
+        self.tree_root = new_root
+        self.chosen = new_root
+        tree = self.query_one("#picker-tree", FolderOnlyTree)
+        tree.path = str(new_root)
+        self.query_one("#picker-current", Static).update(self._status_line())
 
     def on_directory_tree_directory_selected(self, event: DirectoryTree.DirectorySelected) -> None:
         self.chosen = Path(event.path)
-        self.query_one("#picker-current", Static).update(f"当前选中：{self.chosen}")
+        self.query_one("#picker-current", Static).update(self._status_line())
+
+    def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
+        data = getattr(event.node, "data", None)
+        path = getattr(data, "path", None)
+        if path is not None:
+            self.chosen = Path(path)
+            self.query_one("#picker-current", Static).update(self._status_line())
+
+    def action_go_up(self) -> None:
+        parent = self.tree_root.parent
+        if parent != self.tree_root:
+            self._set_root(parent)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "pick-ok":
-            self.dismiss(self.chosen)
-        elif event.button.id == "pick-home":
-            home = Path.home()
-            self.chosen = home
-            tree = self.query_one("#picker-tree", FolderOnlyTree)
-            tree.path = str(home)
-            self.query_one("#picker-current", Static).update(f"当前选中：{self.chosen}")
-        elif event.button.id == "pick-cancel":
+        bid = event.button.id or ""
+        if bid == "pick-add":
+            self.dismiss(("add", self.chosen))
+        elif bid == "pick-replace":
+            self.dismiss(("replace", self.chosen))
+        elif bid == "pick-up":
+            self.action_go_up()
+        elif bid == "pick-home":
+            self._set_root(Path.home())
+        elif bid.startswith("pick-root-"):
+            try:
+                idx = int(bid.split("-")[-1])
+                self._set_root(self._fs_roots[idx])
+            except (ValueError, IndexError):
+                pass
+        elif bid == "pick-cancel":
             self.dismiss(None)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
 
 
+class DirRow(ListItem):
+    def __init__(self, index: int, path: Path) -> None:
+        super().__init__(Label(f"{index + 1}. {path}"))
+        self.dir_path = path
+
+
 class EditDirsScreen(ModalScreen[list[str] | None]):
-    """Modal to edit a bound session's allowed directories at any time."""
+    """Interactive multi-directory manager modal for a bound session or default presets."""
 
     CSS = """
     EditDirsScreen { align: center middle; }
     #edit-box {
-        width: 82%;
-        max-width: 96;
-        height: auto;
+        width: 86%;
+        max-width: 104;
+        height: 82%;
         background: $surface;
         border: heavy $primary;
         padding: 1 2;
     }
     #edit-title { text-style: bold; margin-bottom: 1; }
-    #edit-input { margin-bottom: 1; }
+    #edit-subtitle { color: $text-muted; margin-bottom: 1; }
+    #dir-list { height: 1fr; min-height: 6; border: solid $panel; margin-bottom: 1; }
+    #edit-add-row { height: auto; margin-bottom: 1; }
+    #edit-input { width: 1fr; margin-right: 1; }
+    #edit-add-row Button { margin-right: 1; }
     #edit-error { color: $error; height: auto; margin-bottom: 1; }
     #edit-actions { height: auto; }
     #edit-actions Button { margin-right: 1; }
     """
     BINDINGS = [Binding("escape", "cancel", "取消")]
 
-    def __init__(self, session_title: str, current_dirs: list[Path]) -> None:
+    def __init__(self, title: str, current_dirs: list[Path], *, allow_empty: bool = False) -> None:
         super().__init__()
-        self.session_title = session_title
-        self.current_dirs = current_dirs
+        self.modal_title = title
+        self.allow_empty = allow_empty
+        self.dirs: list[Path] = list(current_dirs)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="edit-box"):
-            yield Static(f"编辑会话「{self.session_title}」允许访问的目录（多个目录用 ; 分隔）", id="edit-title")
-            yield Input(value="; ".join(str(p) for p in self.current_dirs), placeholder="输入目录路径…", id="edit-input")
+            yield Static(self.modal_title, id="edit-title")
+            yield Static("已授权目录列表（可添加多个目录，选中后可移除）：", id="edit-subtitle")
+            yield ListView(id="dir-list")
+            with Horizontal(id="edit-add-row"):
+                yield Input(placeholder="粘贴或输入目录路径后按回车添加（多个可用 ; 分隔）…", id="edit-input")
+                yield Button("+ 添加", variant="primary", id="edit-add")
+                yield Button("浏览目录…", variant="default", id="edit-browse")
             yield Static("", id="edit-error")
             with Horizontal(id="edit-actions"):
-                yield Button("保存", variant="success", id="edit-save")
-                yield Button("浏览添加目录…", variant="primary", id="edit-browse")
+                yield Button("保存生效", variant="success", id="edit-save")
+                yield Button("移除选中", variant="warning", id="edit-remove")
                 yield Button("取消", variant="error", id="edit-cancel")
+
+    def on_mount(self) -> None:
+        self._rebuild_list()
+
+    def _rebuild_list(self) -> None:
+        lv = self.query_one("#dir-list", ListView)
+        lv.clear()
+        if not self.dirs:
+            lv.append(ListItem(Label("（当前未配置目录）")))
+            return
+        for idx, p in enumerate(self.dirs):
+            lv.append(DirRow(idx, p))
+
+    def _set_error(self, msg: str) -> None:
+        self.query_one("#edit-error", Static).update(msg)
+
+    def _absorb_input(self) -> bool:
+        inp = self.query_one("#edit-input", Input)
+        raw = inp.value.strip()
+        if not raw:
+            return True
+        parsed = parse_dir_list(raw)
+        try:
+            resolved = normalize_roots(parsed, allow_empty=False)
+        except PolicyError as exc:
+            self._set_error(str(exc))
+            return False
+        for p in resolved:
+            if p not in self.dirs:
+                self.dirs.append(p)
+        inp.value = ""
+        self._set_error("")
+        self._rebuild_list()
+        return True
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "edit-input":
-            self._save()
+            self._absorb_input()
 
     def _save(self) -> None:
-        raw = self.query_one("#edit-input", Input).value
-        dirs = parse_dir_list(raw)
-        if not dirs:
-            self.query_one("#edit-error", Static).update("请至少保留一个目录")
+        if not self._absorb_input():
             return
-        self.dismiss(dirs)
+        try:
+            validated = normalize_roots([str(p) for p in self.dirs], allow_empty=self.allow_empty)
+        except PolicyError as exc:
+            self._set_error(str(exc))
+            return
+        self.dismiss([str(p) for p in validated])
+
+    def _remove_selected(self) -> None:
+        lv = self.query_one("#dir-list", ListView)
+        item = lv.highlighted_child
+        if isinstance(item, DirRow) and item.dir_path in self.dirs:
+            self.dirs.remove(item.dir_path)
+            self._set_error("")
+            self._rebuild_list()
+        elif self.dirs and len(self.dirs) == 1:
+            self.dirs.pop()
+            self._set_error("")
+            self._rebuild_list()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "edit-save":
+        bid = event.button.id or ""
+        if bid == "edit-add":
+            self._absorb_input()
+        elif bid == "edit-save":
             self._save()
-        elif event.button.id == "edit-browse":
-            start = self.current_dirs[0] if self.current_dirs else Path.cwd()
-            self.app.push_screen(DirPickerScreen(start), self._on_picked)
-        elif event.button.id == "edit-cancel":
+        elif bid == "edit-remove":
+            self._remove_selected()
+        elif bid == "edit-browse":
+            start = self.dirs[-1] if self.dirs else Path.cwd()
+            self.app.push_screen(DirPickerScreen(start, allow_replace=True), self._on_picked)
+        elif bid == "edit-cancel":
             self.dismiss(None)
 
-    def _on_picked(self, path: Path | None) -> None:
-        if path is None:
+    def _on_picked(self, result: tuple[str, Path] | None) -> None:
+        if result is None:
             return
-        inp = self.query_one("#edit-input", Input)
-        existing = parse_dir_list(inp.value)
-        s = str(path)
-        if s not in existing:
-            existing.append(s)
-        inp.value = "; ".join(existing)
+        action, path = result
+        try:
+            resolved = normalize_roots([str(path)], allow_empty=False)[0]
+        except PolicyError as exc:
+            self._set_error(str(exc))
+            return
+        if action == "replace":
+            self.dirs = [resolved]
+        elif resolved not in self.dirs:
+            self.dirs.append(resolved)
+        self._set_error("")
+        self._rebuild_list()
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -186,15 +331,16 @@ class NodeTUI(App[None]):
     #bind-dir-row { height: auto; margin-bottom: 1; display: none; }
     #bind-dir-row.visible { display: block; }
     #bind-dirs-input { width: 1fr; margin-right: 1; }
+    #bind-dir-row Button { margin-right: 1; }
     #prompt-error { color: $error; height: auto; display: none; margin-bottom: 1; }
     #prompt-error.visible { display: block; }
     #prompt-actions { height: auto; }
     #prompt-actions Button { margin-right: 1; }
     #main { height: 1fr; }
     #left-pane {
-        width: 32%;
-        min-width: 26;
-        max-width: 48;
+        width: 34%;
+        min-width: 28;
+        max-width: 50;
         border-right: solid $primary-background;
     }
     .pane-title {
@@ -205,6 +351,13 @@ class NodeTUI(App[None]):
         text-style: bold;
     }
     #sessions { height: 1fr; }
+    #left-actions {
+        height: auto;
+        padding: 0 1;
+        border-top: solid $primary-background;
+        background: $surface;
+    }
+    #left-actions Button { margin: 1 1 1 0; min-width: 10; }
     #right-pane { width: 1fr; }
     #commands { height: 45%; border-bottom: solid $primary-background; }
     #output { height: 1fr; padding: 0 1; }
@@ -243,15 +396,19 @@ class NodeTUI(App[None]):
             yield Static("", id="prompt-text")
             with Horizontal(id="bind-dir-row"):
                 yield Input(placeholder="授权给本会话的目录（多个用 ; 分隔）", id="bind-dirs-input")
-                yield Button("浏览目录…", variant="primary", id="btn-browse")
+                yield Button("浏览 / 换盘…", variant="primary", id="btn-browse")
+                yield Button("多目录管理…", variant="default", id="btn-manage-bind-dirs")
             yield Static("", id="prompt-error")
             with Horizontal(id="prompt-actions"):
                 yield Button("同意 (y / Ctrl+Y)", variant="success", id="btn-allow")
                 yield Button("拒绝 (n)", variant="error", id="btn-deny")
         with Horizontal(id="main"):
             with Vertical(id="left-pane"):
-                yield Static("已绑定会话 (e 改目录 · u 解绑)", classes="pane-title")
+                yield Static("已绑定会话 (选中后改目录/解绑)", classes="pane-title")
                 yield ListView(id="sessions")
+                with Horizontal(id="left-actions"):
+                    yield Button("改目录 (e)", variant="primary", id="btn-edit-dirs")
+                    yield Button("解绑 (u)", variant="warning", id="btn-unbind")
             with Vertical(id="right-pane"):
                 yield Static("指令与文件传输记录 (k 终止运行中命令)", classes="pane-title")
                 yield DataTable(id="commands", cursor_type="row")
@@ -292,7 +449,7 @@ class NodeTUI(App[None]):
     def _refresh_all(self) -> None:
         # 1. Status bar
         dot = {"online": "🟢 在线", "connecting": "🟡 连接中", "kicked": "🔴 已断开"}.get(self.agent.status, "⚪ 离线")
-        preset = ", ".join(str(r) for r in self.agent.roots) if self.agent.roots else "按会话单独授权"
+        preset = "; ".join(str(r) for r in self.agent.roots) if self.agent.roots else "按会话单独授权（按 e 可设默认目录）"
         self.query_one("#status-bar", Static).update(
             f"{dot}  |  节点: {self.agent.name}  |  权限上限: {self.agent.max_mode}  |  默认目录: {preset}\n"
             f"服务器: {self.agent.server}  —  {self.agent.status_detail}"
@@ -320,7 +477,7 @@ class NodeTUI(App[None]):
             verb = "申请调整权限为" if b.is_update else "申请绑定本机，权限模式"
             text_w.update(
                 f"【会话绑定请求】会话「{b.session_title}」({b.harness or 'agent'}) {verb}：{b.mode}\n"
-                f"请为该会话指定允许操作的本地目录（不同会话目录互相隔离）："
+                f"请指定允许该会话操作的本地目录（支持多个目录用 ; 分隔，不同会话目录互相隔离）："
             )
             if self._active_bind_id != b.bind_id:
                 self._active_bind_id = b.bind_id
@@ -415,7 +572,11 @@ class NodeTUI(App[None]):
                 self._rendered_header_sig = None
                 self._rendered_out_len = 0
                 log_w.clear()
-                log_w.write("暂无执行记录。在 Riesz Manager 网页中将本节点绑定到某个会话并在此授权目录后，指令输出会实时显示在这里。")
+                log_w.write(
+                    "暂无执行记录。\n"
+                    "• 点击左侧「改目录 (e)」可预设默认允许目录，或为已绑定会话单独添加/移除多个目录。\n"
+                    "• 在 Riesz Manager 网页中将本节点绑定到某个会话并在此授权目录后，指令输出会实时显示在这里。"
+                )
             return
 
         header_sig = (entry.cmd_id, entry.status, entry.cwd, entry.risk, entry.risk_reason)
@@ -437,12 +598,20 @@ class NodeTUI(App[None]):
         log_w.write("─" * 60)
         log_w.write(entry.output or "（尚无输出）")
 
-    def on_list_view_selected(self, event: ListView.Selected) -> None:
-        if isinstance(event.item, SessionRow):
-            self.selected_session = event.item.session_id
+    def _select_session_item(self, item: ListItem | None) -> None:
+        if isinstance(item, SessionRow) and item.session_id != self.selected_session:
+            self.selected_session = item.session_id
             self.selected_cmd_id = None
             self._last_cmds_sig = None
             self._refresh_all()
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if event.list_view.id == "sessions":
+            self._select_session_item(event.item)
+
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        if event.list_view.id == "sessions":
+            self._select_session_item(event.item)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.row_key and event.row_key.value:
@@ -459,25 +628,45 @@ class NodeTUI(App[None]):
             await self.action_approve_force()
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "btn-allow":
+        bid = event.button.id or ""
+        if bid == "btn-allow":
             await self.action_approve_force()
-        elif event.button.id == "btn-deny":
+        elif bid == "btn-deny":
             await self._do_reject()
-        elif event.button.id == "btn-browse":
+        elif bid == "btn-browse":
             inp = self.query_one("#bind-dirs-input", Input)
             existing = parse_dir_list(inp.value)
-            start = Path(os.path.expanduser(existing[0])) if existing else Path.cwd()
-            self.push_screen(DirPickerScreen(start), self._on_bind_dir_picked)
+            start = Path(os.path.expanduser(existing[-1])) if existing else Path.cwd()
+            self.push_screen(DirPickerScreen(start, allow_replace=True), self._on_bind_dir_picked)
+        elif bid == "btn-manage-bind-dirs":
+            inp = self.query_one("#bind-dirs-input", Input)
+            cur = [Path(os.path.expanduser(p)) for p in parse_dir_list(inp.value)]
+            title = "管理本会话将授权的目录（可添加多个目录）"
+            self.push_screen(EditDirsScreen(title, cur, allow_empty=False), self._on_bind_dirs_managed)
+        elif bid == "btn-edit-dirs":
+            await self.action_edit_dirs()
+        elif bid == "btn-unbind":
+            await self.action_unbind_session()
 
-    def _on_bind_dir_picked(self, path: Path | None) -> None:
-        if path is None:
+    def _on_bind_dir_picked(self, result: tuple[str, Path] | None) -> None:
+        if result is None:
             return
+        action, path = result
         inp = self.query_one("#bind-dirs-input", Input)
-        existing = parse_dir_list(inp.value)
         s = str(path)
-        if s not in existing:
-            existing.append(s)
-        inp.value = "; ".join(existing)
+        if action == "replace":
+            inp.value = s
+        else:
+            existing = parse_dir_list(inp.value)
+            if s not in existing:
+                existing.append(s)
+            inp.value = "; ".join(existing)
+        self._set_prompt_error("")
+
+    def _on_bind_dirs_managed(self, dirs: list[str] | None) -> None:
+        if dirs is None:
+            return
+        self.query_one("#bind-dirs-input", Input).value = "; ".join(dirs)
         self._set_prompt_error("")
 
     def _is_typing(self) -> bool:
@@ -527,21 +716,39 @@ class NodeTUI(App[None]):
         if not sid and len(self.agent.bindings) == 1:
             sid = next(iter(self.agent.bindings))
             self.selected_session = sid
-        if not sid:
+        if sid and sid in self.agent.bindings:
+            b = self.agent.bindings[sid]
+            title = f"编辑会话「{b.title}」的允许目录（支持多个目录）"
+            self.push_screen(
+                EditDirsScreen(title, b.dirs, allow_empty=False),
+                lambda dirs, _sid=sid: self._on_edited_session_dirs(_sid, dirs),
+            )
             return
-        b = self.agent.bindings.get(sid)
-        if b is None:
-            return
-        self.push_screen(EditDirsScreen(b.title, b.dirs), self._on_edited_dirs)
+        # No specific session selected (0 bindings, or "全部会话" selected with multiple bindings): edit default preset dirs
+        title = "编辑默认预填目录（新会话绑定时自动预填，也可在绑定时按会话单独调整）"
+        self.push_screen(EditDirsScreen(title, self.agent.roots, allow_empty=True), self._on_edited_default_dirs)
 
-    def _on_edited_dirs(self, dirs: list[str] | None) -> None:
-        if dirs is None or not self.selected_session:
+    def _on_edited_session_dirs(self, sid: str, dirs: list[str] | None) -> None:
+        if dirs is None:
             return
-        sid = self.selected_session
 
         async def _apply() -> None:
             try:
                 await self.agent.update_binding_dirs(sid, dirs)
+                self.notify("已更新该会话的允许目录", severity="information")
+            except PolicyError as exc:
+                self.notify(str(exc), severity="error")
+
+        asyncio.create_task(_apply())
+
+    def _on_edited_default_dirs(self, dirs: list[str] | None) -> None:
+        if dirs is None:
+            return
+
+        async def _apply() -> None:
+            try:
+                await self.agent.update_default_dirs(dirs)
+                self.notify("已更新默认预填目录", severity="information")
             except PolicyError as exc:
                 self.notify(str(exc), severity="error")
 
@@ -556,8 +763,11 @@ class NodeTUI(App[None]):
     async def action_unbind_session(self) -> None:
         if self._is_typing():
             return
-        if self.selected_session:
-            await self.agent.unbind_session(self.selected_session)
+        sid = self.selected_session
+        if not sid and len(self.agent.bindings) == 1:
+            sid = next(iter(self.agent.bindings))
+        if sid:
+            await self.agent.unbind_session(sid)
             self.selected_session = None
             self._last_sessions_sig = None
             self._last_cmds_sig = None

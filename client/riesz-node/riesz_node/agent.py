@@ -488,6 +488,15 @@ class NodeAgent:
         self._emit()
         return resolved
 
+    async def update_default_dirs(self, dirs: list[str]) -> list[Path]:
+        resolved = normalize_roots(dirs, allow_empty=True)
+        self.roots = resolved
+        await self._send({"type": "roots_update", "dirs": [str(p) for p in resolved]})
+        summary = ", ".join(str(p) for p in resolved) if resolved else "按会话单独授权"
+        self._log(f"[默认目录] 新会话默认预填目录已更新为：{summary}")
+        self._emit()
+        return resolved
+
     async def unbind_session(self, session_id: str) -> None:
         removed = self.bindings.pop(session_id, None)
         if removed is None:
