@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "riesz-node"
+version = "0.1.0"
+description = "Cross-platform reverse-connected local computer node client for Riesz Manager"
+requires-python = ">=3.10"
+dependencies = [
+    "websockets>=13,<19",
+    "textual>=1.0,<6",
+]
+
+[project.scripts]
+riesz-node = "riesz_node.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["riesz_node*"]

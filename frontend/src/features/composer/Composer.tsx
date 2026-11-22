@@ -19,6 +19,7 @@ import { handOff } from "@/lib/handoff";
 import { ContextMeter } from "./ContextMeter";
 import { invalidateCommands, useCommands } from "./useCommands";
 import { cycleMode, HarnessPicker, ModelPicker, ModePicker } from "./SessionControls";
+import { NodeBindChip } from "../nodes/NodeBindChip";
 import { SuggestMenu, type Suggestion } from "./SuggestMenu";
 import { useAttachments } from "./useAttachments";
 import { usePromptHistory } from "./useHistory";
@@ -488,6 +489,7 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
       <ModePicker value={mode} allowBypass={Boolean(config?.allowBypass)} onChange={changeMode} options={harnessModes} />
       <ModelPicker value={model} effort={effort} models={models} onChange={changeModel} onEffort={changeEffort}
         routes={routes} route={route} routeLocked={routeLocked} />
+      {sessionId && <NodeBindChip sessionId={sessionId} />}
     </>
   );
 

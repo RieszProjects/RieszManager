@@ -178,3 +178,51 @@ class BrowserConsumer(AsyncWebsocketConsumer):
                 task.cancel()
         if self.upstream is not None and not self.upstream.closed:
             await self.upstream.close()
+
+
+class NodeConsumer(AsyncWebsocketConsumer):
+    """Reverse WebSocket tunnel for personal computer nodes (`riesz-node`).
+
+    Authentication happens inside the runner via Ed25519 challenge-response against the
+    device's registered public key; no browser session cookie is required or trusted here.
+    """
+
+    upstream: aiohttp.ClientWebSocketResponse | None = None
+    relay_task: asyncio.Task[Any] | None = None
+
+    async def connect(self) -> None:
+        try:
+            self.upstream = await runner.ws_connect("/v1/nodes/ws")
+        except runner.RunnerUnavailable:
+            await self.close(code=4503)
+            return
+        await self.accept()
+        self.relay_task = asyncio.create_task(self._relay())
+
+    async def _relay(self) -> None:
+        assert self.upstream is not None
+        close_code = 1000
+        try:
+            async for msg in self.upstream:
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    await self.send(text_data=msg.data)
+                elif msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                    if self.upstream.close_code:
+                        close_code = self.upstream.close_code
+                    break
+        except Exception:  # noqa: BLE001
+            log.exception("node ws relay failed")
+            close_code = 4503
+        finally:
+            await self.close(code=close_code)
+
+    async def receive(self, text_data: str | None = None, bytes_data: bytes | None = None) -> None:
+        if not text_data or self.upstream is None or self.upstream.closed:
+            return
+        await self.upstream.send_str(text_data)
+
+    async def disconnect(self, code: int) -> None:
+        if self.relay_task is not None:
+            self.relay_task.cancel()
+        if self.upstream is not None and not self.upstream.closed:
+            await self.upstream.close()

@@ -1088,3 +1088,51 @@ body.rz-dragging, body.rz-dragging * { cursor: grabbing !important; user-select:
   opacity: 0.7;
 }
 .rz-notes-resize:hover { opacity: 1; }
+
+/* Local computer nodes (features/nodes/*). */
+.rz-notes-badge.online { background: var(--sage-strong); color: #141914; }
+.rz-notes-badge.danger { background: var(--danger); color: #fff; }
+.rz-chip.rz-node-bound { color: var(--sage-strong); border-color: rgba(147, 168, 140, 0.42); background: rgba(147, 168, 140, 0.08); }
+.rz-nodes-dialog { display: flex; flex-direction: column; gap: 18px; }
+.rz-nodes-section h4 { margin: 0 0 8px; font-size: 13.5px; color: var(--text); }
+.rz-nodes-pair-form { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 10px; }
+.rz-node-pair-box {
+  border: 1px solid rgba(198, 150, 107, 0.35); background: rgba(198, 150, 107, 0.08);
+  border-radius: 10px; padding: 10px 12px; margin-top: 8px; display: flex; flex-direction: column; gap: 6px;
+}
+.rz-node-pair-code { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
+.rz-node-pair-code > .mono { font-size: 16px; font-weight: 700; color: var(--amber-strong); letter-spacing: 0.08em; }
+.rz-node-pair-cmd { display: flex; align-items: center; gap: 6px; background: var(--bg); border: 1px solid var(--line-soft); border-radius: 7px; padding: 6px 8px; }
+.rz-node-pair-cmd code { flex: 1; font-size: 11.5px; overflow-x: auto; white-space: nowrap; }
+.rz-nodes-list { display: flex; flex-direction: column; gap: 10px; }
+.rz-node-card { border: 1px solid var(--line-soft); border-radius: 10px; background: var(--bg1); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.rz-node-card.online { border-color: rgba(147, 168, 140, 0.4); }
+.rz-node-card.revoked { opacity: 0.6; }
+.rz-node-card-head { display: flex; align-items: center; gap: 8px; }
+.rz-node-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text4); flex-shrink: 0; }
+.rz-node-dot.on { background: var(--sage-strong); box-shadow: 0 0 0 3px rgba(147, 168, 140, 0.2); }
+.rz-node-card-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; font-size: 13px; }
+.rz-node-card-title .dim { font-size: 11.5px; }
+.rz-node-card-actions { display: flex; align-items: center; gap: 2px; }
+.rz-node-meta { font-size: 12px; display: flex; flex-direction: column; gap: 3px; }
+.rz-node-bindings { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; }
+.rz-node-bind-tag {
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; border-radius: 999px;
+  background: rgba(147, 168, 140, 0.14); border: 1px solid rgba(147, 168, 140, 0.35); color: var(--sage-strong); font-size: 11.5px;
+}
+.rz-node-bind-tag button { background: none; border: none; color: inherit; cursor: pointer; display: inline-flex; padding: 0; opacity: 0.8; }
+.rz-node-bind-tag button:hover { opacity: 1; }
+.rz-node-cmds { display: flex; flex-direction: column; gap: 5px; border-top: 1px solid var(--line-soft); padding-top: 8px; }
+.rz-node-cmd { border: 1px solid var(--line-soft); border-radius: 7px; background: var(--bg); overflow: hidden; }
+.rz-node-cmd-head { display: flex; align-items: center; gap: 8px; padding: 5px 8px; cursor: pointer; font-size: 12px; }
+.rz-node-cmd-text { flex: 1; min-width: 0; }
+.rz-node-cmd-body { padding: 6px 8px 8px; border-top: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; }
+.rz-node-cmd-out { margin: 0; max-height: 180px; overflow: auto; white-space: pre-wrap; word-break: break-all; font-size: 11.5px; color: var(--text2); }
+.rz-node-approval-card { border: 1px solid rgba(196, 110, 98, 0.45); background: rgba(196, 110, 98, 0.08); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.rz-node-approval-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.rz-node-approval-cmd { margin: 4px 0; padding: 7px 9px; border-radius: 7px; background: var(--bg); border: 1px solid var(--line-soft); font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+.rz-node-approval-actions { display: flex; gap: 8px; margin-top: 4px; }
+.rz-node-prompt { margin: 0 auto 8px; max-width: 820px; width: 100%; }
+.rz-tag.risk-low { color: var(--sage-strong); border-color: rgba(147, 168, 140, 0.35); }
+.rz-tag.risk-medium { color: var(--amber-strong); border-color: rgba(198, 150, 107, 0.4); }
+.rz-tag.risk-high { color: #e09a8e; border-color: rgba(196, 110, 98, 0.5); }

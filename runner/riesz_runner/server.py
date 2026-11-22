@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hmac
 import json
 import logging
@@ -31,6 +32,7 @@ from .hub import Hub
 from .probe import CapabilityProbe
 from .process import ControlError
 from .schedules import ScheduleError, system_timezone
+from .nodes import MAX_TRANSFER_BYTES, NodeError
 from .notes import NoteError
 from . import tools as tools_mod
 from .projects import ROOT_ID
@@ -1517,6 +1519,168 @@ async def browser_ws(request: web.Request) -> web.WebSocketResponse:
     return ws
 
 
+# ---- local computer nodes (nodes.py) -----------------------------------------
+
+async def nodes_list(request: web.Request) -> web.Response:
+    return _json(request.app[HUB].nodes.snapshot())
+
+
+async def nodes_pair(request: web.Request) -> web.Response:
+    body = await _body(request) if request.can_read_body else {}
+    pair = request.app[HUB].nodes.create_pairing(
+        label=str(body.get("label") or ""),
+        ephemeral=bool(body.get("ephemeral")),
+        ttl=int(body.get("ttl") or 300),
+    )
+    return _json({"pairing": pair, **request.app[HUB].nodes.snapshot()})
+
+
+async def nodes_register(request: web.Request) -> web.Response:
+    body = await _body(request)
+    try:
+        res = request.app[HUB].nodes.register_device(
+            code=str(body.get("code") or ""),
+            public_key=str(body.get("publicKey") or ""),
+            name=str(body.get("name") or ""),
+            os_name=str(body.get("os") or ""),
+            platform=str(body.get("platform") or ""),
+            hostname=str(body.get("hostname") or ""),
+        )
+    except NodeError as exc:
+        return _err(400, str(exc))
+    return _json(res)
+
+
+async def nodes_device_action(request: web.Request) -> web.Response:
+    nodes = request.app[HUB].nodes
+    nid = request.match_info["nid"]
+    action = request.match_info["action"]
+    try:
+        if action == "kick":
+            await nodes.kick_device(nid)
+        elif action == "revoke":
+            await nodes.revoke_device(nid)
+        elif action == "delete":
+            await nodes.delete_device(nid)
+        else:
+            return _err(404, "unknown action")
+    except NodeError as exc:
+        return _err(404, str(exc))
+    return _json(nodes.snapshot())
+
+
+async def nodes_bind(request: web.Request) -> web.Response:
+    nodes = request.app[HUB].nodes
+    nid = request.match_info["nid"]
+    body = await _body(request)
+    sid = str(body.get("sessionId") or "")
+    if not _UUID_RE.match(sid):
+        return _err(400, "invalid sessionId")
+    mode = str(body.get("mode") or "auto")
+    try:
+        binding = await nodes.bind_session(nid, sid, mode=mode)
+    except NodeError as exc:
+        return _err(400, str(exc))
+    return _json({"binding": binding, **nodes.snapshot()})
+
+
+async def nodes_unbind(request: web.Request) -> web.Response:
+    nodes = request.app[HUB].nodes
+    nid = request.match_info["nid"]
+    body = await _body(request)
+    sid = str(body.get("sessionId") or "")
+    if not _UUID_RE.match(sid):
+        return _err(400, "invalid sessionId")
+    await nodes.unbind_session(nid, sid)
+    return _json(nodes.snapshot())
+
+
+async def nodes_approval_resolve(request: web.Request) -> web.Response:
+    nodes = request.app[HUB].nodes
+    aid = request.match_info["aid"]
+    body = await _body(request)
+    ok = await nodes.resolve_approval(aid, allow=bool(body.get("allow")), decided_by="web")
+    if not ok:
+        return _err(404, "approval not found or already resolved")
+    return _json(nodes.snapshot())
+
+
+async def nodes_command_kill(request: web.Request) -> web.Response:
+    nodes = request.app[HUB].nodes
+    nid = request.match_info["nid"]
+    cid = request.match_info["cid"]
+    ok = await nodes.kill_command(nid, cid)
+    if not ok:
+        return _err(404, "command not running")
+    return _json({"killed": True})
+
+
+async def nodes_transfer_get(request: web.Request) -> web.StreamResponse:
+    nodes = request.app[HUB].nodes
+    token = request.match_info["token"]
+    try:
+        ticket = nodes.claim_transfer(token, "push")
+    except NodeError as exc:
+        return _err(404, str(exc))
+    if not ticket.server_path.is_file():
+        return _err(404, "source file missing")
+    headers = {
+        "Content-Type": "application/octet-stream",
+        "X-Riesz-SHA256": ticket.sha256 or "",
+        "Cache-Control": "no-store",
+    }
+    return web.FileResponse(ticket.server_path, headers=headers)
+
+
+async def nodes_transfer_post(request: web.Request) -> web.Response:
+    import hashlib
+    nodes = request.app[HUB].nodes
+    token = request.match_info["token"]
+    try:
+        ticket = nodes.claim_transfer(token, "pull")
+    except NodeError as exc:
+        return _err(404, str(exc))
+    expected_sha = request.headers.get("X-Riesz-SHA256", "").strip().lower()
+    dest = ticket.server_path
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(f".{dest.name}.{uuidlib.uuid4().hex[:8]}.tmp")
+    h = hashlib.sha256()
+    total = 0
+    try:
+        with tmp.open("wb") as fh:
+            async for chunk in request.content.iter_chunked(256 * 1024):
+                total += len(chunk)
+                if total > MAX_TRANSFER_BYTES:
+                    raise NodeError("文件超过 200MB 限制")
+                h.update(chunk)
+                fh.write(chunk)
+        digest = h.hexdigest()
+        if expected_sha and digest != expected_sha:
+            raise NodeError("文件 SHA-256 校验失败")
+        os.replace(tmp, dest)
+        ticket.size = total
+        ticket.sha256 = digest
+    except Exception as exc:
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
+        return _err(400, str(exc))
+    return _json({"ok": True, "size": total, "sha256": ticket.sha256})
+
+
+async def nodes_ws(request: web.Request) -> web.WebSocketResponse:
+    nodes = request.app[HUB].nodes
+    ws = web.WebSocketResponse(heartbeat=25, max_msg_size=16 * 1024 * 1024)
+    await ws.prepare(request)
+    try:
+        await nodes.handle_ws(ws)
+    except Exception:  # noqa: BLE001
+        log.exception("local node websocket error")
+    finally:
+        with contextlib.suppress(Exception):
+            await ws.close()
+    return ws
+
+
 # ---- app ---------------------------------------------------------------------
 
 def build_app(cfg: Config) -> web.Application:
@@ -1605,6 +1769,17 @@ def build_app(cfg: Config) -> web.Application:
     r.add_post("/v1/browser/tabs", browser_new_tab)
     r.add_post(r"/v1/browser/tabs/{tid:[A-Za-z0-9_-]{1,128}}/{action:activate|close}", browser_tab_action)
     r.add_get("/v1/browser/ws", browser_ws)
+    r.add_get("/v1/nodes", nodes_list)
+    r.add_post("/v1/nodes/pair", nodes_pair)
+    r.add_post("/v1/nodes/register", nodes_register)
+    r.add_post(r"/v1/nodes/{nid:[0-9a-f]{1,32}}/{action:kick|revoke|delete}", nodes_device_action)
+    r.add_post(r"/v1/nodes/{nid:[0-9a-f]{1,32}}/bind", nodes_bind)
+    r.add_post(r"/v1/nodes/{nid:[0-9a-f]{1,32}}/unbind", nodes_unbind)
+    r.add_post(r"/v1/nodes/{nid:[0-9a-f]{1,32}}/commands/{cid:[A-Za-z0-9_-]{1,32}}/kill", nodes_command_kill)
+    r.add_post(r"/v1/nodes/approvals/{aid:[A-Za-z0-9_-]{1,32}}/resolve", nodes_approval_resolve)
+    r.add_get(r"/v1/nodes/transfer/{token:[A-Za-z0-9_-]{16,128}}", nodes_transfer_get)
+    r.add_post(r"/v1/nodes/transfer/{token:[A-Za-z0-9_-]{16,128}}", nodes_transfer_post)
+    r.add_get("/v1/nodes/ws", nodes_ws)
     r.add_get("/v1/harnesses", harnesses)
     r.add_get("/v1/credentials", credentials)
     r.add_post(r"/v1/credentials/{provider:[a-z]{1,16}}/{action:set|test|clear}", credential_action)

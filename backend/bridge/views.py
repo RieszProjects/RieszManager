@@ -11,6 +11,7 @@ from urllib.parse import quote
 import aiohttp
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse, StreamingHttpResponse
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from riesz.http import ApiError, api_view, error_response, ok
@@ -65,6 +66,13 @@ ROUTES: list[tuple[str, re.Pattern[str], str]] = [
         ("POST", r"^browser/(?P<action>start|stop|tabs)$", "/v1/browser/{action}"),
         ("POST", r"^browser/tabs/(?P<tid>[A-Za-z0-9_-]{1,128})/(?P<action>activate|close)$",
          "/v1/browser/tabs/{tid}/{action}"),
+        ("GET", r"^nodes$", "/v1/nodes"),
+        ("POST", r"^nodes/pair$", "/v1/nodes/pair"),
+        ("POST", r"^nodes/(?P<nid>[0-9a-f]{1,32})/(?P<action>kick|revoke|delete)$", "/v1/nodes/{nid}/{action}"),
+        ("POST", r"^nodes/(?P<nid>[0-9a-f]{1,32})/(?P<action>bind|unbind)$", "/v1/nodes/{nid}/{action}"),
+        ("POST", r"^nodes/(?P<nid>[0-9a-f]{1,32})/commands/(?P<cid>[A-Za-z0-9_-]{1,32})/kill$",
+         "/v1/nodes/{nid}/commands/{cid}/kill"),
+        ("POST", r"^nodes/approvals/(?P<aid>[A-Za-z0-9_-]{1,32})/resolve$", "/v1/nodes/approvals/{aid}/resolve"),
     ]
 ]
 
@@ -204,3 +212,68 @@ async def app_config(request: HttpRequest) -> HttpResponse:
         "transcriptionLive": bool(settings.OPENAI_API_KEY and settings.TRANSCRIBE_LIVE_MODEL),
         "username": request.user.username,
     })
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+async def node_register(request: HttpRequest) -> HttpResponse:
+    """One-time pairing endpoint for `riesz-node` clients (authenticated by pairing code, not cookies)."""
+    try:
+        body = json.loads(request.body or b"{}")
+    except ValueError:
+        return error_response(400, "invalid json")
+    try:
+        resp = await runner.request("POST", "/v1/nodes/register", json=body, timeout=30)
+    except runner.RunnerUnavailable:
+        return _unavailable()
+    async with resp:
+        return HttpResponse(await resp.read(), status=resp.status, content_type="application/json")
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+async def node_transfer(request: HttpRequest, token: str) -> HttpResponse:
+    """Single-use token-authenticated streaming file transfer between runner and `riesz-node`."""
+    target = f"/v1/nodes/transfer/{token}"
+    if request.method == "GET":
+        try:
+            resp = await runner.request("GET", target, timeout=600)
+        except runner.RunnerUnavailable:
+            return _unavailable()
+        if resp.status != 200:
+            async with resp:
+                return HttpResponse(await resp.read(), status=resp.status, content_type="application/json")
+
+        async def chunks():
+            try:
+                async for chunk in resp.content.iter_chunked(256 * 1024):
+                    yield chunk
+            finally:
+                resp.release()
+
+        out = StreamingHttpResponse(chunks(), status=200, content_type="application/octet-stream")
+        for hdr in ("Content-Length", "X-Riesz-SHA256"):
+            if resp.headers.get(hdr):
+                out[hdr] = resp.headers[hdr]
+        out["Cache-Control"] = "no-store"
+        return out
+
+    headers = {}
+    if request.headers.get("X-Riesz-SHA256"):
+        headers["X-Riesz-SHA256"] = request.headers["X-Riesz-SHA256"]
+    if request.headers.get("Content-Length"):
+        headers["Content-Length"] = request.headers["Content-Length"]
+
+    async def upload_stream():
+        while True:
+            chunk = await asyncio.to_thread(request.read, 256 * 1024)
+            if not chunk:
+                break
+            yield chunk
+
+    try:
+        resp = await runner.request("POST", target, data=upload_stream(), headers=headers or None, timeout=600)
+    except runner.RunnerUnavailable:
+        return _unavailable()
+    async with resp:
+        return HttpResponse(await resp.read(), status=resp.status, content_type="application/json")

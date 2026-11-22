@@ -23,6 +23,7 @@ from .auto_resume import AutoResume
 from .balances import BalanceMonitor
 from .browser import ServerBrowser, mcp_server as browser_mcp_server
 from .limits import Limits
+from .nodes import NodeManager
 from .notes import Notes
 from .shares import Shares
 from .schedules import Scheduler
@@ -100,6 +101,7 @@ class Hub:
         self.harnesses = Harnesses(self)
         self.shares = Shares(cfg.state_dir)        # files agents sent to the user (shares.py)
         self.notes = Notes(self)                   # reader sticky notes shown in the web floating window (notes.py)
+        self.nodes = NodeManager(self)             # reverse-connected personal computer nodes (nodes.py)
         self.subagent_watcher = SubagentWatcher(self)  # persistent parent callbacks for subagent turns
         self.limits = Limits(self)               # other subscriptions' usage limits (limits.py)
         self.auto_resume = AutoResume(self)      # retry turns that failed for quota / billing / transient errors
@@ -174,7 +176,9 @@ class Hub:
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*(p.stop() for p in list(self.hosted.values())), self.harnesses.close(),
-                             self.browser.stop(), return_exceptions=True)
+                             self.browser.stop(),
+                             *(self.nodes.kick_device(nid) for nid in list(self.nodes._live)),
+                             return_exceptions=True)
 
     # ---- subscriptions ------------------------------------------------------
 

@@ -16,6 +16,8 @@ import { NewProjectDialog } from "@/features/sessions/NewProjectDialog";
 import { SubagentViewer } from "@/features/chat/SubagentViewer";
 import { NotesWindow } from "@/features/notes/NotesWindow";
 import { startNotes, useNotes } from "@/features/notes/store";
+import { NodesDialog } from "@/features/nodes/NodesDialog";
+import { startNodes, useNodes } from "@/features/nodes/store";
 import { ScheduleDialog } from "@/features/schedules/ScheduleDialog";
 import { startSchedules } from "@/features/schedules/store";
 import { NewSessionDialog } from "@/features/sessions/NewSessionDialog";
@@ -53,6 +55,7 @@ function useLiveData(enabled: boolean) {
         void useApp.getState().loadSessions().catch(() => undefined);
         void useApp.getState().loadProjects().catch(() => undefined);
         void useNotes.getState().load().catch(() => undefined);
+        void useNodes.getState().load().catch(() => undefined);
       }
     });
     socket.start();
@@ -61,6 +64,7 @@ function useLiveData(enabled: boolean) {
     void syncPush();
     startSchedules();
     startNotes();
+    startNodes();
     const timer = window.setInterval(() => void useApp.getState().loadProjects().catch(() => undefined), 60000);
     return () => {
       offEvent();
@@ -118,6 +122,7 @@ export function App() {
       <NewProjectDialog />
       <RenameDialog />
       <NotesWindow />
+      <NodesDialog />
       <DollSlot />
       <Toaster />
       <UpdateBanner />

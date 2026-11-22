@@ -24,6 +24,8 @@ import { Composer } from "../composer/Composer";
 import { MobileHeaderButtons } from "../layout/MobileHeaderButtons";
 import { RightDock, RightPanelButton } from "../layout/RightDock";
 import { NotesButton } from "../notes/NotesButton";
+import { NodesButton } from "../nodes/NodesButton";
+import { NodeApprovalBanner } from "../nodes/NodeApprovalBanner";
 import { MessageList } from "./MessageList";
 import { PendingPrompts } from "./PermissionCard";
 import { SessionContext } from "./SessionContext";
@@ -347,6 +349,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
               )}
             </div>
           </div>
+          <NodesButton />
           <NotesButton sessionId={sessionId} />
           <SessionMenu sessionId={sessionId} state={state} cwd={summary?.cwd ?? null} title={sessionTitle(summary)} keepAlive={keepAlive}
             harness={harness} />
@@ -375,6 +378,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
           )}
         </div>
         <div className="rz-chat-bottom">
+          <NodeApprovalBanner sessionId={sessionId} />
           <QueueBar sessionId={sessionId} queue={state?.queue ?? []} />
           <Composer
             sessionId={sessionId}

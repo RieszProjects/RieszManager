@@ -30,6 +30,7 @@ import aiohttp
 
 from .drivers.base import ToolServer
 from .harnesses import HARNESSES
+from .nodes import NodeError
 from .notes import COLORS as NOTE_COLORS, NoteError
 from .shares import ShareError
 
@@ -39,7 +40,8 @@ if TYPE_CHECKING:
 SERVER_NAME = "riesz"
 INSTRUCTIONS = ("Riesz Manager 托管着这个会话。这里的工具可以定时唤醒本会话（到点给它发一条消息，重启后也有效）、"
                 "给别的会话发消息、开新会话、查看别的会话的状态和回复、把文件发给用户、"
-                "以及用 note_write 给用户写便签（持续显示在网页顶栏的浮动便签窗口里，不随上下文覆盖）。"
+                "用 note_write 给用户写便签（持续显示在网页顶栏的浮动便签窗口里，不随上下文覆盖）、"
+                "以及当用户把自己的本地电脑节点绑定到本会话时，通过 node_info/node_exec/node_push/node_pull 在该电脑上执行命令和互传文件。"
                 "如果同时挂载了 `browser`（chrome-devtools-mcp）服务器，操作服务器浏览器请直接用它，无需走 browser_task。")
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 DAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
@@ -725,6 +727,106 @@ async def browser_task(call: Call, a: dict[str, Any]) -> str:
     return await _reply_when_done(call, child, True, "浏览器任务")
 
 
+# ---- bound local computer nodes (nodes.py) --------------------------------------------------
+
+def _session_cwd(call: Call) -> Path:
+    summary = call.hub.session_summary(call.session_id) or {}
+    cwd = summary.get("cwd")
+    return Path(cwd) if cwd else call.hub.cfg.workspace_root
+
+
+def _resolve_server_path(call: Call, raw: str, *, for_write: bool = False) -> Path:
+    p = Path(os.path.expanduser(raw.strip()))
+    if not p.is_absolute():
+        p = _session_cwd(call) / p
+    resolved = Path(os.path.realpath(p))
+    allowed_roots = [
+        Path(os.path.realpath(call.hub.cfg.workspace_root)),
+        Path(os.path.realpath(_session_cwd(call))),
+        Path(os.path.realpath("/tmp")),
+        Path(os.path.realpath(call.hub.cfg.state_dir / "node_pulls")),
+    ]
+    if not for_write:
+        allowed_roots.extend([
+            Path(os.path.realpath(call.hub.cfg.state_dir / "shared")),
+            Path(os.path.realpath(call.hub.cfg.state_dir / "uploads")),
+        ])
+    for root in allowed_roots:
+        if resolved == root or root in resolved.parents:
+            return resolved
+    raise ToolError(f"服务器路径超出允许范围：{raw}")
+
+
+async def node_info(call: Call, a: dict[str, Any]) -> str:
+    bound = call.hub.nodes.session_bindings(call.session_id)
+    if not bound:
+        return "当前会话尚未绑定任何在线的本地电脑节点。若需要操控用户的个人电脑，请提醒用户在 Riesz Manager 网页中将在线节点绑定到本会话。"
+    lines = ["当前会话已绑定的在线本地节点："]
+    for live, b in bound:
+        dirs = "、".join(live.dirs) if live.dirs else "（未声明目录）"
+        note = f" | 备注：{live.note}" if live.note else ""
+        lines.append(f"- {live.name} (id={live.node_id}, os={live.os_name or live.platform}, 权限={b.mode}, 目录={dirs}{note})")
+    lines.append("\n注意：本地电脑与服务器不在同一磁盘，且用户可随时断开；传文件请用 node_push / node_pull，执行命令用 node_exec。")
+    return "\n".join(lines)
+
+
+async def node_exec(call: Call, a: dict[str, Any]) -> str:
+    try:
+        res = await call.hub.nodes.exec_command(
+            call.session_id,
+            command=str(a.get("command") or ""),
+            cwd=str(a.get("cwd") or ""),
+            timeout=int(a.get("timeout") or 120),
+            node_ref=str(a.get("node") or "") or None,
+        )
+    except NodeError as exc:
+        raise ToolError(str(exc)) from None
+    head = f"[本地节点 {res['node']}] exit={res['exitCode']}"
+    if res.get("killed"):
+        head += " (已终止)"
+    if res.get("riskReason"):
+        head += f" | 风控({res['risk']}): {res['riskReason']}"
+    body = (res.get("output") or "").strip()
+    if len(body) > 24000:
+        body = body[:8000] + "\n... [中间输出已截断] ...\n" + body[-12000:]
+    return f"{head}\n\n{body}" if body else f"{head}\n（无输出）"
+
+
+async def node_push(call: Call, a: dict[str, Any]) -> str:
+    src = _resolve_server_path(call, str(a.get("server_path") or ""), for_write=False)
+    dest = str(a.get("node_path") or "").strip()
+    if not dest:
+        raise ToolError("node_path 不能为空")
+    try:
+        res = await call.hub.nodes.push_file(
+            call.session_id, server_path=src, dest_path=dest,
+            node_ref=str(a.get("node") or "") or None,
+        )
+    except NodeError as exc:
+        raise ToolError(str(exc)) from None
+    return f"已推送到 {res['node']}:{res['destPath']}（{res['size']} 字节，sha256={res['sha256'][:12]}）"
+
+
+async def node_pull(call: Call, a: dict[str, Any]) -> str:
+    src = str(a.get("node_path") or "").strip()
+    if not src:
+        raise ToolError("node_path 不能为空")
+    raw_dest = str(a.get("server_path") or "").strip()
+    if not raw_dest:
+        base_name = os.path.basename(src.replace("\\", "/")) or f"file-{uuidlib.uuid4().hex[:6]}"
+        dest = call.hub.cfg.state_dir / "node_pulls" / call.session_id[:12] / base_name
+    else:
+        dest = _resolve_server_path(call, raw_dest, for_write=True)
+    try:
+        res = await call.hub.nodes.pull_file(
+            call.session_id, node_path=src, server_dest=dest,
+            node_ref=str(a.get("node") or "") or None,
+        )
+    except NodeError as exc:
+        raise ToolError(str(exc)) from None
+    return f"已从 {res['node']} 拉取到服务器：{res['serverPath']}（{res['size']} 字节，sha256={str(res['sha256'])[:12]}）"
+
+
 _SESSION_ID = {"type": "string", "description": "会话 ID（可以只写前 8 位）"}
 
 TOOLS: list[Tool] = [
@@ -770,6 +872,29 @@ TOOLS: list[Tool] = [
     Tool("note_delete", "删除一条不再需要给用户展示的便签。",
          {"id": {"type": "string", "description": "note_write 或 note_list 返回的便签 ID"}},
          note_delete, required=("id",)),
+    Tool("node_info",
+         "查看当前会话绑定了哪些在线的本地电脑节点（OS、允许目录白名单、权限模式、备注）。"
+         "本地电脑与服务器环境不同且用户可随时断开；未绑定时无法操控用户电脑。",
+         {}, node_info, read_only=True),
+    Tool("node_exec",
+         "在当前会话绑定的本地电脑节点上执行命令（工作目录必须在节点允许的白名单目录内；受权限模式与风险检查约束，高风险或 ask 模式下会等用户审批）。",
+         {"command": {"type": "string", "description": "要在本地电脑执行的命令"},
+          "cwd": {"type": "string", "description": "本地电脑上的工作目录（不填默认使用节点第一个允许目录）"},
+          "timeout": {"type": "integer", "description": "超时秒数（默认 120，最大 600）"},
+          "node": {"type": "string", "description": "当绑定了多个节点时，指定节点名或 ID 前缀"}},
+         node_exec, required=("command",)),
+    Tool("node_push",
+         "把 Riesz Manager 服务器上的文件推送到当前会话绑定的本地电脑节点（支持大文件流式传输与 SHA-256 校验，目标路径须在节点允许目录内）。",
+         {"server_path": {"type": "string", "description": "服务器上的源文件路径（相对路径按当前会话工作目录算）"},
+          "node_path": {"type": "string", "description": "本地电脑上的目标路径（绝对路径，或相对于节点首个允许目录的相对路径）"},
+          "node": {"type": "string", "description": "当绑定了多个节点时，指定节点名或 ID 前缀"}},
+         node_push, required=("server_path", "node_path")),
+    Tool("node_pull",
+         "从当前会话绑定的本地电脑节点拉取文件（如截图、日志、构建产物）到服务器，返回服务器保存路径（随后可读取或用 send_file 发给用户）。",
+         {"node_path": {"type": "string", "description": "本地电脑上的源文件路径（须在节点允许目录内）"},
+          "server_path": {"type": "string", "description": "保存到服务器的路径（可选，不填则保存到临时拉取目录并返回完整路径）"},
+          "node": {"type": "string", "description": "当绑定了多个节点时，指定节点名或 ID 前缀"}},
+         node_pull, required=("node_path",)),
     Tool("schedule_add",
          "定时唤醒：到点时 Riesz Manager 给会话（默认是你自己所在的会话）发一条消息，会话没在运行就先启动它。"
          "定时保存在 Riesz Manager 里，重启、空闲关闭后都有效。at（每天几点）和 every（每隔多久）二选一。",
