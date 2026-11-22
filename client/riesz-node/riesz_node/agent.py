@@ -284,7 +284,10 @@ class NodeAgent:
             self._emit()
             self._log(f"[连接] {self.status_detail}")
             try:
-                async with websockets.connect(url, ping_interval=25, ping_timeout=20, max_size=16 * 1024 * 1024) as ws:
+                async with websockets.connect(
+                    url, ping_interval=25, ping_timeout=20, max_size=16 * 1024 * 1024,
+                    user_agent_header="riesz-node/0.1",
+                ) as ws:
                     self._ws = ws
                     raw = await asyncio.wait_for(ws.recv(), timeout=15)
                     chal = json.loads(raw)

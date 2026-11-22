@@ -9,7 +9,7 @@ Supports Windows (PowerShell / cmd), WSL, macOS, and Linux.
 Run on any machine with Python 3.10+ using the command copied from the Riesz Manager web UI ("本地电脑" dialog, gated by your private download token — requests without a valid token return `404`):
 
 ```bash
-python -c "import urllib.request; exec(urllib.request.urlopen('https://your-riesz-host/api/nodes/bootstrap.py?token=<YOUR_TOKEN>').read())"
+python -c "import urllib.request as u; exec(u.urlopen(u.Request('https://your-riesz-host/api/nodes/bootstrap.py?token=<YOUR_TOKEN>', headers={'User-Agent': 'riesz-node/1'})).read())"
 ```
 
 Or with `uv`:

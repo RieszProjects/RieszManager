@@ -971,7 +971,9 @@ def _venv_bin(venv_dir, name):
     return venv_dir / "bin" / name
 
 def _download(url, dest):
-    headers = {{"X-Riesz-Download-Token": DOWNLOAD_TOKEN}} if DOWNLOAD_TOKEN else {{}}
+    headers = {{"User-Agent": "riesz-node/1"}}
+    if DOWNLOAD_TOKEN:
+        headers["X-Riesz-Download-Token"] = DOWNLOAD_TOKEN
     req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=60) as resp:
         dest.write_bytes(resp.read())

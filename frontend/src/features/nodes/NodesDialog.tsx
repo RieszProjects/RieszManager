@@ -126,7 +126,7 @@ export function NodesDialog() {
   const bootstrapUrl = downloadToken
     ? `${origin}/api/nodes/bootstrap.py?token=${encodeURIComponent(downloadToken)}`
     : `${origin}/api/nodes/bootstrap.py?token=<loading>`;
-  const oneLiner = `python -c "import urllib.request; exec(urllib.request.urlopen('${bootstrapUrl}').read())"`;
+  const oneLiner = `python -c "import urllib.request as u; exec(u.urlopen(u.Request('${bootstrapUrl}', headers={'User-Agent': 'riesz-node/1'})).read())"`;
 
   const onCreatePair = async () => {
     setBusy(true);
