@@ -38,7 +38,7 @@ _DANGEROUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(iex|invoke-expression)\b", re.I), "涉及动态执行代码 Invoke-Expression"),
     (re.compile(r"(^|[;&|(\s])eval\b", re.I), "涉及动态求值 eval"),
     (re.compile(r"\bchmod\s+(-R\s+)?[0-7]*777\b", re.I), "涉及危险权限设置 chmod 777"),
-    (re.compile(r"\b(rm|rmdir|del|erase|remove-item)\b.*(\s/\s*$|/\*|\b[A-Za-z]:\\(\s|$|\*)|\s~\s*$|\s\$HOME\b)", re.I), "涉及高危根目录或家目录删除"),
+    (re.compile(r"\b(rm|rmdir|del|erase|remove-item)\b.*(\s/\s*$|\s/\*|\b[A-Za-z]:\\(\s|$|\*)|\s~\s*$|\s~/\*|\s\$HOME\b)", re.I), "涉及高危根目录或家目录删除"),
 ]
 
 _SENSITIVE_PATH_RE = re.compile(
@@ -49,9 +49,10 @@ _SENSITIVE_PATH_RE = re.compile(
 )
 
 # Simple read-only commands allowed with zero latency in `readonly` / `auto` mode.
+# Deliberately excludes `env`/`printenv` to prevent leaking local environment secrets.
 _READONLY_CMDS = {
     "ls", "dir", "pwd", "cd", "echo", "printf", "cat", "head", "tail", "wc", "stat", "file",
-    "which", "where", "whoami", "hostname", "uname", "date", "uptime", "env", "printenv",
+    "which", "where", "whoami", "hostname", "uname", "date", "uptime",
     "rg", "grep", "egrep", "fgrep", "ag", "fd", "tree", "du", "df", "ps", "lsblk",
     "get-childitem", "get-content", "get-location", "select-string", "test-path",
 }
@@ -77,8 +78,50 @@ def check_hard_guard(command: str) -> GuardDecision | None:
     return None
 
 
-def is_readonly_command(command: str) -> bool:
-    """Layer 2: conservatively recognise clearly read-only inspection commands."""
+def _token_within_allowed(tok: str, cwd: str, allowed_dirs: list[str]) -> bool:
+    if not allowed_dirs:
+        return True
+    if tok.startswith(("~", "\\\\", "//")):
+        return False
+    # Reject explicit `..` escapes or absolute paths outside allowed_dirs.
+    norm_tok = tok.replace("\\", "/")
+    is_abs = norm_tok.startswith("/") or bool(re.match(r"^[A-Za-z]:/", norm_tok))
+    if not is_abs and ".." not in norm_tok.split("/"):
+        return True
+    base = (cwd or allowed_dirs[0]).replace("\\", "/").rstrip("/")
+    joined = norm_tok if is_abs else f"{base}/{norm_tok}"
+    parts: list[str] = []
+    prefix = ""
+    if re.match(r"^[A-Za-z]:/", joined):
+        prefix = joined[:2].lower()
+        rest = joined[2:]
+    elif joined.startswith("/"):
+        prefix = "/"
+        rest = joined[1:]
+    else:
+        rest = joined
+    for seg in rest.split("/"):
+        if not seg or seg == ".":
+            continue
+        if seg == "..":
+            if parts:
+                parts.pop()
+            else:
+                return False
+        else:
+            parts.append(seg)
+    full = (prefix + "/" + "/".join(parts)) if prefix and prefix != "/" else (prefix + "/".join(parts))
+    full_cmp = full.lower() if re.match(r"^[a-z]:/", full) else full
+    for root in allowed_dirs:
+        r = root.replace("\\", "/").rstrip("/")
+        r_cmp = r.lower() if re.match(r"^[a-z]:/", full_cmp) else r
+        if full_cmp == r_cmp or full_cmp.startswith(r_cmp + "/"):
+            return True
+    return False
+
+
+def is_readonly_command(command: str, allowed_dirs: list[str] | None = None, cwd: str = "") -> bool:
+    """Layer 2: conservatively recognise clearly read-only inspection commands inside allowed_dirs."""
     text = command.strip()
     if not text or "\n" in text:
         return False
@@ -103,20 +146,25 @@ def is_readonly_command(command: str) -> bool:
         if cmd.endswith(".exe"):
             cmd = cmd[:-4]
         if cmd in _READONLY_CMDS:
-            continue
-        if cmd == "git" and len(tokens) >= 2 and tokens[1].lower() in _READONLY_GIT_SUBS:
+            pass
+        elif cmd == "git" and len(tokens) >= 2 and tokens[1].lower() in _READONLY_GIT_SUBS:
             if any(t in ("-D", "-d", "--delete", "--force", "-f") for t in tokens[2:]):
                 return False
-            continue
-        if cmd == "find":
+        elif cmd == "find":
             if any(t in ("-delete", "-exec", "-execdir", "-ok", "-okdir") for t in tokens[1:]):
                 return False
-            continue
-        if cmd in ("python", "python3", "node", "npm", "dotnet", "cargo", "go", "rustc", "gcc", "clang", "cmake", "godot"):
-            if len(tokens) == 2 and tokens[1] in ("--version", "-v", "-V", "version"):
-                continue
+        elif cmd in ("python", "python3", "node", "npm", "dotnet", "cargo", "go", "rustc", "gcc", "clang", "cmake", "godot"):
+            if not (len(tokens) == 2 and tokens[1] in ("--version", "-v", "-V", "version")):
+                return False
+        else:
             return False
-        return False
+        if allowed_dirs:
+            for tok in tokens[1:]:
+                if tok.startswith("-"):
+                    continue
+                if "/" in tok or "\\" in tok or tok.startswith(("~", ".")) or re.match(r"^[A-Za-z]:", tok):
+                    if not _token_within_allowed(tok, cwd, allowed_dirs):
+                        return False
     return True
 
 
@@ -320,9 +368,9 @@ async def evaluate_action(
     # action == "exec"
     hard = check_hard_guard(command)
     if mode == "readonly":
-        if hard is None and is_readonly_command(command):
+        if hard is None and is_readonly_command(command, allowed_dirs, cwd):
             return GuardDecision("allow", "low", "只读白名单命令", "readonly")
-        return GuardDecision("deny", "medium", "只读模式仅允许白名单查询命令", "readonly")
+        return GuardDecision("deny", "medium", "只读模式仅允许白名单目录内的查询命令", "readonly")
 
     if mode == "full":
         if hard is not None:
@@ -336,7 +384,7 @@ async def evaluate_action(
     # mode == "auto"
     if hard is not None:
         return hard
-    if is_readonly_command(command):
+    if is_readonly_command(command, allowed_dirs, cwd):
         return GuardDecision("allow", "low", "只读命令自动放行", "readonly")
     return await classify_with_llm(
         credentials, action="exec", command=command, cwd=cwd,

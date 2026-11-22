@@ -1,19 +1,47 @@
-"""Cross-platform async command execution and streaming file transfer."""
+"""Cross-platform async command execution and strict streaming file transfer."""
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import os
+import re
 import shutil
 import signal
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
+
+MAX_TRANSFER_BYTES = 200 * 1024 * 1024
+TRANSFER_PATH_RE = re.compile(r"^/api/nodes/transfer/[A-Za-z0-9_-]{16,128}$")
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never follow HTTP redirects on file transfers (prevents compromised server from redirecting uploads to third parties)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+        raise urllib.error.HTTPError(req.full_url, code, f"重定向被本地安全策略禁止（-> {newurl}）", headers, fp)
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect())
+
+
+def safe_transfer_url(server_base: str, url_path: str) -> str:
+    """Strictly validate that `url_path` is a safe same-origin transfer path (blocks SSRF / `@evil.com` tricks)."""
+    if not TRANSFER_PATH_RE.fullmatch(url_path or ""):
+        raise ValueError(f"非法传输路径：{url_path!r}")
+    base = server_base.rstrip("/")
+    full = base + url_path
+    p_base = urllib.parse.urlsplit(base)
+    p_full = urllib.parse.urlsplit(full)
+    if p_full.scheme != p_base.scheme or p_full.netloc != p_base.netloc:
+        raise ValueError("传输地址源站不匹配，已拒绝")
+    return full
 
 
 class RunningProcess:
@@ -51,12 +79,20 @@ def _shell_argv(command: str) -> list[str]:
     if sys.platform == "win32":
         pwsh = shutil.which("pwsh") or shutil.which("powershell")
         if pwsh:
-            return [pwsh, "-NoProfile", "-NonInteractive", "-Command", command]
+            # Force UTF-8 output encoding on Windows PowerShell so Chinese logs don't garble.
+            wrapped = f"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $OutputEncoding=[System.Text.Encoding]::UTF8; {command}"
+            return [pwsh, "-NoProfile", "-NonInteractive", "-Command", wrapped]
         return ["cmd.exe", "/c", command]
     bash = shutil.which("bash")
     if bash:
         return [bash, "-lc", command]
     return ["/bin/sh", "-c", command]
+
+
+def _sanitized_env() -> dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith("RIESZ_")}
+    env.setdefault("PYTHONUTF8", "1")
+    return env
 
 
 async def run_command(
@@ -71,6 +107,7 @@ async def run_command(
     argv = _shell_argv(command)
     kwargs: dict[str, Any] = {
         "cwd": str(cwd),
+        "env": _sanitized_env(),
         "stdin": asyncio.subprocess.DEVNULL,
         "stdout": asyncio.subprocess.PIPE,
         "stderr": asyncio.subprocess.STDOUT,
@@ -108,25 +145,27 @@ async def run_command(
     return proc.returncode, runner.killed, err
 
 
-def download_file_sync(url: str, dest: Path, expected_sha256: str | None = None) -> tuple[int, str]:
-    """Stream-download a file from Riesz Manager into `dest`, verifying SHA-256."""
+def download_file_sync(url: str, dest: Path, expected_sha256: str | None = None, max_bytes: int = MAX_TRANSFER_BYTES) -> tuple[int, str]:
+    """Stream-download a file from Riesz Manager into `dest`, enforcing max size, no redirects, and SHA-256."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(f".{dest.name}.rz.tmp")
     h = hashlib.sha256()
     total = 0
     req = urllib.request.Request(url, method="GET", headers={"User-Agent": "riesz-node/0.1"})
     try:
-        with urllib.request.urlopen(req, timeout=300) as resp, tmp.open("wb") as fh:
+        with _OPENER.open(req, timeout=300) as resp, tmp.open("wb") as fh:
             while True:
                 chunk = resp.read(256 * 1024)
                 if not chunk:
                     break
                 total += len(chunk)
+                if total > max_bytes:
+                    raise RuntimeError(f"下载文件超过安全上限（>{max_bytes // (1024 * 1024)}MB），已中止")
                 h.update(chunk)
                 fh.write(chunk)
         digest = h.hexdigest()
         if expected_sha256 and digest.lower() != expected_sha256.lower():
-            raise RuntimeError("SHA-256 校验失败，文件可能已损坏")
+            raise RuntimeError("SHA-256 校验失败，文件可能已损坏或被篡改")
         os.replace(tmp, dest)
         return total, digest
     except Exception:
@@ -137,10 +176,13 @@ def download_file_sync(url: str, dest: Path, expected_sha256: str | None = None)
         raise
 
 
-def upload_file_sync(url: str, src: Path) -> tuple[int, str]:
-    """Stream-upload a local file to Riesz Manager with SHA-256 verification."""
+def upload_file_sync(url: str, src: Path, max_bytes: int = MAX_TRANSFER_BYTES) -> tuple[int, str]:
+    """Stream-upload a local file to Riesz Manager with max size check, no redirects, and SHA-256."""
     if not src.is_file():
         raise RuntimeError(f"本地文件不存在：{src}")
+    size = src.stat().st_size
+    if size > max_bytes:
+        raise RuntimeError(f"本地文件超过上传上限（>{max_bytes // (1024 * 1024)}MB）")
     h = hashlib.sha256()
     total = 0
     with src.open("rb") as fh:
@@ -165,7 +207,7 @@ def upload_file_sync(url: str, src: Path) -> tuple[int, str]:
             "User-Agent": "riesz-node/0.1",
         },
     )
-    with urllib.request.urlopen(req, timeout=300) as resp:
+    with _OPENER.open(req, timeout=300) as resp:
         if resp.status >= 400:
             raise RuntimeError(f"上传失败：HTTP {resp.status}")
     return total, digest

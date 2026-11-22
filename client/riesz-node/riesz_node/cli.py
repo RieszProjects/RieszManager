@@ -100,6 +100,7 @@ def main(argv: list[str] | None = None) -> None:
             max_mode=args.mode,
             note=args.note,
             auto_accept_bind=bool(args.auto_accept_bind),
+            interactive=not bool(args.plain),
             on_log=(lambda line: print(line, flush=True)) if args.plain else None,
         )
         if args.plain:

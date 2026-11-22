@@ -193,6 +193,7 @@ class NodeManager:
         self._live: dict[str, LiveNode] = {}
         self._approvals: dict[str, PendingApproval] = {}
         self._transfers: dict[str, TransferTicket] = {}
+        self._register_failures: list[float] = []
         self._load()
 
     # ---- persistence --------------------------------------------------------
@@ -254,10 +255,15 @@ class NodeManager:
     def register_device(self, *, code: str, public_key: str, name: str = "", os_name: str = "",
                         platform: str = "", hostname: str = "") -> dict[str, Any]:
         """Consume a one-time pairing code and register the client's Ed25519 public key."""
+        now = time.time()
+        self._register_failures = [t for t in self._register_failures if now - t < 60.0]
+        if len(self._register_failures) >= 20:
+            raise NodeError("配对失败次数过多，请 1 分钟后再试")
         self._prune_pairings()
         norm_code = code.strip().upper()
         pair = self._pairings.get(norm_code)
         if pair is None:
+            self._register_failures.append(now)
             for p in self._pairings.values():
                 p.failures += 1
             self._prune_pairings()
@@ -618,7 +624,7 @@ class NodeManager:
     async def _request_approval(
         self, live: LiveNode, binding: SessionBinding, *,
         action: str, command: str, cwd: str, decision: GuardDecision,
-    ) -> bool:
+    ) -> tuple[bool, str]:
         aid = f"na-{uuidlib.uuid4().hex[:12]}"
         fut: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
         ap = PendingApproval(
@@ -632,13 +638,14 @@ class NodeManager:
         await live.send({"type": "approval_request", **ap.summary()})
         await self.broadcast()
         try:
-            return await asyncio.wait_for(fut, timeout=APPROVAL_TIMEOUT)
+            ok = await asyncio.wait_for(fut, timeout=APPROVAL_TIMEOUT)
+            return ok, aid
         except asyncio.TimeoutError:
             self._approvals.pop(aid, None)
             with contextlib.suppress(Exception):
                 await live.send({"type": "approval_resolved", "approvalId": aid, "allow": False, "decidedBy": "timeout"})
             await self.broadcast()
-            return False
+            return False, aid
 
     async def resolve_approval(self, approval_id: str, *, allow: bool, decided_by: str = "web") -> bool:
         ap = self._approvals.pop(approval_id, None)
@@ -671,8 +678,9 @@ class NodeManager:
         )
         if decision.decision == "deny":
             raise NodeError(f"已拒绝在本地节点 {live.name} 执行：{decision.reason}")
+        approval_id: str | None = None
         if decision.decision == "ask":
-            ok = await self._request_approval(live, binding, action="exec", command=cmd_text, cwd=eff_cwd, decision=decision)
+            ok, approval_id = await self._request_approval(live, binding, action="exec", command=cmd_text, cwd=eff_cwd, decision=decision)
             if not ok:
                 raise NodeError(f"用户拒绝了在本地节点 {live.name} 执行该命令（{decision.reason}）")
 
@@ -695,6 +703,7 @@ class NodeManager:
             "timeout": timeout,
             "risk": decision.risk,
             "riskReason": decision.reason,
+            **({"approvalId": approval_id} if approval_id else {}),
         })
         await self.broadcast()
         try:
@@ -743,9 +752,9 @@ class NodeManager:
         if decision.decision == "deny":
             raise NodeError(f"已拒绝推送文件到 {live.name}：{decision.reason}")
         if decision.decision == "ask":
-            ok = await self._request_approval(live, binding, action="push",
-                                              command=f"推送 {server_path.name} ({size}B) -> {dest_path}",
-                                              cwd=dest_path, decision=decision)
+            ok, _ = await self._request_approval(live, binding, action="push",
+                                                 command=f"推送 {server_path.name} ({size}B) -> {dest_path}",
+                                                 cwd=dest_path, decision=decision)
             if not ok:
                 raise NodeError(f"用户拒绝了向 {live.name} 推送文件")
 
@@ -792,9 +801,9 @@ class NodeManager:
         if decision.decision == "deny":
             raise NodeError(f"已拒绝从 {live.name} 拉取文件：{decision.reason}")
         if decision.decision == "ask":
-            ok = await self._request_approval(live, binding, action="pull",
-                                              command=f"拉取 {node_path} -> {server_dest}",
-                                              cwd=node_path, decision=decision)
+            ok, _ = await self._request_approval(live, binding, action="pull",
+                                                 command=f"拉取 {node_path} -> {server_dest}",
+                                                 cwd=node_path, decision=decision)
             if not ok:
                 raise NodeError(f"用户拒绝了从 {live.name} 拉取文件")
 

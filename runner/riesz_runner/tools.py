@@ -813,7 +813,9 @@ async def node_pull(call: Call, a: dict[str, Any]) -> str:
         raise ToolError("node_path 不能为空")
     raw_dest = str(a.get("server_path") or "").strip()
     if not raw_dest:
-        base_name = os.path.basename(src.replace("\\", "/")) or f"file-{uuidlib.uuid4().hex[:6]}"
+        base_name = os.path.basename(src.replace("\\", "/").rstrip("/"))
+        if base_name in ("", ".", "..") or any(ord(c) < 32 for c in base_name):
+            base_name = f"file-{uuidlib.uuid4().hex[:6]}"
         dest = call.hub.cfg.state_dir / "node_pulls" / call.session_id[:12] / base_name
     else:
         dest = _resolve_server_path(call, raw_dest, for_write=True)
