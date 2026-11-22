@@ -109,6 +109,40 @@ class NodeDownloadGateTest(unittest.IsolatedAsyncioTestCase):
             r_new = await views.node_bootstrap_py(self.rf.get(f"/api/nodes/bootstrap.py?token={tok2}"))
             self.assertEqual(r_new.status_code, 200)
 
+    async def test_ws_node_allows_missing_origin_while_browser_ws_still_rejects(self):
+        from riesz import asgi
+
+        sent_browser: list[dict] = []
+        events = iter([{"type": "websocket.connect"}, {"type": "websocket.disconnect", "code": 1000}])
+
+        async def _recv():
+            return next(events, {"type": "websocket.disconnect", "code": 1000})
+
+        async def _send_browser(msg):
+            sent_browser.append(msg)
+
+        # Browser WS without Origin header must still be rejected by AllowedHostsOriginValidator
+        await asgi._websocket_router(
+            {"type": "websocket", "path": "/ws/events", "headers": [(b"host", b"localhost")]},
+            _recv,
+            _send_browser,
+        )
+        self.assertTrue(any(m.get("type") == "websocket.close" for m in sent_browser))
+
+        # Node WS without Origin header must bypass AllowedHostsOriginValidator and reach NodeConsumer
+        node_called = {"ok": False}
+
+        async def _fake_node_ws(scope, receive, send):
+            node_called["ok"] = True
+
+        with mock.patch.object(asgi, "_node_ws", _fake_node_ws):
+            await asgi._websocket_router(
+                {"type": "websocket", "path": "/ws/node", "headers": [(b"host", b"localhost")]},
+                _recv,
+                _send_browser,
+            )
+        self.assertTrue(node_called["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()

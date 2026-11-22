@@ -7,5 +7,8 @@ websocket_urlpatterns = [
     path("ws/events", EventsConsumer.as_asgi()),
     path("ws/transcribe", TranscribeConsumer.as_asgi()),
     path("ws/browser", BrowserConsumer.as_asgi()),
+]
+
+node_websocket_urlpatterns = [
     path("ws/node", NodeConsumer.as_asgi()),
 ]
