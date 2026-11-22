@@ -18,6 +18,7 @@ from typing import Any
 from aiohttp import WSMsgType, web
 
 from . import files as files_mod
+from . import shares as shares_mod
 from .claude_settings import user_defaults
 from .config import Config
 from .context_limits import ContextLimits, limits_from_usage
@@ -635,7 +636,24 @@ async def session_shared(request: web.Request) -> web.Response:
     """Files the session's agent sent to the user (send_file), and those of the sessions it continues."""
     hub = request.app[HUB]
     sid = _session_id(request)
-    return _json({"files": [f for s in _handoff_chain(hub, sid) for f in hub.shares.list(s)]})
+    ws_root = Path(os.path.realpath(hub.cfg.workspace_root))
+    out: list[dict[str, Any]] = []
+    for s in _handoff_chain(hub, sid):
+        for item in hub.shares.list(s):
+            orig = item.get("path")
+            if orig:
+                real = Path(os.path.realpath(orig))
+                if real.is_file():
+                    try:
+                        rel = real.relative_to(ws_root)
+                        if len(rel.parts) > 1:
+                            item = {**item, "workspaceProject": rel.parts[0], "workspacePath": "/".join(rel.parts[1:])}
+                        elif rel.parts:
+                            item = {**item, "workspaceProject": ROOT_ID, "workspacePath": rel.parts[0]}
+                    except ValueError:
+                        pass
+            out.append(item)
+    return _json({"files": out})
 
 
 async def open_file(request: web.Request) -> web.Response:
@@ -940,15 +958,98 @@ async def files_search(request: web.Request) -> web.Response:
     return _json({"results": results})
 
 
-async def files_raw(request: web.Request) -> web.StreamResponse:
-    root = _project_root(request)
-    path = files_mod.raw_path(root, request.query.get("path", ""))
-    headers = {"Cache-Control": "private, no-cache"}
-    audio = files_mod.audio_type(path)
-    if audio:
-        headers["Content-Type"] = audio
-    # FileResponse answers Range requests (206), which audio seeking and Safari's player rely on.
+def _hdr_path(path: Path | str) -> str:
+    return urllib.parse.quote(str(path), safe="/")
+
+
+def _from_prefixes(from_dir: str) -> list[str]:
+    parts = [p for p in from_dir.strip("/").split("/") if p and p not in (".", "..")]
+    return ["/".join(parts[:i]) for i in range(1, len(parts) + 1)]
+
+
+def _view_asset_roots(hub: Hub) -> list[Path]:
+    roots = [hub.cfg.workspace_root, Path("/tmp"), hub.cfg.state_dir / "shared", hub.cfg.state_dir / "uploads"]
+    for spec in HARNESSES.values():
+        for template in spec.driver.artifact_dirs:
+            base = template.split("{", 1)[0].rstrip("/")
+            if base:
+                roots.append(Path(os.path.expanduser(base)))
+    return roots
+
+
+def _file_response(path: Path, headers: dict[str, str]) -> web.FileResponse:
+    mime = files_mod.mime_type(path)
+    if mime:
+        headers["Content-Type"] = mime
+    # FileResponse answers Range requests (206), which audio/video seeking and Safari's player rely on.
     return web.FileResponse(path, headers=headers)
+
+
+async def files_raw(request: web.Request) -> web.StreamResponse:
+    hub = request.app[HUB]
+    pid = request.query.get("project", "")
+    rel = request.query.get("path", "")
+    from_dir = request.query.get("from", "")
+    ws_root = Path(os.path.realpath(hub.cfg.workspace_root))
+    headers = {"Cache-Control": "private, no-cache", "X-Riesz-Workspace-Root": _hdr_path(ws_root)}
+    shared_root = hub.shares.project_root(pid)
+    if shared_root is not None:
+        sid = pid[len(shares_mod.PROJECT_PREFIX):]
+        try:
+            path, orig_path, key = hub.shares.resolve_raw(sid, rel)
+        except files_mod.FileAccessError:
+            if not from_dir or "/" not in rel.lstrip("/"):
+                raise
+            key_part, _, rest = rel.lstrip("/").partition("/")
+            path = orig_path = None
+            key = key_part
+            for prefix in _from_prefixes(from_dir):
+                try:
+                    path, orig_path, key = hub.shares.resolve_raw(sid, f"{key_part}/{prefix}/{rest}")
+                    break
+                except files_mod.FileAccessError:
+                    continue
+            if path is None:
+                raise
+        proj_root = orig_path.parent if orig_path is not None else shared_root
+        headers["X-Riesz-Project-Root"] = _hdr_path(proj_root)
+        headers["X-Riesz-File-Path"] = _hdr_path(orig_path or path)
+        if key:
+            headers["X-Riesz-View-Prefix"] = _hdr_path(key)
+        return _file_response(path, headers)
+    root = _project_root(request)
+    try:
+        path = files_mod.raw_path(root, rel)
+    except files_mod.FileAccessError:
+        if not from_dir:
+            raise
+        path = None
+        for prefix in _from_prefixes(from_dir):
+            try:
+                path = files_mod.raw_path(root, f"{prefix}/{rel.lstrip('/')}")
+                break
+            except files_mod.FileAccessError:
+                continue
+        if path is None:
+            raise
+    headers["X-Riesz-Project-Root"] = _hdr_path(os.path.realpath(root))
+    headers["X-Riesz-File-Path"] = _hdr_path(path)
+    return _file_response(path, headers)
+
+
+async def files_view_asset(request: web.Request) -> web.StreamResponse:
+    """Serve an explicit local asset referenced by an HTML preview (called only by backend viewer.py)."""
+    hub = request.app[HUB]
+    raw = request.query.get("path", "")
+    path = files_mod.safe_view_asset(raw, _view_asset_roots(hub), allow_external=hub.cfg.allow_external_files)
+    ws_root = Path(os.path.realpath(hub.cfg.workspace_root))
+    headers = {
+        "Cache-Control": "private, no-cache",
+        "X-Riesz-Workspace-Root": _hdr_path(ws_root),
+        "X-Riesz-Project-Root": _hdr_path(path.parent),
+        "X-Riesz-File-Path": _hdr_path(path),
+    }
+    return _file_response(path, headers)
 
 
 async def upload(request: web.Request) -> web.Response:
@@ -1422,6 +1523,7 @@ def build_app(cfg: Config) -> web.Application:
     r.add_get("/v1/files/list", files_list)
     r.add_get("/v1/files/content", files_content)
     r.add_get("/v1/files/raw", files_raw)
+    r.add_get("/v1/files/view-asset", files_view_asset)
     r.add_get("/v1/files/search", files_search)
     r.add_post("/v1/uploads", upload)
     r.add_get("/v1/uploads/{uid}", upload_raw)

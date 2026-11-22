@@ -32,13 +32,16 @@ export function FileViewer() {
     setPreview(true);
     setPageUrl(null);
     const ctrl = new AbortController();
+    let active = true;
     if (/\.html?$/i.test(target.path)) {
-      viewUrl(target.project, target.path).then(setPageUrl).catch((err) => toast((err as Error).message, "error"));
+      viewUrl(target.project, target.path)
+        .then((u) => { if (active) setPageUrl(u); })
+        .catch((err) => { if (active) toast((err as Error).message, "error"); });
     }
     api<{ file: FileInfo }>("files/content", { query: { project: target.project, path: target.path }, signal: ctrl.signal })
       .then((res) => setInfo(res.file))
       .catch((err) => (err as Error).name !== "AbortError" && setError((err as Error).message));
-    return () => ctrl.abort();
+    return () => { active = false; ctrl.abort(); };
   }, [target]);
 
   const close = () => openFile(null);

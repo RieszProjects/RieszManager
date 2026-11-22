@@ -92,9 +92,60 @@ AUDIO_TYPES = {
     ".m4a": "audio/mp4", ".aac": "audio/aac", ".flac": "audio/flac", ".weba": "audio/webm",
 }
 
+# Web asset types that Python's mimetypes table can miss or misclassify on minimal Linux installs.
+EXTRA_MIME_TYPES = {
+    ".cjs": "text/javascript", ".mjs": "text/javascript", ".js": "text/javascript",
+    ".webp": "image/webp", ".avif": "image/avif", ".svg": "image/svg+xml",
+    ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".otf": "font/otf",
+    ".wasm": "application/wasm", ".glb": "model/gltf-binary", ".gltf": "model/gltf+json",
+    ".vtt": "text/vtt", ".mp4": "video/mp4", ".webm": "video/webm",
+}
+
+_SENSITIVE_DIRS = {".git", ".ssh", ".gnupg", ".aws", ".claude", ".codex", ".config", ".kube", ".docker"}
+_SENSITIVE_PREFIXES = ("/etc", "/proc", "/sys", "/root", "/dev", "/var/run")
+_SENSITIVE_EXTS = {".pem", ".key", ".p12", ".pfx", ".jks", ".kdbx"}
+_SENSITIVE_NAMES = {".env", ".netrc", ".npmrc", ".pypirc", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"}
+
 
 def audio_type(path: Path) -> str | None:
     return AUDIO_TYPES.get(path.suffix.lower())
+
+
+def mime_type(path: Path) -> str | None:
+    ext = path.suffix.lower()
+    return AUDIO_TYPES.get(ext) or EXTRA_MIME_TYPES.get(ext) or mimetypes.guess_type(path.name)[0]
+
+
+def is_sensitive_path(path: Path) -> bool:
+    """True when `path` looks like credentials, keys, git internals, or system files."""
+    s = str(path)
+    for prefix in _SENSITIVE_PREFIXES:
+        if s == prefix or s.startswith(prefix + "/"):
+            return True
+    if any(part in _SENSITIVE_DIRS for part in path.parts):
+        return True
+    name = path.name
+    if name in _SENSITIVE_NAMES or name.startswith(".env.") or name.startswith(("id_rsa", "id_ed25519")):
+        return True
+    return path.suffix.lower() in _SENSITIVE_EXTS
+
+
+def safe_view_asset(raw: str, allowed_roots: list[Path], allow_external: bool = False) -> Path:
+    """Resolve an explicit absolute local asset referenced by an HTML preview."""
+    if not raw or not raw.startswith("/"):
+        raise FileAccessError("an absolute path is needed")
+    target = Path(os.path.realpath(raw))
+    if not target.is_file():
+        raise FileAccessError("not a file")
+    if is_sensitive_path(target):
+        raise FileAccessError("access to sensitive file is refused")
+    if allow_external:
+        return target
+    for root in allowed_roots:
+        root_real = Path(os.path.realpath(root))
+        if target == root_real or root_real in target.parents:
+            return target
+    raise FileAccessError("path is outside allowed asset directories")
 
 
 def describe_file(root: Path, rel: str, max_bytes: int) -> dict[str, Any]:

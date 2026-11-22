@@ -19,6 +19,8 @@ export interface SentFile {
   mime: string | null;
   caption: string | null;
   project: string;
+  workspaceProject?: string;
+  workspacePath?: string;
 }
 
 /** A send_file call under any harness's naming (mcp__riesz__send_file, "Run mcp_riesz_send_file", "send_file(...)"). */
@@ -98,7 +100,12 @@ export function SentFiles({ tool }: { tool: ToolBlock }) {
           </button>
         ) : (
           <div key={f.ref} className="rz-sent-file">
-            <button type="button" className="rz-sent-open" onClick={() => openFile({ project: f.project, path: f.ref })}>
+            <button type="button" className="rz-sent-open" onClick={() => {
+              const isHtml = /\.html?$/i.test(f.name) || f.mime === "text/html";
+              openFile(isHtml && f.workspaceProject && f.workspacePath
+                ? { project: f.workspaceProject, path: f.workspacePath }
+                : { project: f.project, path: f.ref });
+            }}>
               <FileText size={16} />
               <span className="rz-sent-name">{f.name}</span>
               <span className="rz-sent-size dim">{size(f.size)}</span>

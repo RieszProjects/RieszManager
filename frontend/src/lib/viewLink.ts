@@ -15,4 +15,4 @@ export async function viewUrl(project: string, path: string): Promise<string> {
 }
 
 /** Sandbox flags for preview iframes: scripts run, but in an opaque origin (no allow-same-origin). */
-export const PREVIEW_SANDBOX = "allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox";
+export const PREVIEW_SANDBOX = "allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-downloads";

@@ -18,6 +18,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from . import files as files_mod
+
 MAX_BYTES = 200 * 1024 * 1024
 PROJECT_PREFIX = "@shared/"
 _SID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -78,3 +80,31 @@ class Shares:
 
     def list(self, session_id: str) -> list[dict[str, Any]]:
         return [{**e, "project": PROJECT_PREFIX + session_id} for e in self._index(session_id).values()]
+
+    def resolve_raw(self, session_id: str, rel: str) -> tuple[Path, Path | None, str]:
+        """Resolve a file under `@shared/<sid>`: serves the shared copy, or a sibling asset from the
+        shared file's original directory (so sent HTML files load their relative CSS/JS/images/fonts)."""
+        shared_root = self.root(session_id)
+        if not shared_root.is_dir():
+            raise files_mod.FileAccessError("nothing was sent in this session")
+        clean = rel.lstrip("/")
+        key, has_sub, subpath = clean.partition("/")
+        orig_path: Path | None = None
+        if key:
+            for entry in self._index(session_id).values():
+                if str(entry.get("ref") or "").startswith(f"{key}/") and entry.get("path"):
+                    orig_path = Path(os.path.realpath(entry["path"]))
+                    break
+        try:
+            candidate = files_mod.safe_join(shared_root, clean)
+            if candidate.is_file():
+                return candidate, orig_path, key
+        except files_mod.FileAccessError:
+            pass
+        if orig_path is not None and has_sub and subpath:
+            orig_dir = orig_path.parent
+            if orig_dir.is_dir():
+                target = files_mod.safe_join(orig_dir, subpath)
+                if target.is_file() and not files_mod.is_sensitive_path(target):
+                    return target, target, key
+        raise files_mod.FileAccessError("not a file")
