@@ -60,7 +60,6 @@ export interface NodePairing {
   code: string;
   sessionId: string;
   sessionTitle: string;
-  mode: NodeMode;
   createdAt: number;
   expiresAt: number;
 }
@@ -88,10 +87,9 @@ interface NodesStore extends NodesSnapshot {
   load: () => Promise<void>;
   loadDownloadToken: () => Promise<void>;
   rotateDownloadToken: () => Promise<void>;
-  createPairing: (sessionId: string, mode: NodeMode) => Promise<NodePairing>;
+  createPairing: (sessionId: string) => Promise<NodePairing>;
   kick: (id: string) => Promise<void>;
   rename: (id: string, name: string) => Promise<void>;
-  setMode: (id: string, mode: NodeMode) => Promise<void>;
   resolveApproval: (approvalId: string, allow: boolean) => Promise<void>;
   killCommand: (nodeId: string, cmdId: string) => Promise<void>;
 }
@@ -136,8 +134,8 @@ export const useNodes = create<NodesStore>((set, get) => ({
     toast("已重置下载口令，旧链接立即失效", "success");
   },
 
-  createPairing: async (sessionId, mode) => {
-    const res = await api<NodesSnapshot & { pairing: NodePairing }>("nodes/pair", { body: { sessionId, mode } });
+  createPairing: async (sessionId) => {
+    const res = await api<NodesSnapshot & { pairing: NodePairing }>("nodes/pair", { body: { sessionId } });
     get().apply(res);
     return res.pairing;
   },
@@ -152,12 +150,6 @@ export const useNodes = create<NodesStore>((set, get) => ({
     const res = await api<NodesSnapshot>(`nodes/${id}/rename`, { body: { name } });
     get().apply(res);
     toast("已更新节点名称", "success");
-  },
-
-  setMode: async (id, mode) => {
-    const res = await api<NodesSnapshot>(`nodes/${id}/mode`, { body: { mode } });
-    get().apply(res);
-    toast(`权限模式已切换为「${NODE_MODE_LABEL[mode]}」`, "success");
   },
 
   resolveApproval: async (approvalId, allow) => {

@@ -107,9 +107,9 @@ class NodeEndToEndTest(unittest.IsolatedAsyncioTestCase):
         await self.client.close()
         self.tmp.cleanup()
 
-    async def _pair_and_connect(self, *, session_id: str | None = None, name: str = "win-pc", mode: str = "auto", max_mode: str = "auto"):
+    async def _pair_and_connect(self, *, session_id: str | None = None, name: str = "win-pc", mode: str = "auto"):
         sid = session_id or self.sid
-        r = await self.client.post("/v1/nodes/pair", json={"sessionId": sid, "mode": mode}, headers=self.headers)
+        r = await self.client.post("/v1/nodes/pair", json={"sessionId": sid}, headers=self.headers)
         self.assertEqual(r.status, 200)
         code = (await r.json())["pairing"]["code"]
         seed, pub = ed.generate_keypair()
@@ -134,7 +134,7 @@ class NodeEndToEndTest(unittest.IsolatedAsyncioTestCase):
         await ws.send_json({
             "type": "hello", "nodeId": node_id, "signature": sig,
             "name": name, "os": "Windows 11", "platform": "win32",
-            "dirs": ["D:\\Sandbox"], "maxMode": max_mode, "note": "RTX GPU",
+            "dirs": ["D:\\Sandbox"], "mode": mode, "note": "RTX GPU",
         })
         welcome = await ws.receive_json()
         self.assertEqual(welcome["type"], "welcome")
@@ -185,7 +185,7 @@ class NodeEndToEndTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(hub.nodes.snapshot()["nodes"], [])
 
     async def test_exec_approval_and_transfer(self):
-        node_id, _, _, ws = await self._pair_and_connect(mode="auto", max_mode="auto")
+        node_id, _, _, ws = await self._pair_and_connect(mode="auto")
         hub = self.app[HUB]
 
         async def node_loop():

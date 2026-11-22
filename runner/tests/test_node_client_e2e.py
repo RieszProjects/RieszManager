@@ -280,7 +280,7 @@ class RealClientServerE2ETest(unittest.IsolatedAsyncioTestCase):
 
     async def test_real_agent_exec_kill_push_pull_and_local_confirm(self):
         hub = self.app[HUB]
-        pair = hub.nodes.create_pairing(session_id=self.sid, mode="full")
+        pair = hub.nodes.create_pairing(session_id=self.sid)
         seed, pub = client_ed.generate_keypair()
         reg = hub.nodes.register_node(
             code=pair["code"], public_key=client_ed.b64u_encode(pub),
@@ -292,10 +292,11 @@ class RealClientServerE2ETest(unittest.IsolatedAsyncioTestCase):
             "server": server_url,
             "seed": client_ed.b64u_encode(seed),
             "publicKey": client_ed.b64u_encode(pub),
+            "mode": "full",
         }
         agent = NodeAgent(
             session=session, dirs=[self.client_dir.resolve()],
-            max_mode="full", note="e2e test box", interactive=True,
+            mode="full", note="e2e test box", interactive=True,
         )
         agent_task = asyncio.create_task(agent.run())
         try:
@@ -415,11 +416,12 @@ class RealClientServerE2ETest(unittest.IsolatedAsyncioTestCase):
         sid_b = "bbbbbbbb-2222-4222-8222-222222222222"
         server_url = f"http://127.0.0.1:{self.server.port}"
 
-        p1 = hub.nodes.create_pairing(session_id=sid_a, mode="full")
+        p1 = hub.nodes.create_pairing(session_id=sid_a)
         s1 = await asyncio.to_thread(pair_session, server_url, p1["code"])
         self.assertEqual(s1["dirs"], [])
+        self.assertEqual(s1["mode"], "auto")
         self.assertFalse(s1["autoRestoredDirs"])
-        a1 = NodeAgent(session=s1, max_mode="full", interactive=True)
+        a1 = NodeAgent(session=s1, interactive=True)
         t1 = asyncio.create_task(a1.run())
         try:
             for _ in range(100):
@@ -429,14 +431,16 @@ class RealClientServerE2ETest(unittest.IsolatedAsyncioTestCase):
             # Without dirs, exec is blocked cleanly
             with self.assertRaises(NodeError):
                 await hub.nodes.exec_command(sid_a, command="pwd")
-            # User picks dirs & renames client -> persisted in prefs.json (NO private keys!)
+            # User picks dirs, switches mode to full, & renames client -> persisted in prefs.json (NO private keys!)
             await a1.update_dirs([str(dir_a)])
+            await a1.set_mode("full")
             await a1.rename("my-win-rig")
             for _ in range(50):
                 ns = hub.nodes.session_nodes(sid_a)
-                if ns and ns[0].name == "my-win-rig" and ns[0].dirs:
+                if ns and ns[0].name == "my-win-rig" and ns[0].dirs and ns[0].mode == "full":
                     break
                 await asyncio.sleep(0.02)
+            self.assertEqual(hub.nodes.session_nodes(sid_a)[0].mode, "full")
             # Isolated from sid_b!
             self.assertEqual(hub.nodes.session_nodes(sid_b), [])
         finally:
@@ -455,19 +459,20 @@ class RealClientServerE2ETest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("publicKey", prefs_text)
         self.assertFalse((pf.parent / "devices.json").exists())
 
-        # Re-pair same sid_a -> automatically restores dirs & custom name "my-win-rig"!
-        p2 = hub.nodes.create_pairing(session_id=sid_a, mode="full")
+        # Re-pair same sid_a -> automatically restores dirs, cached mode "full", & custom name "my-win-rig"!
+        p2 = hub.nodes.create_pairing(session_id=sid_a)
         s2 = await asyncio.to_thread(pair_session, server_url, p2["code"])
         self.assertTrue(s2["autoRestoredDirs"])
         self.assertEqual(s2["dirs"], [dir_a.resolve()])
+        self.assertEqual(s2["mode"], "full")
         self.assertEqual(s2["name"], "my-win-rig")
 
-        a2 = NodeAgent(session=s2, max_mode="full", interactive=True)
+        a2 = NodeAgent(session=s2, interactive=True)
         t2 = asyncio.create_task(a2.run())
         # Second simultaneous client for same sid_a gets conflict-free suffix "my-win-rig-2"!
-        p3 = hub.nodes.create_pairing(session_id=sid_a, mode="full")
+        p3 = hub.nodes.create_pairing(session_id=sid_a)
         s3 = await asyncio.to_thread(pair_session, server_url, p3["code"])
-        a3 = NodeAgent(session=s3, max_mode="full", interactive=True)
+        a3 = NodeAgent(session=s3, interactive=True)
         t3 = asyncio.create_task(a3.run())
         try:
             for _ in range(100):

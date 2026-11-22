@@ -20,6 +20,12 @@ from .policy import PolicyError, normalize_roots, parse_dir_list
 STATUS_ICON = {"running": "⏳", "confirming": "🔒", "done": "✓", "error": "✗", "killed": "⊘", "denied": "⛔"}
 RISK_LABEL = {"low": "低", "medium": "中", "high": "高"}
 MODE_LABEL = {"readonly": "只读", "ask": "逐项确认", "auto": "智能风控", "full": "目录全放行"}
+MODE_CHOICES = [
+    ("readonly", "只读 — 仅允许白名单目录内只读命令与拉取文件"),
+    ("ask", "逐项确认 — 每条命令与文件推送都需人工确认"),
+    ("auto", "智能风控（推荐） — 本地硬规则 + 模型风控，高危需确认"),
+    ("full", "目录全放行 — 白名单目录内全自动执行（本地高危硬拦截仍生效）"),
+]
 
 
 def _fmt_time(ts: float) -> str:
@@ -359,6 +365,48 @@ class RenameScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class ModeScreen(ModalScreen[str | None]):
+    """Modal to switch permission mode on the client (cached per session)."""
+
+    CSS = """
+    ModeScreen { align: center middle; }
+    #mode-box {
+        width: 78%;
+        max-width: 86;
+        height: auto;
+        background: $surface;
+        border: heavy $primary;
+        padding: 1 2;
+    }
+    #mode-title { text-style: bold; margin-bottom: 1; }
+    #mode-box Button { width: 100%; margin-bottom: 1; content-align: left middle; }
+    #mode-cancel { width: auto; margin-top: 1; }
+    """
+    BINDINGS = [Binding("escape", "cancel", "取消")]
+
+    def __init__(self, current_mode: str) -> None:
+        super().__init__()
+        self.current_mode = current_mode
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="mode-box"):
+            yield Static("选择本会话的权限模式（由电脑端独立控制，下次再绑定本会话自动恢复）", id="mode-title")
+            for key, desc in MODE_CHOICES:
+                mark = "● " if key == self.current_mode else "○ "
+                yield Button(f"{mark}{desc}", variant="primary" if key == self.current_mode else "default", id=f"mode-{key}")
+            yield Button("取消 (Esc)", variant="error", id="mode-cancel")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        bid = event.button.id or ""
+        if bid == "mode-cancel":
+            self.dismiss(None)
+        elif bid.startswith("mode-"):
+            self.dismiss(bid.removeprefix("mode-"))
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class NodeTUI(App[None]):
     TITLE = "Riesz Node · 本地受控节点"
     CSS = """
@@ -413,6 +461,7 @@ class NodeTUI(App[None]):
         Binding("y", "approve", "同意", show=True),
         Binding("n", "reject", "拒绝", show=True),
         Binding("e", "edit_dirs", "改目录", show=True),
+        Binding("m", "change_mode", "切权限", show=True),
         Binding("r", "rename_node", "改名称", show=True),
         Binding("k", "kill_cmd", "终止命令", show=True),
         Binding("ctrl+q", "quit_node", "断开并退出", show=True),
@@ -448,6 +497,7 @@ class NodeTUI(App[None]):
                 yield ListView(id="dirs-view")
                 with Horizontal(id="left-actions"):
                     yield Button("改目录 (e)", variant="primary", id="btn-edit-dirs")
+                    yield Button("切权限 (m)", variant="default", id="btn-mode")
                     yield Button("改名称 (r)", variant="default", id="btn-rename")
             with Vertical(id="right-pane"):
                 yield Static("指令与文件传输记录 (k 终止运行中命令)", classes="pane-title")
@@ -588,6 +638,7 @@ class NodeTUI(App[None]):
                 log_w.write(
                     f"已绑定会话：「{self.agent.session_title}」({self.agent.session_id[:8]})，仅该会话可见并操作本客户端。\n"
                     "• 按 e（或点「改目录」）随时添加/移除多个允许目录；\n"
+                    "• 按 m（或点「切权限」）随时切换权限模式（只读 / 逐项确认 / 智能风控 / 目录全放行）；\n"
                     "• 按 r（或点「改名称」）修改本客户端名称；\n"
                     "• 按 Ctrl+Q 立即断开连接并销毁本次临时密钥。"
                 )
@@ -630,6 +681,8 @@ class NodeTUI(App[None]):
             await self.action_reject()
         elif bid in ("btn-edit-dirs", "btn-pick-dirs"):
             self._open_edit_dirs()
+        elif bid == "btn-mode":
+            self.action_change_mode()
         elif bid == "btn-rename":
             self.action_rename_node()
 
@@ -666,6 +719,24 @@ class NodeTUI(App[None]):
             try:
                 await self.agent.update_dirs(dirs)
                 self.notify(f"已更新允许目录（共 {len(dirs)} 个）", severity="information")
+            except PolicyError as exc:
+                self.notify(str(exc), severity="error")
+
+        asyncio.create_task(_apply())
+
+    def action_change_mode(self) -> None:
+        if isinstance(self.focused, Input):
+            return
+        self.push_screen(ModeScreen(self.agent.mode), self._on_mode_changed)
+
+    def _on_mode_changed(self, new_mode: str | None) -> None:
+        if not new_mode or new_mode == self.agent.mode:
+            return
+
+        async def _apply() -> None:
+            try:
+                await self.agent.set_mode(new_mode)
+                self.notify(f"权限模式已切换为：{MODE_LABEL.get(new_mode, new_mode)}", severity="information")
             except PolicyError as exc:
                 self.notify(str(exc), severity="error")
 

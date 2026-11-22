@@ -8,7 +8,8 @@ Supports Windows (PowerShell / cmd), WSL, macOS, and Linux.
 
 - **Zero persistent keys on disk**: every launch generates a fresh in-memory Ed25519 keypair and pairs directly to **one specific session** using a short-lived, single-use pairing code.
 - **Strictly session-scoped**: only the paired session can see or invoke this client. Closing the client destroys the connection and drops all server state immediately.
-- **Local convenience memory (`prefs.json`)**: stores only non-sensitive per-session preferences (previously authorized directories and custom display name) so re-binding a session you have used before automatically restores its directories and name (with automatic conflict suffixes if another client in the same session uses the same name).
+- **Local convenience memory (`prefs.json`)**: stores only non-sensitive per-session preferences (previously authorized directories, permission mode, and custom display name) so re-binding a session you have used before automatically restores its permissions and name (with automatic conflict suffixes if another client in the same session uses the same name).
+- **Client-side permission authority**: both permission mode (`readonly`/`ask`/`auto`/`full`) and allowed directories are strictly controlled on the local computer; the web UI cannot elevate permissions.
 
 ## Zero-Config One-Liner
 
@@ -21,6 +22,7 @@ python -c "import urllib.request as u; exec(u.urlopen(u.Request('https://your-ri
 ## Shortcuts in TUI
 
 - `e`: add/remove multiple allowed directories (with folder browser, parent navigation & Windows drive switcher)
+- `m`: switch permission mode (`readonly` / `ask` / `auto` / `full`, cached per session)
 - `r`: rename this client process (synced to web UI and remembered for this session)
 - `y` / `n`: approve or reject pending command / local high-risk confirmation
 - `k`: kill the currently selected running command

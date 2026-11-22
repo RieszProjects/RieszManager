@@ -69,7 +69,6 @@ class PairingCode:
     session_title: str
     harness: str
     project: str
-    mode: str
     created_at: float
     expires_at: float
     failures: int = 0
@@ -84,7 +83,6 @@ class PendingConnection:
     session_title: str
     harness: str
     project: str
-    mode: str
     name: str
     os_name: str
     platform: str
@@ -276,11 +274,10 @@ class NodeManager:
             if pend.expires_at <= now:
                 self._pending.pop(nid, None)
 
-    def create_pairing(self, *, session_id: str, mode: str = "auto", ttl: int = 300) -> dict[str, Any]:
+    def create_pairing(self, *, session_id: str, ttl: int = 300) -> dict[str, Any]:
         self._prune()
         if not session_id:
             raise NodeError("生成配对码必须指定会话 ID")
-        eff_mode = mode if mode in MODE_RANK else "auto"
         summary = self.hub.session_summary(session_id) or {}
         title = str(summary.get("title") or summary.get("firstMessage") or session_id[:8])[:80]
         harness = str(summary.get("harness") or self.hub.harnesses.harness_of(session_id) or "claude")
@@ -293,7 +290,7 @@ class NodeManager:
         now = time.time()
         entry = PairingCode(
             code=code, session_id=session_id, session_title=title,
-            harness=harness, project=project, mode=eff_mode,
+            harness=harness, project=project,
             created_at=now, expires_at=now + ttl,
         )
         self._pairings[code] = entry
@@ -302,7 +299,6 @@ class NodeManager:
             "code": code,
             "sessionId": session_id,
             "sessionTitle": title,
-            "mode": eff_mode,
             "createdAt": now,
             "expiresAt": entry.expires_at,
         }
@@ -345,7 +341,6 @@ class NodeManager:
             session_title=pair.session_title,
             harness=pair.harness,
             project=pair.project,
-            mode=pair.mode,
             name=assigned_name,
             os_name=os_name.strip()[:80],
             platform=platform.strip()[:40],
@@ -360,7 +355,6 @@ class NodeManager:
             "sessionTitle": pair.session_title,
             "harness": pair.harness,
             "project": pair.project,
-            "mode": pair.mode,
         }
 
     # ---- live node actions --------------------------------------------------
@@ -390,19 +384,6 @@ class NodeManager:
                 await live.send({"type": "renamed", "name": final})
         await self.broadcast()
         return final
-
-    async def set_mode(self, node_id: str, mode: str) -> str:
-        live = self._live.get(node_id)
-        if live is None:
-            raise NodeError("该本地节点未在线")
-        if mode not in MODE_RANK:
-            raise NodeError(f"不支持的权限模式：{mode}")
-        eff = _cap_mode(mode, live.max_mode)
-        live.mode = eff
-        with contextlib.suppress(Exception):
-            await live.send({"type": "mode_updated", "mode": eff})
-        await self.broadcast()
-        return eff
 
     # ---- reverse WebSocket handler -----------------------------------------
 
@@ -449,10 +430,9 @@ class NodeManager:
 
         desired_name = str(hello.get("name") or pend.name).strip() or pend.name
         final_name = self._unique_name(pend.session_id, desired_name)
-        max_mode = str(hello.get("maxMode") or "auto")
-        if max_mode not in MODE_RANK:
-            max_mode = "auto"
-        eff_mode = _cap_mode(pend.mode, max_mode)
+        client_mode = str(hello.get("mode") or hello.get("maxMode") or "auto")
+        if client_mode not in MODE_RANK:
+            client_mode = "auto"
         raw_dirs = hello.get("dirs")
         dirs = [str(d).strip() for d in raw_dirs if str(d).strip()][:20] if isinstance(raw_dirs, list) else []
 
@@ -466,8 +446,8 @@ class NodeManager:
             session_title=pend.session_title,
             harness=pend.harness,
             project=pend.project,
-            mode=eff_mode,
-            max_mode=max_mode,
+            mode=client_mode,
+            max_mode=client_mode,
             dirs=dirs,
             note=str(hello.get("note") or "")[:300],
             connected_at=time.time(),
@@ -508,6 +488,12 @@ class NodeManager:
         elif mtype == "dirs_update":
             if isinstance(msg.get("dirs"), list):
                 live.dirs = [str(d).strip() for d in msg["dirs"] if str(d).strip()][:20]
+                await self.broadcast()
+        elif mtype == "mode_update":
+            new_mode = str(msg.get("mode") or "")
+            if new_mode in MODE_RANK:
+                live.mode = new_mode
+                live.max_mode = new_mode
                 await self.broadcast()
         elif mtype == "rename":
             raw = str(msg.get("name") or "").strip()
@@ -865,7 +851,6 @@ class NodeManager:
                 "code": p.code,
                 "sessionId": p.session_id,
                 "sessionTitle": p.session_title,
-                "mode": p.mode,
                 "createdAt": p.created_at,
                 "expiresAt": p.expires_at,
             }

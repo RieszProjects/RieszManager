@@ -48,8 +48,8 @@ def main(argv: list[str] | None = None) -> None:
     p_conn.add_argument("--name", default="", help="本客户端显示名称（不传则复用上次自定义名或自动分配）")
     p_conn.add_argument("--dir", dest="dirs", action="append", default=[],
                         help="可选：本次授权的本地目录（可多次传；不传时自动恢复该会话上次授权目录或在 TUI 选择）")
-    p_conn.add_argument("--mode", choices=MODES, default="full",
-                        help="本机允许的最高权限档位上限（默认 full，实际权限以会话网页端设定为准）")
+    p_conn.add_argument("--mode", choices=MODES, default="",
+                        help="可选：本次权限模式（不传则自动复用本会话上次缓存的权限模式，首次默认 auto）")
     p_conn.add_argument("--note", default="", help="展示给 Agent 的环境备注（如 GPU / Windows 环境）")
     p_conn.add_argument("--plain", action="store_true", help="纯控制台滚动日志模式（不启动全屏 TUI）")
 
@@ -63,7 +63,10 @@ def main(argv: list[str] | None = None) -> None:
 
         code = args.code.strip() or _ask_pairing_code(args.server)
         try:
-            session = pair_session(args.server, code, name=args.name, cli_dirs=cli_dirs or None)
+            session = pair_session(
+                args.server, code, name=args.name,
+                cli_dirs=cli_dirs or None, cli_mode=args.mode,
+            )
         except Exception as exc:  # noqa: BLE001
             raise SystemExit(f"错误：{exc}") from None
 
@@ -72,7 +75,6 @@ def main(argv: list[str] | None = None) -> None:
 
         agent = NodeAgent(
             session=session,
-            max_mode=args.mode,
             note=args.note,
             interactive=not args.plain,
             on_log=(lambda m: print(m, flush=True)) if args.plain else None,

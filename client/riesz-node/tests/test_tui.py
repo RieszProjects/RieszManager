@@ -13,7 +13,7 @@ from textual.widgets import Input, RichLog, Static
 
 from riesz_node import ed25519_pure as ed
 from riesz_node.agent import CommandEntry, LocalConfirm, NodeAgent, PendingApproval
-from riesz_node.tui import DirPickerScreen, EditDirsScreen, NodeTUI, RenameScreen
+from riesz_node.tui import DirPickerScreen, EditDirsScreen, ModeScreen, NodeTUI, RenameScreen
 
 
 class NodeTUITest(unittest.IsolatedAsyncioTestCase):
@@ -47,7 +47,7 @@ class NodeTUITest(unittest.IsolatedAsyncioTestCase):
             "project": "demo",
             "mode": "auto",
         }
-        agent = NodeAgent(session=session, dirs=[self.root] if dirs is None else dirs, max_mode="full", interactive=True)
+        agent = NodeAgent(session=session, dirs=[self.root] if dirs is None else dirs, interactive=True)
         agent.status = "online"
         agent.status_detail = "已连接"
 
@@ -133,6 +133,15 @@ class NodeTUITest(unittest.IsolatedAsyncioTestCase):
             await pilot.pause(0.15)
             self.assertEqual(agent.dirs, [sub.resolve(), self.root.resolve(), other.resolve()])
             self.assertEqual(self.sent[-1]["type"], "dirs_update")
+
+            # Switch permission mode via 'm' -> ModeScreen -> updates local mode & sends mode_update
+            await pilot.press("m")
+            await pilot.pause(0.15)
+            self.assertIsInstance(app.screen, ModeScreen)
+            await pilot.click("#mode-full")
+            await pilot.pause(0.15)
+            self.assertEqual(agent.mode, "full")
+            self.assertEqual(self.sent[-1], {"type": "mode_update", "mode": "full"})
 
             # Rename via 'r' -> RenameScreen -> sends rename event & updates local name
             await pilot.press("r")

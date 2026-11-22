@@ -1,15 +1,14 @@
 /** Session-scoped dialog for pairing, renaming, monitoring, and disconnecting local computer nodes. */
 import {
-  Button, Dialog, DialogContent, DialogTitle, IconButton, MenuItem, Select, TextField, Tooltip,
+  Button, Dialog, DialogContent, DialogTitle, IconButton, TextField, Tooltip,
 } from "@mui/material";
 import { Check, Copy, Laptop, Pencil, Plus, Power, RefreshCw, Square, X } from "lucide-react";
 import { useState } from "react";
 import { copyText } from "@/lib/clipboard";
 import { sessionTitle as getSessionTitle, useApp } from "@/store/app";
 import { toast } from "@/store/ui";
-import { NODE_MODE_LABEL, type LiveNodeInfo, type NodeCommand, type NodeMode, useNodes } from "./store";
+import { NODE_MODE_LABEL, type LiveNodeInfo, type NodeCommand, useNodes } from "./store";
 
-const ALL_MODES: NodeMode[] = ["readonly", "ask", "auto", "full"];
 const RISK_TEXT: Record<string, string> = { low: "低风险", medium: "中风险", high: "高风险" };
 
 function CmdItem({ cmd, onKill }: { cmd: NodeCommand; onKill: () => void }) {
@@ -42,14 +41,11 @@ function CmdItem({ cmd, onKill }: { cmd: NodeCommand; onKill: () => void }) {
 function NodeCard({ n }: { n: LiveNodeInfo }) {
   const kick = useNodes((s) => s.kick);
   const rename = useNodes((s) => s.rename);
-  const setMode = useNodes((s) => s.setMode);
   const killCommand = useNodes((s) => s.killCommand);
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(n.name);
 
   const cmds = [...n.runningCommands, ...n.recentCommands.slice().reverse()].slice(0, 8);
-  const maxRank = ALL_MODES.indexOf(n.maxMode ?? "full");
-  const allowedModes = ALL_MODES.slice(0, (maxRank >= 0 ? maxRank : ALL_MODES.length - 1) + 1);
 
   const saveRename = async () => {
     const trimmed = draftName.trim();
@@ -96,16 +92,9 @@ function NodeCard({ n }: { n: LiveNodeInfo }) {
           <span className="dim">{n.os || n.platform || "未知系统"}</span>
         </div>
         <div className="rz-node-card-actions" style={{ gap: 6 }}>
-          <Select
-            size="small"
-            value={n.mode}
-            onChange={(e) => void setMode(n.id, e.target.value as NodeMode).catch((err) => toast((err as Error).message, "error"))}
-            sx={{ fontSize: 12, "& .MuiSelect-select": { py: 0.4, px: 1.2 } }}
-          >
-            {allowedModes.map((m) => (
-              <MenuItem key={m} value={m} sx={{ fontSize: 12.5 }}>{NODE_MODE_LABEL[m]}</MenuItem>
-            ))}
-          </Select>
+          <Tooltip title="权限模式由电脑端控制（在电脑端按 m 切换）">
+            <span className="rz-tag">{NODE_MODE_LABEL[n.mode] ?? n.mode}</span>
+          </Tooltip>
           <Tooltip title="断开连接（立刻销毁本次临时连接）">
             <IconButton size="small" className="rz-danger" onClick={() => void kick(n.id)}>
               <Power size={15} />
@@ -145,7 +134,6 @@ export function NodesDialog() {
   const resolveApproval = useNodes((s) => s.resolveApproval);
   const summary = useApp((s) => (sessionId ? s.sessions[sessionId] : undefined));
 
-  const [mode, setMode] = useState<NodeMode>("auto");
   const [busy, setBusy] = useState(false);
 
   if (!sessionId) return null;
@@ -164,7 +152,7 @@ export function NodesDialog() {
   const onCreatePair = async () => {
     setBusy(true);
     try {
-      await createPairing(sessionId, mode);
+      await createPairing(sessionId);
       toast("已为本会话生成 5 分钟有效的一次性配对码", "success");
     } catch (err) {
       toast((err as Error).message, "error");
@@ -227,19 +215,9 @@ export function NodesDialog() {
         <section className="rz-nodes-section">
           <h4>接入本地电脑到此会话</h4>
           <p className="dim" style={{ margin: "0 0 10px", fontSize: 12.5 }}>
-            每次连接都是独立的一次性加密通道（不保存私钥、服务端不记录设备，断开即销毁）；仅本会话能看到并调用。同一电脑再次绑定本会话时，会自动恢复上次授权的目录与自定义名称。
+            每次连接都是独立的一次性加密通道（不保存私钥、服务端不记录设备，断开即销毁）；仅本会话能看到并调用。权限模式与允许目录全部在电脑端控制，同一电脑再次绑定本会话时会自动恢复上次的权限、目录与名称。
           </p>
           <div className="rz-nodes-pair-form">
-            <Select
-              size="small"
-              value={mode}
-              onChange={(e) => setMode(e.target.value as NodeMode)}
-              sx={{ minWidth: 160, fontSize: 13 }}
-            >
-              {ALL_MODES.map((m) => (
-                <MenuItem key={m} value={m} sx={{ fontSize: 13 }}>初始权限：{NODE_MODE_LABEL[m]}</MenuItem>
-              ))}
-            </Select>
             <Button variant="contained" size="small" startIcon={<Plus size={15} />} disabled={busy} onClick={onCreatePair}>
               生成一次性配对码
             </Button>
@@ -255,7 +233,7 @@ export function NodesDialog() {
                     <IconButton size="small" onClick={() => copyCmd(p.code)}><Copy size={13} /></IconButton>
                   </Tooltip>
                   <span className="dim" style={{ marginLeft: "auto" }}>
-                    直连本会话 · {NODE_MODE_LABEL[p.mode]} · 一次性 · 5 分钟有效
+                    直连本会话 · 一次性 · 5 分钟有效
                   </span>
                 </div>
                 <div className="rz-node-pair-cmd">

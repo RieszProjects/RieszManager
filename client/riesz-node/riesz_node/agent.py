@@ -90,10 +90,11 @@ def save_session_pref(
     session_id: str,
     *,
     dirs: list[Path] | None = None,
+    mode: str | None = None,
     custom_name: str | None = None,
     title: str | None = None,
 ) -> None:
-    """Persist non-sensitive convenience preferences (dirs / customName) for `session_id`."""
+    """Persist non-sensitive convenience preferences (dirs / mode / customName) for `session_id`."""
     if not session_id:
         return
     data = _load_prefs()
@@ -101,6 +102,8 @@ def save_session_pref(
     rec = dict(sessions.get(session_id) or {})
     if dirs is not None:
         rec["dirs"] = [str(p) for p in dirs]
+    if mode is not None and mode in MODE_RANK:
+        rec["mode"] = mode
     if custom_name is not None:
         cleaned = " ".join(custom_name.strip().split())[:48]
         if cleaned:
@@ -160,12 +163,13 @@ def pair_session(
     *,
     name: str = "",
     cli_dirs: list[Path] | None = None,
+    cli_mode: str = "",
 ) -> dict[str, Any]:
     """Exchange a one-time session pairing code for an ephemeral in-memory node identity.
 
     - Never writes private keys to disk.
-    - Restores previous authorized directories & custom display name from `prefs.json`
-      when re-binding a session this machine has connected to before.
+    - Restores previous authorized directories, permission mode & custom display name from
+      `prefs.json` when re-binding a session this machine has connected to before.
     """
     base = normalize_server_url(server)
     seed, pub = ed.generate_keypair()
@@ -203,6 +207,10 @@ def pair_session(
     # Restore previous custom name if user renamed this session before (server resolves conflicts)
     desired_name = cli_name or str(pref.get("customName") or "").strip() or str(data.get("name") or host)
 
+    # Restore previous permission mode (strictly client-controlled; default `auto`)
+    saved_mode = str(pref.get("mode") or "")
+    eff_mode = cli_mode if cli_mode in MODE_RANK else (saved_mode if saved_mode in MODE_RANK else "auto")
+
     # Restore previous authorized directories unless explicit --dir was given on CLI
     auto_restored = False
     if cli_dirs:
@@ -212,10 +220,14 @@ def pair_session(
         initial_dirs = restored
         auto_restored = bool(restored)
 
-    if cli_name:
-        save_session_pref(session_id, custom_name=cli_name, title=session_title)
-    if cli_dirs:
-        save_session_pref(session_id, dirs=initial_dirs, title=session_title)
+    if cli_name or cli_dirs or (cli_mode in MODE_RANK):
+        save_session_pref(
+            session_id,
+            dirs=initial_dirs if cli_dirs else None,
+            mode=eff_mode if cli_mode in MODE_RANK else None,
+            custom_name=cli_name or None,
+            title=session_title,
+        )
 
     return {
         "nodeId": data["nodeId"],
@@ -227,7 +239,7 @@ def pair_session(
         "sessionTitle": session_title,
         "harness": str(data.get("harness") or ""),
         "project": str(data.get("project") or ""),
-        "mode": str(data.get("mode") or "auto"),
+        "mode": eff_mode,
         "dirs": initial_dirs,
         "autoRestoredDirs": auto_restored,
     }
@@ -279,7 +291,7 @@ class NodeAgent:
         *,
         session: dict[str, Any],
         dirs: list[Path] | None = None,
-        max_mode: str = "auto",
+        mode: str | None = None,
         note: str = "",
         interactive: bool = True,
         on_update: Callable[[], None] | None = None,
@@ -293,9 +305,8 @@ class NodeAgent:
         self.session_title = str(session.get("sessionTitle") or self.session_id[:8])
         self.harness = str(session.get("harness") or "")
         self.project = str(session.get("project") or "")
-        self.max_mode = max_mode if max_mode in MODE_RANK else "auto"
-        req_mode = str(session.get("mode") or "auto")
-        self.mode = req_mode if req_mode in MODE_RANK and MODE_RANK[req_mode] <= MODE_RANK[self.max_mode] else self.max_mode
+        req_mode = str(mode or session.get("mode") or "auto")
+        self.mode = req_mode if req_mode in MODE_RANK else "auto"
         self.dirs: list[Path] = list(dirs if dirs is not None else (session.get("dirs") or []))
         self.auto_restored_dirs = bool(session.get("autoRestoredDirs"))
         self.note = note
@@ -377,7 +388,7 @@ class NodeAgent:
                     "platform": sys.platform,
                     "hostname": socket.gethostname(),
                     "dirs": [str(p) for p in self.dirs],
-                    "maxMode": self.max_mode,
+                    "mode": self.mode,
                     "note": self.note,
                     "version": "2",
                 })
@@ -456,12 +467,6 @@ class NodeAgent:
                 save_session_pref(self.session_id, custom_name=new_name, title=self.session_title)
                 self._log(f"[改名] 本机名称已更新为：{new_name}")
                 self._emit()
-        elif mtype == "mode_updated":
-            new_mode = str(msg.get("mode") or "")
-            if new_mode in MODE_RANK and MODE_RANK[new_mode] <= MODE_RANK[self.max_mode]:
-                self.mode = new_mode
-                self._log(f"[权限] 权限模式已调整为：{new_mode}")
-                self._emit()
         elif mtype == "approval_request":
             ap = PendingApproval(
                 approval_id=str(msg.get("id") or ""),
@@ -509,6 +514,16 @@ class NodeAgent:
         self._log(f"[更新目录] 允许目录已更新为：{', '.join(str(p) for p in resolved)}")
         self._emit()
         return resolved
+
+    async def set_mode(self, mode: str) -> str:
+        if mode not in MODE_RANK:
+            raise PolicyError(f"不支持的权限模式：{mode}")
+        self.mode = mode
+        save_session_pref(self.session_id, mode=mode, title=self.session_title)
+        await self._send({"type": "mode_update", "mode": mode})
+        self._log(f"[权限] 已切换权限模式为：{mode}")
+        self._emit()
+        return mode
 
     async def rename(self, new_name: str) -> str:
         cleaned = " ".join(new_name.strip().split())[:48]
