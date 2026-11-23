@@ -1,9 +1,10 @@
 /** Main-area full-screen read-only view for a harness-native subagent's conversation. Refreshes while running. */
-import { Button, IconButton, Tooltip } from "@mui/material";
-import { ArrowLeft, Cpu, Eye, GitBranch, LoaderCircle, Shield } from "lucide-react";
+import { IconButton, Tooltip } from "@mui/material";
+import { ArrowLeft, ArrowUp, Bot, Cpu, GitBranch, LoaderCircle, Paperclip, Shield } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/api/client";
-import type { Item, SessionState } from "@/api/types";
+import type { Item, LiveInfo, SessionState } from "@/api/types";
+import { StatusDot } from "@/components/StatusDot";
 import { modeTier, modelLabel, permissionLabel } from "@/lib/format";
 import { useHarnesses, useHarnessLabel, useRouteTag } from "@/lib/harnesses";
 import { useIsMobile } from "@/lib/useIsMobile";
@@ -12,8 +13,13 @@ import { useSessions } from "@/store/sessions";
 import { type SubagentTarget, useUi } from "@/store/ui";
 import { MobileHeaderButtons } from "../layout/MobileHeaderButtons";
 import { RightDock, RightPanelButton } from "../layout/RightDock";
-import { ItemView } from "./MessageItems";
+import { NodeApprovalBanner } from "../nodes/NodeApprovalBanner";
+import { NodeBindChip } from "../nodes/NodeBindChip";
+import { NodesButton } from "../nodes/NodesButton";
+import { NotesButton } from "../notes/NotesButton";
+import { MessageList } from "./MessageList";
 import { SessionContext, type SessionContextValue } from "./SessionContext";
+import { ActivityLine } from "./StreamingView";
 
 const POLL_MS = 3000;
 const PAGE = 160;
@@ -53,12 +59,12 @@ export function SubagentViewer({ target }: { target: SubagentTarget }) {
   const [liveStatus, setLiveStatus] = useState<boolean | undefined>(undefined);
   const [items, setItems] = useState<Item[]>([]);
   const [hasMore, setHasMore] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const body = useRef<HTMLDivElement>(null);
-  const stick = useRef(true);
   /** Earlier pages were loaded by hand: refreshes of the latest page leave "load earlier" alone. */
   const olderLoaded = useRef(false);
+  const loadingOlderRef = useRef(false);
 
   useEffect(() => {
     const pid = target.projectId ?? parentSummary?.project ?? null;
@@ -79,20 +85,28 @@ export function SubagentViewer({ target }: { target: SubagentTarget }) {
     setLiveStatus(undefined);
     setItems([]);
     setHasMore(false);
+    setLoaded(false);
+    setLoadingOlder(false);
     setError(null);
-    stick.current = true;
     olderLoaded.current = false;
+    loadingOlderRef.current = false;
     let cancelled = false;
-    setLoading(true);
     api<{ subagents: SubagentInfo[] }>(`sessions/${target.sessionId}/subagents`)
       .then((res) => {
         if (cancelled) return;
         const found = res.subagents.find((a) => (target.agentId ? a.agentId === target.agentId : a.toolUseId === target.toolUseId));
         if (found) setAgent(found);
-        else setError("没有找到这个子代理的记录");
+        else {
+          setError("没有找到这个子代理的记录");
+          setLoaded(true);
+        }
       })
-      .catch((e: Error) => !cancelled && setError(e.message))
-      .finally(() => !cancelled && setLoading(false));
+      .catch((e: Error) => {
+        if (!cancelled) {
+          setError(e.message);
+          setLoaded(true);
+        }
+      });
     return () => {
       cancelled = true;
     };
@@ -108,11 +122,21 @@ export function SubagentViewer({ target }: { target: SubagentTarget }) {
     });
     if (!olderLoaded.current) setHasMore(page.hasMore);
     if (typeof page.running === "boolean") setLiveStatus(page.running);
+    setLoaded(true);
   }, [target.sessionId, agent]);
 
   useEffect(() => {
     if (!agent) return;
-    void loadLatest().catch((e: Error) => setError(e.message));
+    let cancelled = false;
+    void loadLatest().catch((e: Error) => {
+      if (!cancelled) {
+        setError(e.message);
+        setLoaded(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [agent, loadLatest]);
 
   useEffect(() => {
@@ -121,21 +145,31 @@ export function SubagentViewer({ target }: { target: SubagentTarget }) {
     return () => window.clearInterval(timer);
   }, [agent, running, loadLatest]);
 
-  const loadEarlier = async () => {
-    if (!agent || !items.length) return;
-    const page = await api<Page>(`sessions/${target.sessionId}/subagents/${agent.agentId}/items`,
-      { query: { limit: PAGE, before: items[0].seq } });
-    stick.current = false;
-    olderLoaded.current = true;
-    setItems((prev) => [...page.items, ...prev]);
-    setHasMore(page.hasMore);
-  };
+  const loadEarlier = useCallback(async () => {
+    if (!agent || !items.length || loadingOlderRef.current) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const page = await api<Page>(`sessions/${target.sessionId}/subagents/${agent.agentId}/items`, {
+        query: { limit: PAGE, before: items[0].seq },
+      });
+      olderLoaded.current = true;
+      setItems((prev) => {
+        const seen = new Set(prev.map((it) => it.seq));
+        const fresh = page.items.filter((it) => !seen.has(it.seq));
+        return fresh.length ? [...fresh, ...prev] : prev;
+      });
+      setHasMore(page.hasMore);
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [agent, items, target.sessionId]);
 
-  // Follow new steps while scrolled to the bottom.
-  useEffect(() => {
-    const el = body.current;
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [items]);
+  const harness = agent?.harness ?? parentSummary?.harness ?? "claude";
+  const harnessName = useHarnessLabel(harness);
+  const apiTag = useRouteTag(state?.api ?? parentSummary?.api, harness);
+  const harnessSpec = harnesses.find((h) => h.id === harness);
 
   const context = useMemo<SessionContextValue>(() => {
     const pending = new Set<string>();
@@ -149,18 +183,15 @@ export function SubagentViewer({ target }: { target: SubagentTarget }) {
       pendingTools: pending,
       tasks: [],
       hosted: false,
+      harness,
+      capabilities: state?.capabilities ?? null,
     };
-  }, [items, running, target, parentSummary?.cwd, parentSummary?.project]);
+  }, [items, running, target, parentSummary?.cwd, parentSummary?.project, harness, state?.capabilities]);
 
   const backToParent = () => {
     openSubagent(null);
     navigate({ view: "session", sessionId: target.sessionId });
   };
-
-  const harness = agent?.harness ?? parentSummary?.harness ?? "claude";
-  const harnessName = useHarnessLabel(harness);
-  const apiTag = useRouteTag(harness, state?.api ?? parentSummary?.api);
-  const harnessSpec = harnesses.find((h) => h.id === harness);
 
   // Resolve subagent model: transcript assistant model > explicit subagent model > parent session model
   const transcriptModel = useMemo(() => {
@@ -189,14 +220,69 @@ export function SubagentViewer({ target }: { target: SubagentTarget }) {
   const project = projectId ? projects.find((pr) => pr.id === projectId) : undefined;
   const parentName = parentSummary ? sessionTitle(parentSummary) : target.sessionId.slice(0, 8);
   const workspaceTag = agent?.workspace ? WORKSPACE_LABEL[agent.workspace] : null;
+  const title = target.title || agent?.description || "子代理";
+
+  useEffect(() => {
+    document.title = `${title} · Riesz Manager`;
+    return () => {
+      document.title = "Riesz Manager";
+    };
+  }, [title]);
 
   const p = task?.progress;
   const statsParts = [
-    agent?.agentType,
-    running ? "运行中" : "已完成",
     p?.toolUses != null ? `${p.toolUses} 次工具调用` : null,
     p?.tokens != null ? `${Math.round(p.tokens / 1000)}k tokens` : null,
   ].filter(Boolean);
+
+  const liveDot: LiveInfo | null = running ? { hosted: true, busy: true, pid: 0 } : null;
+  const sessionKey = `subagent:${target.sessionId}:${agent?.agentId ?? target.agentId ?? target.toolUseId ?? ""}`;
+
+  const chips = (
+    <>
+      <button type="button" className={`rz-chip harness-${harness}`} disabled title={`所属工具：${harnessName}`}>
+        <Bot size={13} />
+        <span>{harnessName}</span>
+      </button>
+      <button
+        type="button"
+        className={`rz-chip tier-${permTier}`}
+        disabled
+        title={isResearchSandbox ? "研究型子代理运行在只读沙箱中" : `权限模式（继承父会话）：${permLabel}`}
+      >
+        <Shield size={13} />
+        <span>{permLabel}</span>
+      </button>
+      {modelDisplay && (
+        <button
+          type="button"
+          className="rz-chip"
+          disabled
+          title={modelInherited ? `模型（继承父会话）：${effectiveModel}` : `模型：${effectiveModel}`}
+        >
+          <Cpu size={13} />
+          <span>{modelDisplay}</span>
+        </button>
+      )}
+      {workspaceTag && (
+        <button type="button" className="rz-chip" disabled title={`工作区隔离模式：${workspaceTag}`}>
+          <GitBranch size={13} />
+          <span>{workspaceTag}</span>
+        </button>
+      )}
+      <NodeBindChip sessionId={target.sessionId} />
+    </>
+  );
+
+  const footer = (
+    <ActivityLine
+      busy={running}
+      since={task?.startedAt ? task.startedAt * 1000 : null}
+      waiting={false}
+      label="子代理运行中"
+      interruptible={false}
+    />
+  );
 
   return (
     <SessionContext.Provider value={context}>
@@ -209,78 +295,69 @@ export function SubagentViewer({ target }: { target: SubagentTarget }) {
             </IconButton>
           </Tooltip>
           <div className="rz-chat-title">
-            <div className="clamp-1 rz-chat-title-text">{target.title || agent?.description || "子代理"}</div>
+            <div className="clamp-1 rz-chat-title-text">{title}</div>
             <div className="rz-chat-sub">
+              <StatusDot live={liveDot} size={7} />
               <span className={`rz-tag harness harness-${harness}`}>{harnessName}</span>
               {apiTag && <span className="rz-tag harness">{apiTag}</span>}
-              {modelDisplay && (
-                <span
-                  className="rz-tag rz-subagent-meta-tag"
-                  title={modelInherited ? `继承父会话模型：${effectiveModel}` : `模型：${effectiveModel}`}
-                >
-                  <Cpu size={10} />
-                  {modelDisplay}
-                </span>
-              )}
-              <span
-                className={`rz-tag rz-subagent-meta-tag tier-${permTier}`}
-                title={isResearchSandbox ? "研究型子代理运行在只读沙箱中" : `权限模式（继承父会话）：${permLabel}`}
-              >
-                <Shield size={10} />
-                {permLabel}
-              </span>
-              {workspaceTag && (
-                <span className="rz-tag rz-subagent-meta-tag">
-                  <GitBranch size={10} />
-                  {workspaceTag}
-                </span>
-              )}
               {project && <span className="clamp-1">{project.name}</span>}
-              <span className="dim clamp-1">· 父会话：{parentName}</span>
-              {statsParts.length > 0 && <span className="dim clamp-1">· {statsParts.join(" · ")}</span>}
+              {parentSummary?.gitBranch && <span className="dim mono clamp-1">⎇ {parentSummary.gitBranch}</span>}
+              {agent?.agentType && <span className="rz-tag">{agent.agentType}</span>}
+              <span className="dim clamp-1">父会话：{parentName}</span>
             </div>
           </div>
+          <NodesButton sessionId={target.sessionId} />
+          <NotesButton sessionId={target.sessionId} />
           {isMobile ? <MobileHeaderButtons side="right" /> : <RightPanelButton />}
         </header>
         <div className="rz-chat-row">
           <div className="rz-chat-col">
-            <div
-              ref={body}
-              className="rz-chat-body rz-subagent-body"
-              onScroll={(e) => {
-                const el = e.currentTarget;
-                stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-              }}
-            >
+            <div className="rz-chat-body">
               {error ? (
                 <div className="rz-center dim">{error}</div>
-              ) : loading && !items.length ? (
-                <div className="rz-center dim"><LoaderCircle size={20} className="spin" /></div>
+              ) : !loaded ? (
+                <div className="rz-center"><LoaderCircle className="spin" size={22} /></div>
               ) : (
-                <div className="rz-msg-list">
-                  {hasMore && (
-                    <div className="rz-subagent-more">
-                      <Button size="small" onClick={() => void loadEarlier()}>加载更早的内容</Button>
+                <MessageList
+                  sessionKey={sessionKey}
+                  items={items}
+                  hasMore={hasMore}
+                  loadingOlder={loadingOlder}
+                  onLoadOlder={() => void loadEarlier()}
+                  footer={footer}
+                  emptyState={
+                    <div className="rz-chat-empty">
+                      <div className="dim">{running ? "子代理已启动，等待输出…" : "暂无消息记录"}</div>
                     </div>
-                  )}
-                  {items.map((item) => (
-                    <div key={item.key} className="rz-msg-row"><ItemView item={item} /></div>
-                  ))}
-                  {running && (
-                    <div className="rz-msg-row rz-subagent-running dim">
-                      <LoaderCircle size={13} className="spin" /> 运行中
-                    </div>
-                  )}
-                </div>
+                  }
+                />
               )}
             </div>
             <div className="rz-chat-bottom">
-              <div className="rz-subagent-readonly">
-                <Eye size={14} />
-                <span>内置子代理由父会话驱动，当前为实时只读视图。</span>
-                <Button size="small" variant="outlined" onClick={backToParent} sx={{ ml: "auto", flexShrink: 0 }}>
-                  返回父会话
-                </Button>
+              <NodeApprovalBanner sessionId={target.sessionId} />
+              <div className="rz-composer-wrap">
+                {isMobile && <div className="rz-composer-chips rz-composer-readonly-chips">{chips}</div>}
+                <div className="rz-composer readonly">
+                  <textarea
+                    rows={1}
+                    disabled
+                    value=""
+                    placeholder="内置子代理由父会话驱动，当前为只读模式，无法直接发送消息"
+                  />
+                  <div className="rz-composer-bar">
+                    <IconButton size="small" disabled aria-label="添加文件"><Paperclip size={17} /></IconButton>
+                    {!isMobile && chips}
+                    <div className="rz-spacer" />
+                    {statsParts.length > 0 && <span className="rz-composer-readonly-stat dim">{statsParts.join(" · ")}</span>}
+                    <Tooltip title="内置子代理只读，无法直接发送消息">
+                      <span>
+                        <IconButton className="rz-send" disabled aria-label="发送">
+                          <ArrowUp size={18} />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
