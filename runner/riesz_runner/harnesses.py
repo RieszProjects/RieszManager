@@ -716,14 +716,21 @@ class Harnesses:
         await self.hub.broadcast_global({"ev": "session_live", "sessionId": session_id, "live": None})
         return True
 
+    def is_working(self, session_id: str) -> bool | None:
+        """Whether a hosted non-Claude session is busy (turn, queue, prompt, tasks, or Antigravity background work); None if not running."""
+        driver = self.drivers.get(session_id)
+        if driver is None or not driver.alive:
+            return None
+        if driver.busy or driver.permissions or driver.tasks or driver.has_pending_queue():
+            return True
+        if driver.harness == "antigravity" and self.hub.agy_subagents.has_active_work(
+            session_id, parent_alive=True, started_at=driver.started_at
+        ):
+            return True
+        return False
+
     def working_ids(self) -> list[str]:
-        return [
-            sid for sid, d in self.drivers.items()
-            if d.alive and (
-                d.busy or d.permissions or d.tasks
-                or (d.harness == "antigravity" and self.hub.agy_subagents.has_running(sid, parent_alive=True))
-            )
-        ]
+        return [sid for sid in list(self.drivers) if self.is_working(sid)]
 
     def working(self) -> bool:
         return bool(self.working_ids())
@@ -758,11 +765,10 @@ class Harnesses:
             for sid, driver in list(self.drivers.items()):
                 rec = self.records.get(sid) or {}
                 lock = self._locks.get(sid)
-                agy_busy = driver.harness == "antigravity" and self.hub.agy_subagents.has_running(sid, parent_alive=True)
                 if (
                     not driver.alive or not driver.ready
                     or (lock is not None and lock.locked())
-                    or driver.busy or driver.permissions or driver.tasks or agy_busy or rec.get("keepAlive")
+                    or self.is_working(sid) or rec.get("keepAlive")
                 ):
                     continue
                 last_active = max(self._active.get(sid, 0.0), getattr(driver, "started_at", 0.0) or 0.0)

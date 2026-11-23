@@ -733,14 +733,27 @@ class Hub:
     def session_working(self, session_id: str) -> bool | None:
         """Whether a hosted session of any harness is busy (a turn, queued messages, a prompt, or open background tasks); None: not running."""
         if self.harnesses.has(session_id):
-            driver = self.harnesses.drivers.get(session_id)
-            if driver is None or not driver.alive:
-                return None
-            return bool(driver.busy or driver.permissions or driver.tasks or getattr(driver, "_queue", None))
+            return self.harnesses.is_working(session_id)
         proc = self.get_hosted(session_id)
         if proc is None or not proc.alive:
             return None
         return bool(proc.busy or proc.queue or proc.permissions or proc.tasks)
+
+    def message_queued(self, session_id: str, message_uuid: str | None) -> bool:
+        """Whether `message_uuid` is still queued or held for `session_id` (across any harness or handoff)."""
+        if not message_uuid:
+            return False
+        target = self.final_handoff_target(session_id)
+        for sid in (session_id, target):
+            if any(h.get("uuid") == message_uuid for h in self._handoff_held.get(sid, ())):
+                return True
+            if self.delivery is not None and any(h.uuid == message_uuid for h in self.delivery.held.get(sid, ())):
+                return True
+        if self.harnesses.has(target):
+            driver = self.harnesses.drivers.get(target)
+            return bool(driver is not None and driver.alive and driver.has_queued(message_uuid))
+        proc = self.get_hosted(target)
+        return bool(proc is not None and proc.alive and message_uuid in proc.queue)
 
     def _last_active(self, sid: str, pref: dict[str, Any]) -> float:
         """When a session last did something (its subagent row is "recent" for a while after)."""

@@ -162,6 +162,36 @@ class AutonomousTest(unittest.IsolatedAsyncioTestCase):
         await self.until(lambda: len(driver.sink.of("result")) == 3, "then answered")
         self.assertIn("echo: hello", driver.last_assistant_text())
 
+    async def test_autonomous_permission_prompt_does_not_timeout(self):
+        driver = AntigravityDriver(agy=AGENT, cwd=tempfile.mkdtemp(), sink=Events(), env=dict(os.environ))
+        driver.autonomous_quiet = 0.35
+        self.addAsyncCleanup(driver.stop)
+        await driver.start()
+        await driver.send("timer_ask")
+        await self.until(lambda: bool(driver.permissions), "autonomous turn prompts user")
+        # Wait longer than autonomous_quiet before answering: the turn must stay alive waiting for the user.
+        await asyncio.sleep(0.6)
+        self.assertTrue(driver.busy)
+        self.assertTrue(driver.permissions)
+        self.assertEqual(len(driver.sink.of("result")), 1)
+        [req_id] = driver.permissions
+        driver.answer_permission(req_id, allow=True)
+        await self.until(lambda: len(driver.sink.of("result")) == 2, "autonomous turn finishes after approval")
+        self.assertIn("autonomous proceed_once", driver.last_assistant_text())
+
+    async def test_interrupt_ends_autonomous_turn_promptly(self):
+        driver = AntigravityDriver(agy=AGENT, cwd=tempfile.mkdtemp(), sink=Events(), env=dict(os.environ))
+        driver.autonomous_quiet = 5.0
+        self.addAsyncCleanup(driver.stop)
+        await driver.start()
+        await driver.send("timer_ask")
+        await self.until(lambda: driver.busy and driver._autonomous and bool(driver.permissions), "autonomous turn active")
+        t0 = time.monotonic()
+        await driver.interrupt()
+        await self.until(lambda: len(driver.sink.of("result")) == 2 and not driver.busy, "interrupted promptly")
+        self.assertLess(time.monotonic() - t0, 1.5)
+        self.assertTrue(any(it.get("kind") == "interrupted" for it in driver.items.items))
+
 
 class LateReplayTest(unittest.IsolatedAsyncioTestCase):
     """Antigravity answers session/load before replaying the history: the next message still goes after it."""

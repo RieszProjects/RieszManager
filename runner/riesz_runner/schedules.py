@@ -38,6 +38,7 @@ log = logging.getLogger(__name__)
 
 CHECK_INTERVAL = 15.0
 GRACE_SECONDS = 600          # a run later than this counts as missed
+RETRY_DELAYS = (60, 180, 300)  # transient send-failure retries before advancing to the next scheduled slot
 MIN_EVERY_MINUTES = 5
 MAX_JITTER_MINUTES = 720
 MAX_PROMPT_CHARS = 20000
@@ -204,7 +205,7 @@ class Scheduler:
     async def create(self, data: dict[str, Any], created_by: str | None = None) -> dict[str, Any]:
         s = validate({"enabled": True, **data})
         s.update(id=secrets.token_hex(6), createdAt=time.time(), createdBy=created_by, last=None,
-                 lastBase=None, lastResult=None, lastUuid=None)
+                 lastBase=None, lastResult=None, lastUuid=None, retries=0)
         plan(s, time.time())
         self.items[s["id"]] = s
         await self._changed()
@@ -217,6 +218,7 @@ class Scheduler:
         timing = any(k in data for k in ("times", "days", "every", "tz", "jitter")) or (s["enabled"] and not current.get("enabled"))
         self.items[sid] = s
         if timing:
+            s["retries"] = 0
             plan(s, time.time())
         await self._changed()
         return s
@@ -250,6 +252,7 @@ class Scheduler:
             return
         now = time.time()
         changed = False
+        due: list[dict[str, Any]] = []
         for s in list(self.items.values()):
             if not s.get("enabled"):
                 continue
@@ -262,23 +265,29 @@ class Scheduler:
             late = now - s["next"]
             if late > GRACE_SECONDS + s.get("jitter", 0) * 60 and not s.get("catchUp"):
                 s["lastResult"] = "missed"
+                s["retries"] = 0
                 log.info("schedule %s for %s missed its run %.0f min ago", s["id"], s["sessionId"][:8], late / 60)
                 s["lastBase"] = s.get("nextBase")
                 plan(s, now)
+                changed = True
             else:
-                await self._fire(s)
+                due.append(s)
+        if due:
+            results = await asyncio.gather(*(self._fire(s) for s in due), return_exceptions=True)
+            for s, res in zip(due, results):
+                if isinstance(res, Exception):
+                    log.exception("schedule %s fire failed", s.get("id"), exc_info=res)
             changed = True
         if changed:
             await self._changed()
 
     async def _fire(self, s: dict[str, Any], manual: bool = False) -> None:
         now = time.time()
-        if not manual:
-            s["lastBase"] = s.get("nextBase") or now
         sid = s["sessionId"]
-        proc = self.hub.get_hosted(sid)
-        if proc is not None and proc.alive and s.get("lastUuid") in proc.queue:
+        retry_scheduled = False
+        if self.hub.message_queued(sid, s.get("lastUuid")):
             s["lastResult"] = "skipped: the previous message is still queued"
+            s["retries"] = 0
         else:
             text = s["prompt"].replace("{now}", datetime.now(ZoneInfo(s["tz"])).strftime("%Y-%m-%d %H:%M %Z"))
             message_uuid = str(uuidlib.uuid4())
@@ -286,12 +295,23 @@ class Scheduler:
                 result = await self.hub.delivery.send(sid, text, [], message_uuid)
                 s["lastUuid"] = message_uuid
                 s["lastResult"] = "held" if result.get("held") else "sent"
+                s["retries"] = 0
                 log.info("schedule %s woke %s", s["id"], sid[:8])
             except Exception as exc:  # noqa: BLE001 - recorded and shown to the user
                 s["lastResult"] = f"failed: {exc}"[:300]
-                log.warning("schedule %s could not wake %s: %s", s["id"], sid[:8], exc)
+                retries = int(s.get("retries") or 0)
+                if not manual and retries < len(RETRY_DELAYS):
+                    delay = RETRY_DELAYS[retries]
+                    s["retries"] = retries + 1
+                    s["next"] = now + delay
+                    retry_scheduled = True
+                    log.warning("schedule %s could not wake %s: %s; retrying in %ds", s["id"], sid[:8], exc, delay)
+                else:
+                    s["retries"] = 0
+                    log.warning("schedule %s could not wake %s: %s", s["id"], sid[:8], exc)
         s["last"] = now
-        if not manual:
+        if not manual and not retry_scheduled:
+            s["lastBase"] = s.get("nextBase") or now
             plan(s, now)
 
 

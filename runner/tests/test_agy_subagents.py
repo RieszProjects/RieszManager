@@ -172,6 +172,66 @@ class AgySubagentStoreTest(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(await store.items(parent, "agy-99999999-9999-4999-8999-999999999999", parent_alive=True))
             self.assertIsNone(await store.items(parent, "not-agy", parent_alive=True))
 
+    async def test_parent_open_bg_tasks_and_started_at_filter(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            brain = Path(td)
+            parent = "44444444-4444-4444-8444-444444444444"
+            p_log = brain / parent / ".system_generated" / "logs" / "transcript.jsonl"
+            store = AgySubagentStore(brain)
+
+            # Old background task from a previous agy process (before started_at)
+            _write_jsonl(p_log, [{
+                "step_index": 1,
+                "type": "GENERIC",
+                "status": "DONE",
+                "created_at": "2026-11-20T10:00:00Z",
+                "content": "Tool is running as a background task with task id: 44444444/task-old\n",
+            }])
+            from datetime import datetime
+            new_start = datetime.fromisoformat("2026-11-23T10:00:00+00:00").timestamp()
+            self.assertFalse(store.has_running(parent, parent_alive=True))
+            self.assertFalse(store.has_active_work(parent, parent_alive=True, started_at=new_start))
+
+            # New background task started during the current agy process
+            _write_jsonl(p_log, [{
+                "step_index": 2,
+                "type": "GENERIC",
+                "status": "DONE",
+                "created_at": "2026-11-23T10:05:00Z",
+                "content": "Tool is running as a background task with task id: 44444444/task-live\n",
+            }])
+            self.assertTrue(store.has_active_work(parent, parent_alive=True, started_at=new_start))
+            self.assertFalse(store.has_active_work(parent, parent_alive=False, started_at=new_start))
+
+            # Finished / canceled clears it
+            _write_jsonl(p_log, [{
+                "step_index": 3,
+                "type": "SYSTEM_MESSAGE",
+                "status": "DONE",
+                "created_at": "2026-11-23T10:06:00Z",
+                "content": 'Task id "44444444/task-live" was canceled by user',
+            }])
+            self.assertFalse(store.has_active_work(parent, parent_alive=True, started_at=new_start))
+
+            # Killed via manage_task also clears it
+            _write_jsonl(p_log, [
+                {
+                    "step_index": 4,
+                    "type": "GENERIC",
+                    "status": "DONE",
+                    "created_at": "2026-11-23T10:07:00Z",
+                    "content": "Tool is running as a background task with task id: 44444444/task-kill\n",
+                },
+            ])
+            self.assertTrue(store.has_active_work(parent, parent_alive=True, started_at=new_start))
+            _write_jsonl(p_log, [{
+                "step_index": 5,
+                "type": "PLANNER_RESPONSE",
+                "status": "DONE",
+                "tool_calls": [{"name": "manage_task", "args": {"Action": '"kill"', "TaskId": '"44444444/task-kill"'}}],
+            }])
+            self.assertFalse(store.has_active_work(parent, parent_alive=True, started_at=new_start))
+
 
 if __name__ == "__main__":
     unittest.main()

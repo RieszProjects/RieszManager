@@ -397,6 +397,41 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(child, watcher2._pending)
         self.assertTrue(watcher2._is_delivered(child, "final:1", "全部渲染完成"))
 
+    async def test_deferred_subagent_callback_flushes_when_background_work_ends(self):
+        from riesz_runner.drivers.base import assistant_item
+
+        hub = self.app[HUB]
+        me = await self.session("parent")
+        hub.harnesses.drivers[me].fake_pid = os.getpid()
+        parent_driver = hub.harnesses.drivers[me]
+        parent_msgs = lambda: [it["text"] for it in parent_driver.items.items if it.get("kind") == "user"]
+        relay = await self.relay()
+
+        text, error = await relay.call("subagent_start", task="后台任务", harness="fake", wait=False)
+        self.assertFalse(error, text)
+        child_prefix = text.split("子代理 ")[1][:8]
+        child = next(s for s in hub.harnesses.drivers if s.startswith(child_prefix))
+        child_driver = hub.harnesses.drivers[child]
+        await asyncio.sleep(0.1)
+        before = len(parent_msgs())
+
+        # Child emits a turn result while a background task is still active -> deferred, not delivered yet.
+        hub.subagent_watcher.prepare_prompt(child, sync_wait=False)
+        child_driver.tasks["bg-1"] = {"id": "bg-1", "description": "timer"}
+        child_driver.items.put(assistant_item("def:1", [{"type": "text", "text": "收尾结果"}]))
+        await child_driver.emit({"ev": "result", "result": {"subtype": "success", "isError": False}, "text": "收尾结果"})
+        await asyncio.sleep(0.1)
+        self.assertEqual(len(parent_msgs()), before)
+        self.assertIn(child, hub.subagent_watcher._deferred)
+
+        # Background task ends without emitting another result event -> flush_due delivers the deferred reply.
+        child_driver.tasks.clear()
+        await hub.subagent_watcher.flush_due()
+        await asyncio.sleep(0.05)
+        self.assertEqual(len(parent_msgs()), before + 1)
+        self.assertIn("收尾结果", parent_msgs()[-1])
+        self.assertNotIn(child, hub.subagent_watcher._deferred)
+
     async def test_a_process_outside_hosted_sessions_is_refused(self):
         await self.session("one")                                      # claims no process
         relay = await self.relay()                                     # the list is for anyone (a harness asks while it starts)

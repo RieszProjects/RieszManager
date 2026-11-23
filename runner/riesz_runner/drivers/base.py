@@ -383,6 +383,14 @@ class Driver:
             "capabilities": self.capabilities.as_dict(),
         }
 
+    def has_pending_queue(self) -> bool:
+        """Whether any user/system prompt is currently queued inside this driver."""
+        return bool(self.snapshot().get("queue"))
+
+    def has_queued(self, message_uuid: str) -> bool:
+        """Whether `message_uuid` is still sitting in this driver's queue."""
+        return any(q.get("uuid") == message_uuid for q in self.snapshot().get("queue") or ())
+
     @property
     def pid(self) -> int | None:
         return None

@@ -108,6 +108,29 @@ def prompt(rid, p):
             update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "checked again"}})
         threading.Thread(target=wake, daemon=True).start()
         return
+    elif text == "timer_ask":
+        # Autonomous wake-up that requests user permission mid-turn.
+        update(sid, {"sessionUpdate": "tool_call", "toolCallId": "t5", "title": "Run schedule", "kind": "other", "status": "in_progress",
+                     "rawInput": {"DurationSeconds": 1, "Prompt": "check and edit"}})
+        send({"id": rid, "result": {"stopReason": "end_turn"}})
+
+        def wake_and_ask():
+            cancelled.wait(0.2)
+            update(sid, {"sessionUpdate": "tool_call_update", "toolCallId": "t5", "status": "completed"})
+            call = {"toolCallId": "t6", "title": "WriteFile auto.txt", "kind": "edit", "status": "pending",
+                    "content": [{"type": "diff", "path": "/w/auto.txt", "oldText": "x\n", "newText": "y\n"}],
+                    "locations": [{"path": "/w/auto.txt"}]}
+            update(sid, {"sessionUpdate": "tool_call", **call})
+            answer = ask({"sessionId": sid, "toolCall": call, "options": [
+                {"optionId": "proceed_once", "name": "Allow", "kind": "allow_once"},
+                {"optionId": "cancel", "name": "Reject", "kind": "reject_once"}]})
+            outcome = answer["outcome"]
+            chosen = outcome.get("optionId", outcome["outcome"])
+            update(sid, {"sessionUpdate": "tool_call_update", "toolCallId": "t6",
+                         "status": "completed" if chosen.startswith("proceed") else "failed"})
+            update(sid, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": f"autonomous {chosen}"}})
+        threading.Thread(target=wake_and_ask, daemon=True).start()
+        return
     elif text == "wait":
         update(sid, {"sessionUpdate": "tool_call", "toolCallId": "t2", "title": "sleep 60", "kind": "execute", "status": "in_progress"})
         cancelled.wait(30)

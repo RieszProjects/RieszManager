@@ -482,6 +482,7 @@ class SubagentWatcher:
         self._pending: dict[str, dict[str, Any]] = {}
         self._reported_this_prompt: set[str] = set()
         self._stop_after: set[str] = set()
+        self._deferred: set[str] = set()
         self._locks: dict[str, asyncio.Lock] = {}
         self._in_flight: set[str] = set()
         self._wakeup = asyncio.Event()
@@ -548,6 +549,7 @@ class SubagentWatcher:
     def prepare_prompt(self, child: str, *, sync_wait: bool, stop_after: bool = False) -> None:
         """Register before sending a prompt to `child`, so fast completions cannot race."""
         self._reported_this_prompt.discard(child)
+        self._deferred.discard(child)
         if child in self._pending:
             self._pending.pop(child, None)
             self._save()
@@ -592,6 +594,7 @@ class SubagentWatcher:
         async with self._lock(child):
             self._sync.pop(child, None)
             self._sync_saw_result.discard(child)
+            self._deferred.discard(child)
             parent, _ = self._parent_of(child)
             if finished:
                 key, text = await _last_reply_item(self.hub, child, include_error=True)
@@ -683,9 +686,11 @@ class SubagentWatcher:
             if not parent:
                 return
             # Still busy, queued, waiting on a permission prompt, or running open background tasks:
-            # wait for the later autonomous turn that completes them.
+            # defer delivery until either a later autonomous turn finishes or flush_due sees work end.
             if self.hub.session_working(child):
+                self._deferred.add(child)
                 return
+            self._deferred.discard(child)
             is_error = bool((event.get("result") or {}).get("isError"))
             key, text = await _last_reply_item(self.hub, child, include_error=is_error)
             if not text or self._is_delivered(child, key, text):
@@ -706,6 +711,7 @@ class SubagentWatcher:
 
     async def _deliver_exit(self, child: str, event: dict[str, Any]) -> None:
         async with self._lock(child):
+            self._deferred.discard(child)
             if child in self._sync or event.get("requested"):
                 return
             parent, pref = self._parent_of(child)
@@ -736,7 +742,13 @@ class SubagentWatcher:
                 _announce(self.hub, parent)
 
     async def flush_due(self) -> None:
-        """Deliver any pending callbacks whose retry backoff has elapsed."""
+        """Deliver deferred completions once their background work ends, and retry due pending callbacks."""
+        for child in list(self._deferred):
+            if child in self._sync or not self._parent_of(child)[0]:
+                self._deferred.discard(child)
+                continue
+            if not self.hub.session_working(child):
+                await self._deliver(child, {})
         now = time.time()
         for child, entry in list(self._pending.items()):
             if float(entry.get("next_at") or 0.0) <= now:

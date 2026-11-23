@@ -52,6 +52,7 @@ GIVE_UP_AFTER = 2 * 24 * 3600
 EXIT_ATTEMPTS = 3
 CHECK_INTERVAL = 15.0
 BUSY_RETRY = 60
+STUCK_SENT_GRACE = 60.0
 
 NETWORK_RE = re.compile(r"ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|fetch failed|can't reach|"
                         r"network|connection (lost|reset|refused|closed|error)|timed? ?out|stream (disconnected|closed)", re.I)
@@ -175,9 +176,18 @@ class AutoResume:
         except (OSError, ValueError) as exc:
             log.warning("cannot read %s: %s", self.path, exc)
             return
+        changed = False
+        now = time.time()
         for entry in data.get("sessions", []) if isinstance(data, dict) else []:
             if isinstance(entry, dict) and isinstance(entry.get("sessionId"), str):
-                self.items[entry["sessionId"]] = entry
+                sid = entry["sessionId"]
+                self.items[sid] = entry
+                if entry.get("sentAt") is not None and entry.get("nextAt") is None:
+                    # The runner restarted before the prior resume attempt reported a result.
+                    self._reconcile_stuck(sid, entry, now, delay=CHECK_INTERVAL)
+                    changed = True
+        if changed:
+            self._save()
 
     def _save(self) -> None:
         try:
@@ -246,6 +256,7 @@ class AutoResume:
             route = rec.get("api") if rec else (self.hub.prefs.get(sid) or {}).get("api")
             resets_at = self.hub.limits.reset_time(route)
         entry.update(cause=fail.get("cause") or "server", message=fail.get("message") or "", resetsAt=resets_at, sentAt=None)
+        entry.pop("sentUuid", None)
         if now - entry["since"] > GIVE_UP_AFTER or (entry["cause"] == "exit" and entry["attempts"] >= EXIT_ATTEMPTS):
             log.info("auto-resume of %s given up after %d attempts", sid[:8], entry["attempts"])
             self.items.pop(sid, None)
@@ -283,6 +294,18 @@ class AutoResume:
                 log.exception("auto-resume tick failed")
             await asyncio.sleep(CHECK_INTERVAL)
 
+    def _reconcile_stuck(self, sid: str, entry: dict[str, Any], now: float, *, delay: float | None = None) -> None:
+        """Recover an entry left in `sentAt != None, nextAt == None` after a restart or dropped result."""
+        entry["sentAt"] = None
+        entry.pop("sentUuid", None)
+        if now - float(entry.get("since") or now) > GIVE_UP_AFTER or (
+            entry.get("cause") == "exit" and entry.get("attempts", 0) >= EXIT_ATTEMPTS
+        ):
+            log.info("auto-resume of %s given up during reconcile after %d attempts", sid[:8], entry.get("attempts", 0))
+            self.items.pop(sid, None)
+            return
+        entry["nextAt"] = (now + delay) if delay is not None else self._next(entry, now)
+
     async def _tick(self) -> None:
         if self.hub.reload_ready.is_set():
             return
@@ -292,6 +315,16 @@ class AutoResume:
                 self.items.pop(sid, None)
                 self._save()
                 continue
+            if entry.get("sentAt") is not None and entry.get("nextAt") is None:
+                if (
+                    now - float(entry["sentAt"]) >= STUCK_SENT_GRACE
+                    and not self.hub.session_working(sid)
+                    and not self.hub.message_queued(sid, entry.get("sentUuid"))
+                ):
+                    log.info("auto-resume of %s stuck in sent state while idle; rescheduling", sid[:8])
+                    self._reconcile_stuck(sid, entry, now)
+                    await self._changed(sid)
+                continue
             if entry.get("nextAt") is None or entry["nextAt"] > now:
                 continue
             if self.hub.session_working(sid):
@@ -300,15 +333,18 @@ class AutoResume:
             await self._fire(sid, entry)
 
     async def _fire(self, sid: str, entry: dict[str, Any]) -> None:
+        message_uuid = str(uuidlib.uuid4())
         entry["attempts"] = entry.get("attempts", 0) + 1
         entry["sentAt"] = time.time()
+        entry["sentUuid"] = message_uuid
         entry["nextAt"] = None
         try:
-            await self.hub.delivery.send(sid, resume_text(entry), [], str(uuidlib.uuid4()))
+            await self.hub.delivery.send(sid, resume_text(entry), [], message_uuid)
             log.info("auto-resume: picked %s up again (attempt %d)", sid[:8], entry["attempts"])
         except Exception as exc:  # noqa: BLE001 - tried again later
             log.warning("auto-resume: could not message %s: %s", sid[:8], exc)
             entry["sentAt"] = None
+            entry.pop("sentUuid", None)
             entry["nextAt"] = self._next(entry, time.time())
         await self._changed(sid)
 

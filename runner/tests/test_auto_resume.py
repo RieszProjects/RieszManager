@@ -84,6 +84,7 @@ def _fake_hub(state_dir: Path) -> SimpleNamespace:
         closing=False,
         reload_ready=asyncio.Event(),
         session_working=lambda sid: False,
+        message_queued=lambda sid, u: False,
         session_state=lambda sid: {"alive": False},
         session_summary=lambda sid: {"sessionId": sid},
         broadcast_session=AsyncMock(),
@@ -166,6 +167,35 @@ class AutoResumeLifecycleTest(unittest.IsolatedAsyncioTestCase):
             # A scheduled message went through before nextAt
             await ar.on_result("s1", {"subtype": "success", "isError": False})
             self.assertLessEqual(ar.view("s1")["nextAt"], time.time() + 1)
+
+    async def test_reconciles_stuck_sent_entry_on_restart_and_idle(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            hub = _fake_hub(Path(td))
+            path = Path(td) / "auto_resume.json"
+            now = time.time()
+            # Persisted in-flight entry across runner restart -> reconciled on load
+            path.write_text(json.dumps({"sessions": [{
+                "sessionId": "s1", "cause": "network", "message": "timeout",
+                "since": now - 300, "attempts": 1, "sentAt": now - 10, "nextAt": None,
+            }]}), encoding="utf-8")
+            ar = AutoResume(hub)
+            view = ar.view("s1")
+            assert view is not None
+            self.assertIsNone(view["sentAt"])
+            self.assertIsNotNone(view["nextAt"])
+
+            # Runtime stuck sentAt while idle and not queued -> reconciled in _tick
+            ar.items["s1"]["sentAt"] = now - 120
+            ar.items["s1"]["sentUuid"] = "u-1"
+            ar.items["s1"]["nextAt"] = None
+            hub.message_queued = lambda sid, u: True
+            await ar._tick()
+            self.assertIsNotNone(ar.items["s1"]["sentAt"])    # still queued/held -> do not reschedule
+
+            hub.message_queued = lambda sid, u: False
+            await ar._tick()
+            self.assertIsNone(ar.items["s1"]["sentAt"])
+            self.assertIsNotNone(ar.items["s1"]["nextAt"])
 
 
 if __name__ == "__main__":

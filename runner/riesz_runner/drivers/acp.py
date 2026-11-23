@@ -260,6 +260,7 @@ class AcpDriver(Driver):
         self._open: dict[str, float] = {}           # tool calls started and not finished: id -> when
         self._last_update = 0.0                     # when the last session/update came (monotonic)
         self._autonomous = False                    # working on its own, without a prompt of ours
+        self._autonomous_cancel: asyncio.Event | None = None
         self._elicitation_answers: dict[str, dict[str, str]] = {}  # toolCallId -> {question: formatted answer}
 
     @property
@@ -475,6 +476,7 @@ class AcpDriver(Driver):
         """The agent works without a prompt of ours (Antigravity: a background call finished, its own timer
         fired): shown as working, and a reload waits, until its updates stop."""
         self._autonomous = True
+        self._autonomous_cancel = asyncio.Event()
         self._turn += 1
         self._close_current()
         self.turn_started()
@@ -482,16 +484,40 @@ class AcpDriver(Driver):
 
     async def _watch_autonomous(self) -> None:
         await self.emit_state()
+        cancel_ev = self._autonomous_cancel
+        interrupted = False
         while self._autonomous and self.alive:
-            await asyncio.sleep(min(2.0, self.autonomous_quiet / 2))
-            if time.monotonic() - self._last_update >= self.autonomous_quiet:
+            if cancel_ev is not None and cancel_ev.is_set():
+                interrupted = True
                 break
+            # Waiting for a user permission/question response is synchronous: never time out the turn while open.
+            if self.permissions:
+                self._last_update = time.monotonic()
+            elif time.monotonic() - self._last_update >= self.autonomous_quiet:
+                break
+            wait_s = min(2.0, self.autonomous_quiet / 2)
+            if cancel_ev is not None:
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(cancel_ev.wait(), timeout=wait_s)
+            else:
+                await asyncio.sleep(wait_s)
+        if interrupted:
+            # Drain the agent's immediate cancel-ack updates so they stay inside this turn instead of
+            # spawning a second autonomous turn right after we mark the session idle.
+            await self._settle(quiet=0.25, limit=1.5)
         if not self._autonomous:
             return                                      # a prompt of ours took over, or the process ended
         self._autonomous = False
+        self._autonomous_cancel = None
         self._close_current()
-        self._to_background()
-        result = self.turn_finished("success", stop_reason="end_turn")
+        if interrupted:
+            self._open.clear()
+            self.mark_unfinished_tools("interrupted")
+            self.items.put(interrupted_item(f"a:t:{self._turn}:end"))
+            result = self.turn_finished("interrupted", stop_reason="interrupted")
+        else:
+            self._to_background()
+            result = self.turn_finished("success", stop_reason="end_turn")
         await self.flush()
         await self.emit({"ev": "result", "result": result, "text": self.last_assistant_text()[:400]})
         if self._queue:
@@ -525,6 +551,8 @@ class AcpDriver(Driver):
         if self.peer is None or not self.busy:
             return
         self.cancel_permissions()
+        if self._autonomous_cancel is not None:
+            self._autonomous_cancel.set()
         with contextlib.suppress(PeerClosed):
             await self.peer.notify("session/cancel", {"sessionId": self.session_id})
 

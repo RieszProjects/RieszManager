@@ -22,6 +22,7 @@ import time
 import urllib.parse
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +35,8 @@ CREATED_RE = re.compile(r"Created the following subagent:\s*(\{[\s\S]*?\})")
 ACTIVE_LIST_RE = re.compile(r"You have \d+ active subagent\(s\):\s*(\[[\s\S]*?\])")
 TIMESTAMPS_RE = re.compile(r"^(?:(?:Created|Completed) At:[^\n]*\n)+")
 BG_TASK_START_RE = re.compile(r"Tool is running as a background task with task id:\s*([^\s]+)")
-BG_TASK_DONE_RE = re.compile(r'Task id "([^"]+)" finished')
+BG_TASK_DONE_RE = re.compile(r'Task id "([^"]+)" (?:finished|was canceled|stopped)')
+BG_TASK_RESET_MARKER = "All your subagents and background tasks have been stopped"
 SYS_MSG_RE = re.compile(
     r"\[Message\]\s+timestamp=[^\s]+\s+sender=([^\s]+)\s+priority=[^\s]+\s+content=([\s\S]*?)(?:\n</SYSTEM_MESSAGE>|$)"
 )
@@ -64,6 +66,16 @@ def _unwrap_args(raw: Any) -> dict[str, Any]:
 
 def _clean_generic_content(text: str) -> str:
     return TIMESTAMPS_RE.sub("", text).strip()
+
+
+def _step_ts(step: dict[str, Any]) -> float:
+    raw = step.get("created_at")
+    if isinstance(raw, str) and raw:
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            pass
+    return 0.0
 
 
 def _file_uri_to_path(uri: str | None) -> Path | None:
@@ -128,6 +140,7 @@ class _ParentIndex:
     offset: int = 0
     pending_invokes: list[dict[str, str]] = field(default_factory=list)
     children: dict[str, _SubagentMeta] = field(default_factory=dict)
+    open_bg_tasks: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -234,6 +247,11 @@ class AgySubagentStore:
                         "model": str(args.get("Model") or "").strip(),
                         "workspace": str(args.get("Workspace") or "").strip(),
                     })
+                elif name == "manage_task":
+                    action = str(args.get("Action") or "").strip()
+                    tid = str(args.get("TaskId") or "").strip()
+                    if action == "kill" and tid:
+                        idx.open_bg_tasks.pop(tid, None)
                 elif name == "manage_subagents":
                     action = str(args.get("Action") or "").strip()
                     if action == "kill_all":
@@ -249,6 +267,9 @@ class AgySubagentStore:
             content = str(step.get("content") or "")
             if not content:
                 return
+            ts = _step_ts(step)
+            for m in BG_TASK_START_RE.finditer(content):
+                idx.open_bg_tasks[m.group(1)] = ts
             for m in CREATED_RE.finditer(content):
                 try:
                     info = json.loads(m.group(1))
@@ -292,6 +313,12 @@ class AgySubagentStore:
                         meta.agent_type = str(row["type"])
                     if row.get("transcript"):
                         meta.transcript_path = _file_uri_to_path(str(row["transcript"])) or meta.transcript_path
+        elif stype == "SYSTEM_MESSAGE":
+            content = str(step.get("content") or "")
+            for m in BG_TASK_DONE_RE.finditer(content):
+                idx.open_bg_tasks.pop(m.group(1), None)
+            if BG_TASK_RESET_MARKER in content:
+                idx.open_bg_tasks.clear()
 
     def _sync_status(self, meta: _SubagentMeta) -> _SubagentStatus:
         path = self._safe_transcript(meta)
@@ -335,7 +362,7 @@ class AgySubagentStore:
                 content = str(step.get("content") or "")
                 for m in BG_TASK_DONE_RE.finditer(content):
                     status.open_bg_tasks.discard(m.group(1))
-                if "All your subagents and background tasks have been stopped" in content:
+                if BG_TASK_RESET_MARKER in content:
                     status.open_bg_tasks.clear()
         return status
 
@@ -382,6 +409,21 @@ class AgySubagentStore:
 
     def has_running(self, parent_sid: str, *, parent_alive: bool) -> bool:
         return bool(self.running_ids(parent_sid, parent_alive=parent_alive))
+
+    def has_active_work(self, parent_sid: str, *, parent_alive: bool, started_at: float | None = None) -> bool:
+        """Whether an Antigravity session has live built-in subagents or open background tasks/timers."""
+        if not parent_alive:
+            return False
+        if self.has_running(parent_sid, parent_alive=True):
+            return True
+        idx = self._sync_parent(parent_sid)
+        if idx is None or not idx.open_bg_tasks:
+            return False
+        if started_at is None:
+            return True
+        cutoff = started_at - 5.0
+        # Entries without a parsed timestamp (0.0) are treated as current; older ones belong to a prior process.
+        return any(ts == 0.0 or ts >= cutoff for ts in idx.open_bg_tasks.values())
 
     async def items(self, parent_sid: str, agent_id: str, *, parent_alive: bool) -> tuple[list[dict[str, Any]], float, bool] | None:
         """All display items of one Antigravity built-in subagent, plus `(mtime, running)`."""
