@@ -9,7 +9,6 @@ import { create } from "zustand";
 import { api } from "@/api/client";
 import type { LiveInfo, SessionSummary } from "@/api/types";
 import { relativeTime } from "@/lib/format";
-import { harnessLabel, useHarnesses } from "@/lib/harnesses";
 import { useNowSeconds, useTick } from "@/lib/useNow";
 import { useUi } from "@/store/ui";
 
@@ -132,7 +131,6 @@ export function SessionSubagents({ session, live }: { session: SessionSummary; l
   const route = useUi((s) => s.route);
   const current = useUi((s) => (s.subagent?.sessionId === sessionId ? s.subagent : null));
   const now = useNowSeconds();
-  useHarnesses();
   const [olderShown, setOlderShown] = useState(false);
   const { running, recent, older } = useMemo(() => split(list ?? [], live, now), [list, live, now]);
 
@@ -156,7 +154,6 @@ export function SessionSubagents({ session, live }: { session: SessionSummary; l
       >
         {active ? <LoaderCircle size={12} className="spin" /> : <ViaIcon a={a} />}
         <span className="rz-subagent-row-title clamp-1">{a.description || a.agentType || "子代理"}</span>
-        {a.via === "riesz" && a.harness && <span className={`rz-tag harness-${a.harness} rz-subagent-tag`}>{harnessLabel(a.harness)}</span>}
         <span className="rz-subagent-row-time">{active ? "运行中" : relativeTime(a.mtime)}</span>
       </button>
     );
