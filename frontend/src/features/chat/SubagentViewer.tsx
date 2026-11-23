@@ -1,24 +1,21 @@
-/** Main-area full-screen read-only view for a harness-native subagent's conversation. Refreshes while running. */
+/** Read-only conversation adapter for a harness-native subagent, reusing ConversationShell, MessageList and Composer. */
 import { IconButton, Tooltip } from "@mui/material";
-import { ArrowLeft, ArrowUp, Bot, Cpu, GitBranch, LoaderCircle, Paperclip, Shield } from "lucide-react";
+import { ArrowLeft, GitBranch, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/api/client";
 import type { Item, LiveInfo, SessionState } from "@/api/types";
 import { StatusDot } from "@/components/StatusDot";
-import { modeTier, modelLabel, permissionLabel } from "@/lib/format";
-import { useHarnesses, useHarnessLabel, useRouteTag } from "@/lib/harnesses";
-import { useIsMobile } from "@/lib/useIsMobile";
+import { useHarnessLabel, useRouteTag } from "@/lib/harnesses";
 import { sessionTitle, useApp } from "@/store/app";
 import { useSessions } from "@/store/sessions";
 import { type SubagentTarget, useUi } from "@/store/ui";
-import { MobileHeaderButtons } from "../layout/MobileHeaderButtons";
-import { RightDock, RightPanelButton } from "../layout/RightDock";
+import { Composer } from "../composer/Composer";
 import { NodeApprovalBanner } from "../nodes/NodeApprovalBanner";
-import { NodeBindChip } from "../nodes/NodeBindChip";
 import { NodesButton } from "../nodes/NodesButton";
 import { NotesButton } from "../notes/NotesButton";
+import { ConversationShell } from "./ConversationShell";
 import { MessageList } from "./MessageList";
-import { SessionContext, type SessionContextValue } from "./SessionContext";
+import type { SessionContextValue } from "./SessionContext";
 import { ActivityLine } from "./StreamingView";
 
 const POLL_MS = 3000;
@@ -50,11 +47,9 @@ export function SubagentViewer({ target }: { target: SubagentTarget }) {
   const openSubagent = useUi((s) => s.openSubagent);
   const navigate = useUi((s) => s.navigate);
   const setContextProject = useUi((s) => s.setContextProject);
-  const isMobile = useIsMobile();
   const parentSummary = useApp((s) => s.sessions[target.sessionId]);
   const projects = useApp((s) => s.projects);
   const state = useSessions((s) => s.data[target.sessionId]?.state as SessionState | undefined);
-  const harnesses = useHarnesses();
   const [agent, setAgent] = useState<SubagentInfo | null>(null);
   const [liveStatus, setLiveStatus] = useState<boolean | undefined>(undefined);
   const [items, setItems] = useState<Item[]>([]);
@@ -66,10 +61,10 @@ export function SubagentViewer({ target }: { target: SubagentTarget }) {
   const olderLoaded = useRef(false);
   const loadingOlderRef = useRef(false);
 
+  const projectId = target.projectId ?? parentSummary?.project ?? null;
   useEffect(() => {
-    const pid = target.projectId ?? parentSummary?.project ?? null;
-    if (pid) setContextProject(pid);
-  }, [target.projectId, parentSummary?.project, setContextProject]);
+    if (projectId) setContextProject(projectId);
+  }, [projectId, setContextProject]);
 
   const toolUseId = target.toolUseId ?? agent?.toolUseId ?? null;
   const task = useMemo(
@@ -79,7 +74,6 @@ export function SubagentViewer({ target }: { target: SubagentTarget }) {
   const liveRunning = useApp((s) => Boolean(toolUseId && s.live[target.sessionId]?.agents?.includes(toolUseId)));
   const running = liveStatus ?? agent?.running ?? (Boolean(task && state?.alive) || liveRunning);
 
-  // Find the subagent of this tool call / agentId.
   useEffect(() => {
     setAgent(null);
     setLiveStatus(undefined);
@@ -169,7 +163,6 @@ export function SubagentViewer({ target }: { target: SubagentTarget }) {
   const harness = agent?.harness ?? parentSummary?.harness ?? "claude";
   const harnessName = useHarnessLabel(harness);
   const apiTag = useRouteTag(state?.api ?? parentSummary?.api, harness);
-  const harnessSpec = harnesses.find((h) => h.id === harness);
 
   const context = useMemo<SessionContextValue>(() => {
     const pending = new Set<string>();
@@ -179,14 +172,14 @@ export function SubagentViewer({ target }: { target: SubagentTarget }) {
     return {
       sessionId: target.sessionId,
       cwd: target.cwd ?? parentSummary?.cwd ?? null,
-      projectId: target.projectId ?? parentSummary?.project ?? null,
+      projectId,
       pendingTools: pending,
       tasks: [],
       hosted: false,
       harness,
       capabilities: state?.capabilities ?? null,
     };
-  }, [items, running, target, parentSummary?.cwd, parentSummary?.project, harness, state?.capabilities]);
+  }, [items, running, target.sessionId, target.cwd, parentSummary?.cwd, projectId, harness, state?.capabilities]);
 
   const backToParent = () => {
     openSubagent(null);
@@ -204,19 +197,10 @@ export function SubagentViewer({ target }: { target: SubagentTarget }) {
   const explicitModel = agent?.model && agent.model !== "inherit" ? agent.model : null;
   const parentModel = state?.model ?? parentSummary?.model ?? null;
   const effectiveModel = transcriptModel ?? explicitModel ?? parentModel;
-  const modelDisplay = effectiveModel ? modelLabel(effectiveModel) : null;
   const modelInherited = !transcriptModel && !explicitModel && Boolean(parentModel);
 
-  // Resolve permission mode: research subagent runs read-only sandbox; otherwise inherits parent's permission mode
   const isResearchSandbox = agent?.agentType === "research";
-  const rawPerm = isResearchSandbox ? "plan" : (state?.permissionMode ?? parentSummary?.permissionMode ?? "default");
-  const modeOptions = state?.modes ?? harnessSpec?.modes ?? null;
-  const permLabel = isResearchSandbox
-    ? "只读沙箱"
-    : (modeOptions?.find((m) => m.id === rawPerm)?.name ?? permissionLabel(rawPerm));
-  const permTier = isResearchSandbox ? "readonly" : modeTier(rawPerm, modeOptions);
-
-  const projectId = target.projectId ?? parentSummary?.project ?? null;
+  const effectiveMode = isResearchSandbox ? "plan" : (state?.permissionMode ?? parentSummary?.permissionMode ?? "default");
   const project = projectId ? projects.find((pr) => pr.id === projectId) : undefined;
   const parentName = parentSummary ? sessionTitle(parentSummary) : target.sessionId.slice(0, 8);
   const workspaceTag = agent?.workspace ? WORKSPACE_LABEL[agent.workspace] : null;
@@ -238,132 +222,92 @@ export function SubagentViewer({ target }: { target: SubagentTarget }) {
   const liveDot: LiveInfo | null = running ? { hosted: true, busy: true, pid: 0 } : null;
   const sessionKey = `subagent:${target.sessionId}:${agent?.agentId ?? target.agentId ?? target.toolUseId ?? ""}`;
 
-  const chips = (
-    <>
-      <button type="button" className={`rz-chip harness-${harness}`} disabled title={`所属工具：${harnessName}`}>
-        <Bot size={13} />
-        <span>{harnessName}</span>
-      </button>
-      <button
-        type="button"
-        className={`rz-chip tier-${permTier}`}
-        disabled
-        title={isResearchSandbox ? "研究型子代理运行在只读沙箱中" : `权限模式（继承父会话）：${permLabel}`}
-      >
-        <Shield size={13} />
-        <span>{permLabel}</span>
-      </button>
-      {modelDisplay && (
-        <button
-          type="button"
-          className="rz-chip"
-          disabled
-          title={modelInherited ? `模型（继承父会话）：${effectiveModel}` : `模型：${effectiveModel}`}
-        >
-          <Cpu size={13} />
-          <span>{modelDisplay}</span>
-        </button>
-      )}
-      {workspaceTag && (
-        <button type="button" className="rz-chip" disabled title={`工作区隔离模式：${workspaceTag}`}>
-          <GitBranch size={13} />
-          <span>{workspaceTag}</span>
-        </button>
-      )}
-      <NodeBindChip sessionId={target.sessionId} />
-    </>
-  );
-
-  const footer = (
-    <ActivityLine
-      busy={running}
-      since={task?.startedAt ? task.startedAt * 1000 : null}
-      waiting={false}
-      label="子代理运行中"
-      interruptible={false}
-    />
-  );
-
   return (
-    <SessionContext.Provider value={context}>
-      <div className="rz-chat">
-        <header className="rz-chat-head">
-          {isMobile && <MobileHeaderButtons side="left" />}
-          <Tooltip title={`返回父会话：${parentName}`}>
-            <IconButton size="small" onClick={backToParent} aria-label="返回父会话">
-              <ArrowLeft size={18} />
-            </IconButton>
-          </Tooltip>
-          <div className="rz-chat-title">
-            <div className="clamp-1 rz-chat-title-text">{title}</div>
-            <div className="rz-chat-sub">
-              <StatusDot live={liveDot} size={7} />
-              <span className={`rz-tag harness harness-${harness}`}>{harnessName}</span>
-              {apiTag && <span className="rz-tag harness">{apiTag}</span>}
-              {project && <span className="clamp-1">{project.name}</span>}
-              {parentSummary?.gitBranch && <span className="dim mono clamp-1">⎇ {parentSummary.gitBranch}</span>}
-              {agent?.agentType && <span className="rz-tag">{agent.agentType}</span>}
-              <span className="dim clamp-1">父会话：{parentName}</span>
-            </div>
-          </div>
+    <ConversationShell
+      context={context}
+      headStart={
+        <Tooltip title={`返回父会话：${parentName}`}>
+          <IconButton size="small" onClick={backToParent} aria-label="返回父会话">
+            <ArrowLeft size={18} />
+          </IconButton>
+        </Tooltip>
+      }
+      title={title}
+      subtitle={
+        <>
+          <StatusDot live={liveDot} size={7} />
+          <span className={`rz-tag harness harness-${harness}`}>{harnessName}</span>
+          {apiTag && <span className="rz-tag harness">{apiTag}</span>}
+          {project && <span className="clamp-1">{project.name}</span>}
+          {parentSummary?.gitBranch && <span className="dim mono clamp-1">⎇ {parentSummary.gitBranch}</span>}
+          {agent?.agentType && <span className="rz-tag">{agent.agentType}</span>}
+          <span className="dim clamp-1">父会话：{parentName}</span>
+        </>
+      }
+      headActions={
+        <>
           <NodesButton sessionId={target.sessionId} />
           <NotesButton sessionId={target.sessionId} />
-          {isMobile ? <MobileHeaderButtons side="right" /> : <RightPanelButton />}
-        </header>
-        <div className="rz-chat-row">
-          <div className="rz-chat-col">
-            <div className="rz-chat-body">
-              {error ? (
-                <div className="rz-center dim">{error}</div>
-              ) : !loaded ? (
-                <div className="rz-center"><LoaderCircle className="spin" size={22} /></div>
-              ) : (
-                <MessageList
-                  sessionKey={sessionKey}
-                  items={items}
-                  hasMore={hasMore}
-                  loadingOlder={loadingOlder}
-                  onLoadOlder={() => void loadEarlier()}
-                  footer={footer}
-                  emptyState={
-                    <div className="rz-chat-empty">
-                      <div className="dim">{running ? "子代理已启动，等待输出…" : "暂无消息记录"}</div>
-                    </div>
-                  }
-                />
-              )}
-            </div>
-            <div className="rz-chat-bottom">
-              <NodeApprovalBanner sessionId={target.sessionId} />
-              <div className="rz-composer-wrap">
-                {isMobile && <div className="rz-composer-chips rz-composer-readonly-chips">{chips}</div>}
-                <div className="rz-composer readonly">
-                  <textarea
-                    rows={1}
-                    disabled
-                    value=""
-                    placeholder="内置子代理由父会话驱动，当前为只读模式，无法直接发送消息"
-                  />
-                  <div className="rz-composer-bar">
-                    <IconButton size="small" disabled aria-label="添加文件"><Paperclip size={17} /></IconButton>
-                    {!isMobile && chips}
-                    <div className="rz-spacer" />
-                    {statsParts.length > 0 && <span className="rz-composer-readonly-stat dim">{statsParts.join(" · ")}</span>}
-                    <Tooltip title="内置子代理只读，无法直接发送消息">
-                      <span>
-                        <IconButton className="rz-send" disabled aria-label="发送">
-                          <ArrowUp size={18} />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                  </div>
-                </div>
+        </>
+      }
+      body={
+        error ? (
+          <div className="rz-center dim">{error}</div>
+        ) : !loaded ? (
+          <div className="rz-center"><LoaderCircle className="spin" size={22} /></div>
+        ) : (
+          <MessageList
+            sessionKey={sessionKey}
+            items={items}
+            hasMore={hasMore}
+            loadingOlder={loadingOlder}
+            onLoadOlder={() => void loadEarlier()}
+            footer={
+              <ActivityLine
+                busy={running}
+                since={task?.startedAt ? task.startedAt * 1000 : null}
+                waiting={false}
+                label="子代理运行中"
+                interruptible={false}
+              />
+            }
+            emptyState={
+              <div className="rz-chat-empty">
+                <div className="dim">{running ? "子代理已启动，等待输出…" : "暂无消息记录"}</div>
               </div>
-            </div>
-          </div>
-          <RightDock />
-        </div>
-      </div>
-    </SessionContext.Provider>
+            }
+          />
+        )
+      }
+      bottom={
+        <>
+          <NodeApprovalBanner sessionId={target.sessionId} />
+          <Composer
+            sessionId={target.sessionId}
+            projectId={projectId}
+            state={state ?? null}
+            defaultModel={effectiveModel}
+            defaultMode={effectiveMode}
+            harness={harness}
+            api={state?.api ?? parentSummary?.api}
+            readOnly
+            placeholder="内置子代理由父会话驱动，当前为只读模式"
+            readOnlyModeLabel={isResearchSandbox ? "只读沙箱" : undefined}
+            readOnlyModeTier={isResearchSandbox ? "readonly" : undefined}
+            readOnlyModeTitle={isResearchSandbox ? "研究型子代理运行在只读沙箱中" : "权限模式（继承父会话）"}
+            readOnlyModelTitle={effectiveModel ? (modelInherited ? `模型（继承父会话）：${effectiveModel}` : `模型：${effectiveModel}`) : undefined}
+            extraChips={
+              workspaceTag ? (
+                <button type="button" className="rz-chip" disabled title={`工作区隔离模式：${workspaceTag}`}>
+                  <GitBranch size={13} />
+                  <span>{workspaceTag}</span>
+                </button>
+              ) : undefined
+            }
+            rightNote={statsParts.length > 0 ? <span className="rz-composer-readonly-stat dim">{statsParts.join(" · ")}</span> : undefined}
+          />
+        </>
+      }
+    />
   );
 }

@@ -4,7 +4,7 @@
  */
 import { IconButton, Tooltip } from "@mui/material";
 import { ArrowUp, FileText, Image as ImageIcon, LoaderCircle, Mic, Paperclip, Square, X } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
 import { api } from "@/api/client";
 import type { SessionState } from "@/api/types";
 import { composerBus } from "@/lib/composerBus";
@@ -39,6 +39,14 @@ interface Props {
   /** The session's harness and model API as the session list knows them, until its state arrives. */
   harness?: string | null;
   api?: string | null;
+  /** Render the exact same composer chrome in disabled read-only mode (e.g. built-in subagents). */
+  readOnly?: boolean;
+  readOnlyModeLabel?: string;
+  readOnlyModeTier?: string;
+  readOnlyModeTitle?: string;
+  readOnlyModelTitle?: string;
+  extraChips?: ReactNode;
+  rightNote?: ReactNode;
 }
 
 const isCoarse = () => window.matchMedia?.("(pointer: coarse)").matches ?? false;
@@ -66,7 +74,11 @@ async function moveTo(sessionId: string, target: string): Promise<void> {
   }
 }
 
-export function Composer({ sessionId, projectId, state, defaultModel, defaultMode, onCreated, autoFocus, placeholder, dropRef, harness: knownHarness, api: knownApi }: Props) {
+export function Composer({
+  sessionId, projectId, state, defaultModel, defaultMode, onCreated, autoFocus, placeholder, dropRef,
+  harness: knownHarness, api: knownApi, readOnly = false, readOnlyModeLabel, readOnlyModeTier,
+  readOnlyModeTitle, readOnlyModelTitle, extraChips, rightNote,
+}: Props) {
   const config = useApp((s) => s.config);
   const isMobile = useIsMobile();
   const draftKey = `draft:${sessionId ?? `new:${projectId ?? ""}`}`;
@@ -109,11 +121,17 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
   const hosted = Boolean(state?.hosted && state.alive);
   const external = Boolean(state?.external && state.alive && !hosted);
   const busy = Boolean(state?.busy);
-  const model = (hosted ? state?.model : localModel ?? state?.model ?? defaultModel)
-    ?? (!nativeRoute ? null : other ? info?.defaultModel ?? models.find((m) => m.isDefault)?.value : defaults?.model) ?? null;
-  const effort = (hosted ? state?.effort : localEffort ?? state?.effort) ?? (other || !nativeRoute ? null : defaults?.effort) ?? null;
-  const mode = (hosted ? state?.permissionMode : localMode ?? state?.permissionMode ?? defaultMode)
-    ?? (other ? info?.defaultMode ?? harnessModes?.[0]?.id : config?.defaultPermissionMode) ?? "default";
+  const model = readOnly
+    ? (defaultModel ?? null)
+    : (hosted ? state?.model : localModel ?? state?.model ?? defaultModel)
+      ?? (!nativeRoute ? null : other ? info?.defaultModel ?? models.find((m) => m.isDefault)?.value : defaults?.model) ?? null;
+  const effort = readOnly
+    ? null
+    : (hosted ? state?.effort : localEffort ?? state?.effort) ?? (other || !nativeRoute ? null : defaults?.effort) ?? null;
+  const mode = readOnly
+    ? (defaultMode ?? "default")
+    : (hosted ? state?.permissionMode : localMode ?? state?.permissionMode ?? defaultMode)
+      ?? (other ? info?.defaultMode ?? harnessModes?.[0]?.id : config?.defaultPermissionMode) ?? "default";
 
   const pickHarness = (next: string) => {
     setPickedHarness(next);
@@ -137,13 +155,14 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
   }, [draftKey]);
 
   useEffect(() => {
+    if (readOnly) return;
     const t = window.setTimeout(() => (text ? storage.set(draftKey, text) : storage.remove(draftKey)), 300);
     return () => window.clearTimeout(t);
-  }, [text, draftKey]);
+  }, [text, draftKey, readOnly]);
 
   useEffect(() => {
-    if (autoFocus && !isCoarse()) ta.current?.focus();
-  }, [autoFocus, draftKey]);
+    if (!readOnly && autoFocus && !isCoarse()) ta.current?.focus();
+  }, [autoFocus, draftKey, readOnly]);
 
   // Text sent from elsewhere on the page, e.g. the doll's quick phrases (see lib/composerBus).
   // It goes where the caret last was, or at the end; on its own line if the text before it is not empty.
@@ -153,21 +172,24 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
    * put before the words, and what it holds now. */
   const voiceSpan = useRef<{ start: number; sep: string; text: string } | null>(null);
   const caretTouched = useRef(false);
-  useEffect(() => composerBus.register((phrase) => {
-    const el = ta.current;
-    const cur = textRef.current;
-    const at = el && caretTouched.current ? Math.min(el.selectionStart, cur.length) : cur.length;
-    const before = cur.slice(0, at);
-    const head = before + (before && !/\s$/.test(before) ? "\n" : "") + phrase;
-    setText(head + cur.slice(at));
-    requestAnimationFrame(() => {
-      if (!el) return;
-      if (!isCoarse()) el.focus();
-      el.setSelectionRange(head.length, head.length);
-      caretTouched.current = true;
-      setCaret(head.length);
+  useEffect(() => {
+    if (readOnly) return;
+    return composerBus.register((phrase) => {
+      const el = ta.current;
+      const cur = textRef.current;
+      const at = el && caretTouched.current ? Math.min(el.selectionStart, cur.length) : cur.length;
+      const before = cur.slice(0, at);
+      const head = before + (before && !/\s$/.test(before) ? "\n" : "") + phrase;
+      setText(head + cur.slice(at));
+      requestAnimationFrame(() => {
+        if (!el) return;
+        if (!isCoarse()) el.focus();
+        el.setSelectionRange(head.length, head.length);
+        caretTouched.current = true;
+        setCaret(head.length);
+      });
     });
-  }), []);
+  }, [readOnly]);
 
   useLayoutEffect(() => {
     const el = ta.current;
@@ -483,12 +505,32 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
 
   const chips = (
     <>
-      {harnesses.length > 1 && (sessionId
-        ? <HarnessPicker value={harness} harnesses={harnesses} moving onChange={(target) => moveTo(sessionId, target)} />
-        : <HarnessPicker value={harness} harnesses={harnesses} onChange={pickHarness} />)}
-      <ModePicker value={mode} allowBypass={Boolean(config?.allowBypass)} onChange={changeMode} options={harnessModes} />
-      <ModelPicker value={model} effort={effort} models={models} onChange={changeModel} onEffort={changeEffort}
-        routes={routes} route={route} routeLocked={routeLocked} />
+      {(harnesses.length > 1 || readOnly) && (sessionId
+        ? <HarnessPicker value={harness} harnesses={harnesses} moving disabled={readOnly} onChange={(target) => moveTo(sessionId, target)} />
+        : <HarnessPicker value={harness} harnesses={harnesses} disabled={readOnly} onChange={pickHarness} />)}
+      <ModePicker
+        value={mode}
+        allowBypass={Boolean(config?.allowBypass)}
+        disabled={readOnly}
+        onChange={changeMode}
+        options={harnessModes}
+        labelOverride={readOnlyModeLabel}
+        tierOverride={readOnlyModeTier}
+        titleOverride={readOnlyModeTitle}
+      />
+      <ModelPicker
+        value={model}
+        effort={effort}
+        models={models}
+        disabled={readOnly}
+        onChange={changeModel}
+        onEffort={changeEffort}
+        routes={routes}
+        route={route}
+        routeLocked={routeLocked}
+        titleOverride={readOnlyModelTitle}
+      />
+      {extraChips}
       {sessionId && <NodeBindChip sessionId={sessionId} />}
     </>
   );
@@ -496,8 +538,8 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
   return (
     <div className="rz-composer-wrap">
       {/* Phones: session controls sit above the box so the input row never wraps. */}
-      {isMobile && <div className="rz-composer-chips">{chips}</div>}
-      {menu && (menu === "slash" ? true : mentionResults.length > 0) && (
+      {isMobile && <div className={`rz-composer-chips${readOnly ? " rz-composer-readonly-chips" : ""}`}>{chips}</div>}
+      {!readOnly && menu && (menu === "slash" ? true : mentionResults.length > 0) && (
         <SuggestMenu
           items={menuItems}
           active={menuIndex}
@@ -507,8 +549,8 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
           empty={menu === "slash" ? "没有匹配的命令" : "没有匹配的文件"}
         />
       )}
-      <div className={`rz-composer${voice.recording ? " recording" : ""}`}>
-        {attachments.items.length > 0 && (
+      <div className={`rz-composer${readOnly ? " readonly" : ""}${voice.recording ? " recording" : ""}`}>
+        {!readOnly && attachments.items.length > 0 && (
           <div className="rz-attachments">
             {attachments.items.map((a) => (
               <div key={a.localId} className={`rz-attachment ${a.status}`}>
@@ -525,28 +567,31 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
         <textarea
           ref={ta}
           rows={1}
-          value={text}
-          placeholder={(other ? undefined : placeholder) ?? defaultPlaceholder}
-          onChange={(e) => {
+          disabled={readOnly}
+          value={readOnly ? "" : text}
+          placeholder={readOnly ? (placeholder ?? "当前为只读视图") : ((other ? undefined : placeholder) ?? defaultPlaceholder)}
+          onChange={readOnly ? undefined : (e) => {
             dropVoice();
             setText(e.target.value);
             setCaret(e.target.selectionStart);
             caretTouched.current = true;
           }}
-          onSelect={(e) => {
+          onSelect={readOnly ? undefined : (e) => {
             setCaret(e.currentTarget.selectionStart);
             caretTouched.current = true;
           }}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
+          onKeyDown={readOnly ? undefined : onKeyDown}
+          onPaste={readOnly ? undefined : onPaste}
           enterKeyHint={isCoarse() ? "enter" : "send"}
           spellCheck={false}
         />
         <div className="rz-composer-bar">
-          <Tooltip title="添加图片或文件">
-            <IconButton size="small" aria-label="添加文件" onClick={() => fileInput.current?.click()}><Paperclip size={17} /></IconButton>
+          <Tooltip title={readOnly ? "只读模式" : "添加图片或文件"}>
+            <span>
+              <IconButton size="small" disabled={readOnly} aria-label="添加文件" onClick={() => fileInput.current?.click()}><Paperclip size={17} /></IconButton>
+            </span>
           </Tooltip>
-          {photoButton && (
+          {!readOnly && photoButton && (
             <>
               <IconButton size="small" aria-label="从相册选择照片" onClick={() => photoInput.current?.click()}><ImageIcon size={17} /></IconButton>
               {/* accept="image/*" without `capture`: Android and iOS open the photo library instead of the file browser. */}
@@ -563,20 +608,23 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
               />
             </>
           )}
-          <input
-            ref={fileInput}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => {
-              void attachments.add(Array.from(e.target.files ?? []));
-              e.target.value = "";
-            }}
-          />
+          {!readOnly && (
+            <input
+              ref={fileInput}
+              type="file"
+              multiple
+              hidden
+              onChange={(e) => {
+                void attachments.add(Array.from(e.target.files ?? []));
+                e.target.value = "";
+              }}
+            />
+          )}
           {!isMobile && chips}
           <div className="rz-spacer" />
-          {sessionId && <ContextMeter sessionId={sessionId} model={state?.model} hosted={hosted} live={other ? state?.context ?? null : undefined} />}
-          {voice.available && (
+          {rightNote}
+          {!readOnly && sessionId && <ContextMeter sessionId={sessionId} model={state?.model} hosted={hosted} live={other ? state?.context ?? null : undefined} />}
+          {!readOnly && voice.available && (
             <Tooltip title={voice.recording ? "停止录音" : "语音输入"}>
               <IconButton size="small" className={voice.recording ? "rz-mic-on" : ""} onClick={() => void voice.toggle()} disabled={voice.transcribing}>
                 {voice.transcribing ? <LoaderCircle size={17} className="spin" /> : <Mic size={17} />}
@@ -584,14 +632,14 @@ export function Composer({ sessionId, projectId, state, defaultModel, defaultMod
               </IconButton>
             </Tooltip>
           )}
-          {showStop ? (
+          {!readOnly && showStop ? (
             <Tooltip title="中断（Esc）">
               <IconButton className="rz-send stop" onClick={() => void interrupt()}><Square size={14} fill="currentColor" /></IconButton>
             </Tooltip>
           ) : (
-            <Tooltip title={busy ? "加入队列" : "发送"}>
+            <Tooltip title={readOnly ? "只读模式，无法发送消息" : busy ? "加入队列" : "发送"}>
               <span>
-                <IconButton className="rz-send" disabled={!canSend} onClick={() => void submit()}>
+                <IconButton className="rz-send" disabled={readOnly || !canSend} onClick={() => void submit()}>
                   {sending ? <LoaderCircle size={17} className="spin" /> : <ArrowUp size={18} />}
                 </IconButton>
               </span>

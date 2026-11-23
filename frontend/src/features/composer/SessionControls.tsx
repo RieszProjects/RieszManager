@@ -13,16 +13,19 @@ interface ModeProps {
   disabled?: boolean;
   /** Another harness's own modes, instead of Claude Code's. */
   options?: HarnessMode[] | null;
+  labelOverride?: string;
+  tierOverride?: string;
+  titleOverride?: string;
 }
 
-export function ModePicker({ value, allowBypass, onChange, disabled, options }: ModeProps) {
+export function ModePicker({ value, allowBypass, onChange, disabled, options, labelOverride, tierOverride, titleOverride }: ModeProps) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const modes = options
     ? options.map((m) => ({ value: m.id, label: m.name, hint: m.description ?? "" }))
     : PERMISSION_MODES.filter((m) => allowBypass || m.value !== "bypassPermissions");
   const current = value ?? (options ? options[0]?.id ?? "" : "default");
-  const tier = modeTier(current, options);
-  const label = options ? modes.find((m) => m.value === current)?.label ?? current : permissionLabel(current);
+  const tier = tierOverride ?? modeTier(current, options);
+  const label = labelOverride ?? (options ? modes.find((m) => m.value === current)?.label ?? current : permissionLabel(current));
   return (
     <>
       <button
@@ -30,11 +33,11 @@ export function ModePicker({ value, allowBypass, onChange, disabled, options }: 
         className={`rz-chip mode-${current} tier-${tier}`}
         disabled={disabled}
         onClick={(e) => setAnchor(e.currentTarget)}
-        title="权限模式（Shift+Tab 切换）"
+        title={titleOverride ?? "权限模式（Shift+Tab 切换）"}
       >
         <Shield size={13} />
         <span>{label}</span>
-        <ChevronDown size={12} />
+        {!disabled && <ChevronDown size={12} />}
       </button>
       <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => setAnchor(null)}
         anchorOrigin={{ vertical: "top", horizontal: "left" }} transformOrigin={{ vertical: "bottom", horizontal: "left" }}>
@@ -63,10 +66,11 @@ interface HarnessProps {
   /** A new session: the harness it will run on. An existing one (`moving`): hand it over (may take a while). */
   onChange: (harness: string) => void | Promise<void>;
   moving?: boolean;
+  disabled?: boolean;
 }
 
 /** Which harness runs the session: picked for a new one, or the one an existing session moves to. */
-export function HarnessPicker({ value, harnesses, onChange, moving }: HarnessProps) {
+export function HarnessPicker({ value, harnesses, onChange, moving, disabled }: HarnessProps) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const options = harnesses.some((h) => h.id === "claude")
@@ -84,11 +88,11 @@ export function HarnessPicker({ value, harnesses, onChange, moving }: HarnessPro
   };
   return (
     <>
-      <button type="button" className={`rz-chip harness-${value}`} onClick={(e) => setAnchor(e.currentTarget)} disabled={Boolean(pending)}
-        title={moving ? "转到其他工具继续这个会话" : "用哪个工具运行这个会话"}>
+      <button type="button" className={`rz-chip harness-${value}`} onClick={(e) => setAnchor(e.currentTarget)} disabled={disabled || Boolean(pending)}
+        title={disabled ? `所属工具：${harnessLabel(value)}` : moving ? "转到其他工具继续这个会话" : "用哪个工具运行这个会话"}>
         {pending && moving ? <LoaderCircle size={13} className="spin" /> : <Bot size={13} />}
         <span>{pending && moving ? `正在转到 ${harnessLabel(pending)}` : harnessLabel(value)}</span>
-        <ChevronDown size={12} />
+        {!disabled && <ChevronDown size={12} />}
       </button>
       <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => setAnchor(null)}
         anchorOrigin={{ vertical: "top", horizontal: "left" }} transformOrigin={{ vertical: "bottom", horizontal: "left" }}>
@@ -140,9 +144,10 @@ interface ModelProps {
   route?: string | null;
   /** Only the current API can be used (a Codex session stays on the API it started with). */
   routeLocked?: boolean;
+  titleOverride?: string;
 }
 
-export function ModelPicker({ value, effort, models, onChange, onEffort, disabled, routes, route, routeLocked }: ModelProps) {
+export function ModelPicker({ value, effort, models, onChange, onEffort, disabled, routes, route, routeLocked, titleOverride }: ModelProps) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const grouped = Boolean(routes && routes.length > 1);
   const currentRoute = routes?.find((r) => r.id === route) ?? routes?.find((r) => r.available);
@@ -163,10 +168,10 @@ export function ModelPicker({ value, effort, models, onChange, onEffort, disable
   };
   return (
     <>
-      <button type="button" className="rz-chip" disabled={disabled || (!shown.length && !grouped)} onClick={(e) => setAnchor(e.currentTarget)} title="模型与推理强度">
+      <button type="button" className="rz-chip" disabled={disabled || (!shown.length && !grouped)} onClick={(e) => setAnchor(e.currentTarget)} title={titleOverride ?? "模型与推理强度"}>
         <Cpu size={13} />
         <span>{effort ? `${name} · ${effort}` : name}</span>
-        <ChevronDown size={12} />
+        {!disabled && <ChevronDown size={12} />}
       </button>
       <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => setAnchor(null)}
         anchorOrigin={{ vertical: "top", horizontal: "left" }} transformOrigin={{ vertical: "bottom", horizontal: "left" }}

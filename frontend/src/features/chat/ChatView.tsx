@@ -15,20 +15,17 @@ import { copyText } from "@/lib/clipboard";
 import { clockTime } from "@/lib/format";
 import { handOff } from "@/lib/handoff";
 import { harnessLabel, resumeCommand, useHarnessLabel, useHarnesses, useRouteTag } from "@/lib/harnesses";
-import { useIsMobile } from "@/lib/useIsMobile";
 import { sessionTitle, useApp } from "@/store/app";
 import { useOrganize } from "@/store/organize";
 import { useSessions } from "@/store/sessions";
 import { toast, useUi } from "@/store/ui";
 import { Composer } from "../composer/Composer";
-import { MobileHeaderButtons } from "../layout/MobileHeaderButtons";
-import { RightDock, RightPanelButton } from "../layout/RightDock";
 import { NotesButton } from "../notes/NotesButton";
 import { NodesButton } from "../nodes/NodesButton";
 import { NodeApprovalBanner } from "../nodes/NodeApprovalBanner";
+import { ConversationShell } from "./ConversationShell";
 import { MessageList } from "./MessageList";
 import { PendingPrompts } from "./PermissionCard";
-import { SessionContext } from "./SessionContext";
 import { EditableTitle } from "./EditableTitle";
 import { ActivityLine, StreamingView } from "./StreamingView";
 import { turnStatus, waitingLabel } from "./turnStatus";
@@ -201,7 +198,6 @@ export function ChatView({ sessionId }: { sessionId: string }) {
     const mine = s.items.filter((x) => x.sessionId === sessionId && x.enabled);
     return mine.length ? Math.min(...mine.map((x) => x.next ?? Infinity)) : undefined;
   });
-  const isMobile = useIsMobile();
   const dropRef = useRef<((files: File[]) => void) | null>(null);
   const [dragging, setDragging] = useState(false);
   // The drop hint. A drag that ends elsewhere (dropped outside, left the window, cancelled) sends no reliable
@@ -307,77 +303,73 @@ export function ChatView({ sessionId }: { sessionId: string }) {
   );
 
   return (
-    <SessionContext.Provider value={ctx}>
-      <div
-        className="rz-chat"
-        onDragOver={(e) => {
-          if (e.dataTransfer.types.includes("Files")) {
-            e.preventDefault();
-            setDragging(true);
-            window.clearTimeout(dragTimer.current);
-            dragTimer.current = window.setTimeout(() => setDragging(false), DRAG_IDLE_MS);
-          }
-        }}
-        onDragLeave={(e) => {
-          // Leaving a child for another fires this too: only when the pointer is outside the whole area.
-          const r = e.currentTarget.getBoundingClientRect();
-          if (e.clientX <= r.left || e.clientX >= r.right || e.clientY <= r.top || e.clientY >= r.bottom) endDrag();
-        }}
-        onDrop={onDrop}
-      >
-        <header className="rz-chat-head">
-          {isMobile && <MobileHeaderButtons side="left" />}
-          <div className="rz-chat-title">
-            <div className="rz-chat-title-text"><EditableTitle sessionId={sessionId} title={sessionTitle(summary)} /></div>
-            <div className="rz-chat-sub">
-              <StatusDot live={live} size={7} />
-              {harness && <span className={`rz-tag harness harness-${harness}`}>{harnessName}</span>}
-              {apiTag && <span className="rz-tag harness">{apiTag}</span>}
-
-              {project && <span className="clamp-1">{project.name}</span>}
-              {summary?.gitBranch && <span className="dim mono clamp-1">⎇ {summary.gitBranch}</span>}
-              {keepAlive && <span className="rz-tag keep" title="保持运行：空闲时不会被关闭"><Pin size={10} />常驻</span>}
-              {nextWake !== undefined && (
-                <button
-                  type="button"
-                  className="rz-tag keep rz-tag-btn"
-                  title={Number.isFinite(nextWake) ? `下次 ${clockTime(nextWake)}` : "定时唤醒"}
-                  onClick={() => setScheduleSession(sessionId)}
-                >
-                  <AlarmClock size={10} />定时
-                </button>
-              )}
-            </div>
-          </div>
+    <ConversationShell
+      context={ctx}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes("Files")) {
+          e.preventDefault();
+          setDragging(true);
+          window.clearTimeout(dragTimer.current);
+          dragTimer.current = window.setTimeout(() => setDragging(false), DRAG_IDLE_MS);
+        }
+      }}
+      onDragLeave={(e) => {
+        // Leaving a child for another fires this too: only when the pointer is outside the whole area.
+        const r = e.currentTarget.getBoundingClientRect();
+        if (e.clientX <= r.left || e.clientX >= r.right || e.clientY <= r.top || e.clientY >= r.bottom) endDrag();
+      }}
+      onDrop={onDrop}
+      title={<EditableTitle sessionId={sessionId} title={sessionTitle(summary)} />}
+      subtitle={
+        <>
+          <StatusDot live={live} size={7} />
+          {harness && <span className={`rz-tag harness harness-${harness}`}>{harnessName}</span>}
+          {apiTag && <span className="rz-tag harness">{apiTag}</span>}
+          {project && <span className="clamp-1">{project.name}</span>}
+          {summary?.gitBranch && <span className="dim mono clamp-1">⎇ {summary.gitBranch}</span>}
+          {keepAlive && <span className="rz-tag keep" title="保持运行：空闲时不会被关闭"><Pin size={10} />常驻</span>}
+          {nextWake !== undefined && (
+            <button
+              type="button"
+              className="rz-tag keep rz-tag-btn"
+              title={Number.isFinite(nextWake) ? `下次 ${clockTime(nextWake)}` : "定时唤醒"}
+              onClick={() => setScheduleSession(sessionId)}
+            >
+              <AlarmClock size={10} />定时
+            </button>
+          )}
+        </>
+      }
+      headActions={
+        <>
           <NodesButton sessionId={sessionId} />
           <NotesButton sessionId={sessionId} />
           <SessionMenu sessionId={sessionId} state={state} cwd={summary?.cwd ?? null} title={sessionTitle(summary)} keepAlive={keepAlive}
             harness={harness} />
-          {isMobile ? <MobileHeaderButtons side="right" /> : <RightPanelButton />}
-        </header>
-        <div className="rz-chat-row">
-        <div className="rz-chat-col">
-        <div className="rz-chat-body">
-          {!data?.loaded ? (
-            <div className="rz-center"><LoaderCircle className="spin" size={22} /></div>
-          ) : (
-            <MessageList
-              sessionKey={sessionId}
-              items={items}
-              hasMore={Boolean(data?.hasMore)}
-              loadingOlder={Boolean(data?.loadingOlder)}
-              onLoadOlder={() => void loadOlder(sessionId)}
-              footer={footer}
-              emptyState={
-                <div className="rz-chat-empty">
-                  <Mascot pose="sleepy" height={180} />
-                  <div className="dim">会话已就绪</div>
-                </div>
-              }
-            />
-          )}
-        </div>
-        <div className="rz-chat-bottom">
+        </>
+      }
+      body={
+        !data?.loaded ? (
+          <div className="rz-center"><LoaderCircle className="spin" size={22} /></div>
+        ) : (
+          <MessageList
+            sessionKey={sessionId}
+            items={items}
+            hasMore={Boolean(data?.hasMore)}
+            loadingOlder={Boolean(data?.loadingOlder)}
+            onLoadOlder={() => void loadOlder(sessionId)}
+            footer={footer}
+            emptyState={
+              <div className="rz-chat-empty">
+                <Mascot pose="sleepy" height={180} />
+                <div className="dim">会话已就绪</div>
+              </div>
+            }
+          />
+        )
+      }
+      bottom={
+        <>
           <NodeApprovalBanner sessionId={sessionId} />
           <QueueBar sessionId={sessionId} queue={state?.queue ?? []} />
           <Composer
@@ -391,12 +383,9 @@ export function ChatView({ sessionId }: { sessionId: string }) {
             autoFocus
             dropRef={dropRef}
           />
-        </div>
-        </div>
-        <RightDock />
-        </div>
-        {dragging && <div className="rz-dropzone">松开以添加附件</div>}
-      </div>
-    </SessionContext.Provider>
+        </>
+      }
+      overlay={dragging && <div className="rz-dropzone">松开以添加附件</div>}
+    />
   );
 }
