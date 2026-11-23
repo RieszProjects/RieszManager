@@ -46,6 +46,16 @@ class SessionPrefs:
         self._prune()
         self._save()
 
+    def forget(self, session_id: str, *keys: str) -> None:
+        """Remove specific stored keys for `session_id` if present."""
+        current = self._data.get(session_id)
+        if not current or not any(k in current for k in keys):
+            return
+        updated = {k: v for k, v in current.items() if k not in keys}
+        updated["time"] = time.time()
+        self._data[session_id] = updated
+        self._save()
+
     def children(self, parent: str) -> list[str]:
         """Sessions started for `parent` as its subagents (browser tasks), oldest first."""
         found = [(v.get("time") or 0, k) for k, v in self._data.items() if v.get("subagentOf") == parent]

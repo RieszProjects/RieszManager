@@ -40,6 +40,17 @@ export interface AutoResumeInfo {
   resetsAt?: number | null;
 }
 
+export interface QuotaFallbackInfo {
+  fromRoute: string;
+  toRoute: string;
+  originalModel?: string | null;
+  fallbackModel?: string | null;
+  resetsAt?: number | null;
+  switchedAt?: number | null;
+  switching?: boolean;
+  restorePending?: boolean;
+}
+
 export interface SessionSummary {
   sessionId: string;
   /** Sessions of other harnesses ("codex", "dsh"); absent for Claude Code. */
@@ -78,6 +89,8 @@ export interface SessionSummary {
   subagentsActive?: number | null;
   /** Scheduled auto-resume after a recoverable turn failure (quota, billing, transient error). */
   autoResume?: AutoResumeInfo | null;
+  /** Temporary fallback to DeepSeek API while Claude subscription quota is exhausted. */
+  quotaFallback?: QuotaFallbackInfo | null;
 }
 
 export interface LiveProcess {
@@ -334,6 +347,8 @@ export interface SessionState {
   keepAlive?: boolean;
   /** Scheduled auto-resume after a recoverable turn failure. */
   autoResume?: AutoResumeInfo | null;
+  /** Temporary fallback to DeepSeek API while Claude subscription quota is exhausted. */
+  quotaFallback?: QuotaFallbackInfo | null;
   hosted: boolean;
   alive: boolean;
   ready?: boolean;

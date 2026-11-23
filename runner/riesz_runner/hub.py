@@ -20,6 +20,7 @@ from .tools import SubagentWatcher, server as tools_server
 from .projects import ProjectResolver
 from .session_prefs import SessionPrefs
 from .auto_resume import AutoResume
+from .quota_fallback import ClaudeQuotaFallback
 from .balances import BalanceMonitor
 from .browser import ServerBrowser, mcp_server as browser_mcp_server
 from .limits import Limits
@@ -56,6 +57,15 @@ KEEP_ALIVE_INTERVAL = 30.0
 KEEP_ALIVE_CRASH_WINDOW = 600
 RESET_ITEMS = 160
 EFFORT_LEVELS = {"low", "medium", "high", "xhigh", "max"}
+
+
+def _model_compatible(route: str, model: Any) -> bool:
+    """Whether `model` belongs to Claude Code's `route` (prevents leaking deepseek-* to Anthropic or vice versa)."""
+    if not isinstance(model, str) or not model or model == "<synthetic>":
+        return False
+    if route == "deepseek:key":
+        return model.startswith("deepseek")
+    return not model.startswith("deepseek")
 
 
 class Hub:
@@ -105,6 +115,7 @@ class Hub:
         self.subagent_watcher = SubagentWatcher(self)  # persistent parent callbacks for subagent turns
         self.limits = Limits(self)               # other subscriptions' usage limits (limits.py)
         self.auto_resume = AutoResume(self)      # retry turns that failed for quota / billing / transient errors
+        self.quota_fallback = ClaudeQuotaFallback(self)  # Claude subscription -> DeepSeek API fallback & restore
 
     # ---- lifecycle ----------------------------------------------------------
 
@@ -117,6 +128,7 @@ class Hub:
             asyncio.create_task(self._working_loop()),
             asyncio.create_task(self.schedules.loop()),
             asyncio.create_task(self.auto_resume.loop()),
+            asyncio.create_task(self.quota_fallback.loop()),
             asyncio.create_task(self._live_loop()),
             asyncio.create_task(self._index_loop()),
             asyncio.create_task(self._reap_loop()),
@@ -148,7 +160,7 @@ class Hub:
     def _all_idle(self) -> bool:
         if self.delivery is not None and self.delivery.held:
             return False
-        if self.subagent_watcher.has_in_flight():
+        if self.subagent_watcher.has_in_flight() or self.quota_fallback.has_in_flight():
             return False
         return all(not p.alive or not p.working for p in self.hosted.values()) and not self.harnesses.working()
 
@@ -438,6 +450,7 @@ class Hub:
         data["handoffFrom"] = (self.prefs.get(session_id) or {}).get("handoffFrom")
         data["handedOffTo"] = (self.prefs.get(session_id) or {}).get("handedOffTo")
         data["autoResume"] = self.auto_resume.view(session_id)
+        data["quotaFallback"] = self.quota_fallback.view(session_id)
         return data
 
     def _live_info(self, session_id: str) -> dict[str, Any] | None:
@@ -489,11 +502,16 @@ class Hub:
                     state[key] = value
         state["keepAlive"] = self.prefs.keep_alive(session_id)
         state["autoResume"] = self.auto_resume.view(session_id)
+        state["quotaFallback"] = self.quota_fallback.view(session_id)
         held = self.handoff_queue_entries(session_id)
         if held:
             state["queue"] = [*(state.get("queue") or []), *held]
         if not state.get("api"):
             state["api"] = (self.prefs.get(session_id) or {}).get("api")
+        route = state.get("api") or "anthropic:subscription"
+        if not _model_compatible(route, state.get("model")):
+            saved = (self.prefs.get(session_id) or {}).get("restoreModel")
+            state["model"] = saved if _model_compatible(route, saved) else None
         return state
 
     def session_state(self, session_id: str) -> dict[str, Any]:
@@ -530,12 +548,15 @@ class Hub:
             return
         if ev == "rate_limit":
             self.usage.note_rate_limit(event.get("info"))
+            self.quota_fallback.on_rate_limit(event.get("info"))
             await self.broadcast_global({"ev": "usage_changed"})
         if ev in ("permission", "result", "exit"):
             await self._attention_from(proc, event)
         if ev == "result":
-            await self.auto_resume.on_result(proc.session_id, event.get("result") or {})
-            self.subagent_watcher.on_result(proc.session_id, event)
+            handled = await self.quota_fallback.on_result(proc.session_id, event.get("result") or {})
+            if not handled:
+                await self.auto_resume.on_result(proc.session_id, event.get("result") or {})
+                self.subagent_watcher.on_result(proc.session_id, event)
         if ev == "exit":
             self._remember(proc)
             self._poke(proc.session_id)
@@ -632,7 +653,12 @@ class Hub:
             if last_mode == "bypassPermissions" and not self.cfg.allow_bypass:
                 last_mode = None
             # Sessions from before routes existed, and terminal sessions, use the subscription.
-            route = (self.prefs.get(session_id) or {}).get("api") or "anthropic:subscription"
+            pref = self.prefs.get(session_id) or {}
+            route = pref.get("api") or "anthropic:subscription"
+            if model and not _model_compatible(route, model):
+                model = None
+            if model is None and _model_compatible(route, pref.get("restoreModel")):
+                model = pref.get("restoreModel")
             proc = ClaudeProcess(
                 self.cfg,
                 session_id=session_id,
@@ -645,7 +671,7 @@ class Hub:
                 tools=self.tool_server,
                 extra_tools=self.extra_tools,
                 api=await self.claude_setup(route),
-                browser=bool((self.prefs.get(session_id) or {}).get("browser")),
+                browser=bool(pref.get("browser")),
             )
             self.hosted[session_id] = proc
             try:
@@ -653,6 +679,7 @@ class Hub:
             except Exception:
                 self.hosted.pop(session_id, None)
                 raise
+            self.prefs.forget(session_id, "restoreModel")
             await self.broadcast_global({"ev": "live", "live": self.live_list()})
             return proc
 
@@ -801,22 +828,36 @@ class Hub:
         except CredentialError as exc:
             raise ControlError(str(exc)) from None
 
-    async def set_api(self, session_id: str, route: str, model: str | None = None) -> None:
+    async def set_api(self, session_id: str, route: str, model: str | None = None, *, _internal: bool = False) -> None:
         """Move a Claude Code session to another route; a running process is restarted on it (when idle)."""
         if not routes.valid("claude", route):
             raise ControlError("Claude Code cannot use that API")
         await self.claude_setup(route)
+        current_route = (self.prefs.get(session_id) or {}).get("api") or "anthropic:subscription"
+        if route == current_route and model is None:
+            if not _internal:
+                await self.quota_fallback.on_manual_api_change(session_id, route)
+                await self.broadcast_global({"ev": "sessions", "sessions": [self.session_summary(session_id)], "removed": []})
+                await self.broadcast_session(session_id, {"ev": "state", "state": self.session_state(session_id)})
+            return
         proc = self.get_hosted(session_id)
         if proc is not None and proc.working:
             raise ControlError("the session is working; switch when this turn is over")
+        if not _internal:
+            await self.quota_fallback.on_manual_api_change(session_id, route)
         self.prefs.remember(session_id, api=route)
         if proc is not None:
+            self.prefs.forget(session_id, "restoreModel")
             old_pid = proc.pid
             await proc.stop()
             live = self.live.get(session_id)
             if live is not None and live.pid == old_pid:      # not rescanned yet: it was ours
                 self.live.pop(session_id, None)
             await self.ensure_process(session_id, model=model)
+        elif model and _model_compatible(route, model):
+            self.prefs.remember(session_id, restoreModel=model)
+        else:
+            self.prefs.forget(session_id, "restoreModel")
         await self.broadcast_global({"ev": "sessions", "sessions": [self.session_summary(session_id)], "removed": []})
         await self.broadcast_session(session_id, {"ev": "state", "state": self.session_state(session_id)})
 

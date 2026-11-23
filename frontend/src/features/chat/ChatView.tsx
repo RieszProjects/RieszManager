@@ -279,6 +279,27 @@ export function ChatView({ sessionId }: { sessionId: string }) {
           interruptible={false}
         />
       )}
+      {state?.quotaFallback && (
+        <div className="rz-auto-resume">
+          <RotateCcw size={13} />
+          <span className="rz-auto-resume-text">
+            {state.quotaFallback.switching
+              ? "Claude 订阅额度用尽，正在切换至 DeepSeek API…"
+              : state.quotaFallback.restorePending
+                ? "Claude 订阅额度已恢复，本轮结束后自动切回"
+                : state.quotaFallback.resetsAt
+                  ? `Claude 订阅额度用尽，暂用 DeepSeek API · 预计 ${clockTime(state.quotaFallback.resetsAt)} 切回`
+                  : "Claude 订阅额度用尽，暂用 DeepSeek API · 额度恢复后自动切回"}
+          </span>
+          <button
+            type="button"
+            className="rz-linklike"
+            onClick={() => void api(`sessions/${sessionId}/api`, { body: { api: state.quotaFallback!.toRoute } }).catch((err: Error) => toast(err.message, "error"))}
+          >
+            保留 DeepSeek
+          </button>
+        </div>
+      )}
       {state?.autoResume && (
         <div className="rz-auto-resume">
           <RotateCcw size={13} />

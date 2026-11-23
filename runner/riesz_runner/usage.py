@@ -131,6 +131,19 @@ class UsageMonitor:
         elif status:
             self.limited = None
 
+    def reset_time(self) -> float | None:
+        """Known reset time (unix seconds) when the Claude subscription has an exhausted window."""
+        now = time.time()
+        candidates: list[float] = []
+        if self.limited and self.limited.get("resetsAt"):
+            ts = float(self.limited["resetsAt"])
+            if ts > now:
+                candidates.append(ts)
+        for w in (self._data or {}).get("windows") or ():
+            if isinstance(w, dict) and float(w.get("percent") or 0) >= 100.0 and w.get("resetsAt"):
+                candidates.append(float(w["resetsAt"]))
+        return max(candidates) if candidates else None
+
     async def get(self, force: bool = False) -> dict[str, Any]:
         age = time.time() - self._fetched
         if self._data is not None and age < CACHE_SECONDS and not self._stale and not force:
