@@ -2,15 +2,16 @@
  *
  * Shown: the running subagents and those that finished in the last 10 minutes ("active"); older ones are
  * folded into one line. The number on the row's button is how many are active, and the list opens by
- * itself while there are any, unless the user opened or closed it. */
+ * itself while there are any (or when one of its subagents is currently selected), unless the user closed it. */
 import { Bot, ChevronRight, Globe, LoaderCircle, Workflow } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { create } from "zustand";
 import { api } from "@/api/client";
 import type { LiveInfo, SessionSummary } from "@/api/types";
 import { relativeTime } from "@/lib/format";
 import { useNowSeconds, useTick } from "@/lib/useNow";
-import { useUi } from "@/store/ui";
+import { useApp } from "@/store/app";
+import { type Route, type SubagentTarget, useUi } from "@/store/ui";
 
 export interface SubagentEntry {
   agentId: string;
@@ -74,6 +75,42 @@ function split(list: SubagentEntry[], live: LiveInfo | undefined, now: number) {
   };
 }
 
+/** Whether `entry` is the currently viewed subagent. */
+function isEntrySelected(a: SubagentEntry, current: SubagentTarget | null, route: Route): boolean {
+  if (a.sessionId) return !current && route.view === "session" && route.sessionId === a.sessionId;
+  return Boolean(current && (current.agentId ? current.agentId === a.agentId : current.toolUseId === a.toolUseId));
+}
+
+/** Walk handoff chain to see if `childSid` belongs to `parentSid`. */
+function isChildOf(childSid: string, parentSid: string, sessions: Record<string, SessionSummary>): boolean {
+  const seen = new Set<string>();
+  let cur: string | null | undefined = childSid;
+  while (cur && !seen.has(cur)) {
+    seen.add(cur);
+    const s: SessionSummary | undefined = sessions[cur];
+    if (!s) break;
+    if (s.subagentOf === parentSid) return true;
+    cur = s.handoffFrom;
+  }
+  return false;
+}
+
+/** Key identifying the currently selected subagent if it belongs to `parentSessionId`, else null. */
+function useSelectedSubagentKey(parentSessionId: string, list: SubagentEntry[] | undefined): string | null {
+  const subagent = useUi((s) => s.subagent);
+  const route = useUi((s) => s.route);
+  const sessions = useApp((s) => s.sessions);
+  if (subagent) {
+    if (subagent.sessionId !== parentSessionId) return null;
+    return `b:${subagent.agentId ?? subagent.toolUseId ?? ""}`;
+  }
+  if (route.view !== "session") return null;
+  if (isChildOf(route.sessionId, parentSessionId, sessions) || Boolean(list?.some((a) => a.sessionId === route.sessionId))) {
+    return `r:${route.sessionId}`;
+  }
+  return null;
+}
+
 /** For a session row: whether it has subagents, how many are active, and whether the list under it is open. */
 export function useSessionSubagents(session: SessionSummary, live: LiveInfo | undefined) {
   const sessionId = session.sessionId;
@@ -91,6 +128,8 @@ export function useSessionSubagents(session: SessionSummary, live: LiveInfo | un
     const g = split(list, live, now);
     return g.running.length + g.recent.length;
   });
+  const selectedKey = useSelectedSubagentKey(sessionId, list);
+  const hasSelected = Boolean(selectedKey);
   const choice = useUi((s) => s.subagentsOpen[sessionId]);
   const setOpen = useUi((s) => s.setSubagentsOpen);
   // A subagent starting is new activity: drop an earlier "closed" so the list shows it.
@@ -99,7 +138,19 @@ export function useSessionSubagents(session: SessionSummary, live: LiveInfo | un
     if (runningNow > 0 && !wasRunning.current && choice === false) setOpen(sessionId, undefined);
     wasRunning.current = runningNow > 0;
   }, [runningNow, choice, setOpen, sessionId]);
-  return { has, active, running: runningNow, open: has && (choice ?? active > 0) };
+  // Selecting a subagent of this session reveals its list once per selection change.
+  const revealedKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedKey) {
+      revealedKey.current = null;
+      return;
+    }
+    if (revealedKey.current !== selectedKey) {
+      revealedKey.current = selectedKey;
+      if (choice !== true) setOpen(sessionId, true);
+    }
+  }, [selectedKey, choice, setOpen, sessionId]);
+  return { has, active, running: runningNow, hasSelected, open: has && (choice ?? (active > 0 || hasSelected)) };
 }
 
 /** The button at the bottom right of a session row: how many subagents are active; opens or closes the list. */
@@ -130,27 +181,63 @@ export function SessionSubagents({ session, live }: { session: SessionSummary; l
   const navigate = useUi((s) => s.navigate);
   const route = useUi((s) => s.route);
   const current = useUi((s) => (s.subagent?.sessionId === sessionId ? s.subagent : null));
+  const olderChoice = useUi((s) => s.subagentsOlderOpen[sessionId]);
+  const setOlderOpen = useUi((s) => s.setSubagentsOlderOpen);
+  const setOpen = useUi((s) => s.setSubagentsOpen);
   const now = useNowSeconds();
-  const [olderShown, setOlderShown] = useState(false);
   const { running, recent, older } = useMemo(() => split(list ?? [], live, now), [list, live, now]);
+  const selectedKey = useSelectedSubagentKey(sessionId, list);
+  const selectedInOlder = useMemo(() => older.some((a) => isEntrySelected(a, current, route)), [older, current, route]);
+  const olderShown = olderChoice ?? selectedInOlder;
+
+  // When a historical subagent inside "已完成 N 个" is selected, ensure that fold is expanded.
+  const revealedOlderKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedKey || !selectedInOlder) {
+      if (!selectedKey) revealedOlderKey.current = null;
+      return;
+    }
+    if (revealedOlderKey.current !== selectedKey) {
+      revealedOlderKey.current = selectedKey;
+      if (olderChoice !== true) setOlderOpen(sessionId, true);
+    }
+  }, [selectedKey, selectedInOlder, olderChoice, setOlderOpen, sessionId]);
+
+  const selectedRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (selectedKey && selectedRef.current) {
+      selectedRef.current.scrollIntoView({ block: "nearest" });
+    }
+  }, [selectedKey, olderShown, list]);
 
   if (!list) {
     return <div className="rz-subagent-rows"><div className="rz-subagent-row dim"><LoaderCircle size={12} className="spin" /></div></div>;
   }
-  const row = (a: SubagentEntry, active: boolean) => {
-    const selected = a.sessionId
-      ? (!current && route.view === "session" && route.sessionId === a.sessionId)
-      : Boolean(current && (current.agentId ? current.agentId === a.agentId : current.toolUseId === a.toolUseId));
+  const row = (a: SubagentEntry, active: boolean, inOlder = false) => {
+    const selected = isEntrySelected(a, current, route);
     return (
       <button
         key={a.agentId}
+        ref={selected ? selectedRef : undefined}
         type="button"
         className={`rz-subagent-row${active ? " running" : ""}${selected ? " selected" : ""}`}
         title={[a.description, a.agentType].filter(Boolean).join(" · ")}
-        onClick={() => a.sessionId
-          ? navigate({ view: "session", sessionId: a.sessionId })
-          : openSubagent({ sessionId, toolUseId: a.toolUseId, agentId: a.agentId, title: a.description,
-            cwd: session.cwd, projectId: session.project })}
+        onClick={() => {
+          setOpen(sessionId, true);
+          if (inOlder) setOlderOpen(sessionId, true);
+          if (a.sessionId) {
+            navigate({ view: "session", sessionId: a.sessionId });
+          } else {
+            openSubagent({
+              sessionId,
+              toolUseId: a.toolUseId,
+              agentId: a.agentId,
+              title: a.description,
+              cwd: session.cwd,
+              projectId: session.project,
+            });
+          }
+        }}
       >
         {active ? <LoaderCircle size={12} className="spin" /> : <ViaIcon a={a} />}
         <span className="rz-subagent-row-title clamp-1">{a.description || a.agentType || "子代理"}</span>
@@ -163,12 +250,17 @@ export function SessionSubagents({ session, live }: { session: SessionSummary; l
       {running.map((a) => row(a, true))}
       {recent.map((a) => row(a, false))}
       {older.length > 0 && (
-        <button type="button" className="rz-subagent-row rz-subagent-rest" aria-expanded={olderShown} onClick={() => setOlderShown(!olderShown)}>
+        <button
+          type="button"
+          className="rz-subagent-row rz-subagent-rest"
+          aria-expanded={olderShown}
+          onClick={() => setOlderOpen(sessionId, !olderShown)}
+        >
           <ChevronRight size={11} className={`rz-subagent-chevron${olderShown ? " open" : ""}`} />
           已完成 {older.length} 个
         </button>
       )}
-      {olderShown && older.map((a) => row(a, false))}
+      {olderShown && older.map((a) => row(a, false, true))}
     </div>
   );
 }

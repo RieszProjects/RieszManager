@@ -1,7 +1,7 @@
 /** Right panel: the current project's sessions and files. */
 import { IconButton, Tooltip } from "@mui/material";
 import { FolderGit2, GitBranch, Plus, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/api/client";
 import type { Project } from "@/api/types";
 import { useApp } from "@/store/app";
@@ -11,6 +11,10 @@ import { useOrganizeView } from "@/lib/organize";
 import { useOrganize } from "@/store/organize";
 import { SortableList } from "../organize/SortableList";
 import { SessionRow } from "../sessions/SessionRow";
+
+/** Cache project detail & session-list scroll offset across view switches so the docked panel does not flicker or jump. */
+const detailCache = new Map<string, Project>();
+const listScrollCache = new Map<string, number>();
 
 interface Props {
   /** "floating": glass card docked below the view header; "drawer": full-height phone drawer. */
@@ -23,18 +27,28 @@ export function RightPanel({ variant = "drawer", onClose }: Props) {
   const tab = useUi((s) => s.rightTab);
   const setTab = useUi((s) => s.setRightTab);
   const route = useUi((s) => s.route);
+  const subagent = useUi((s) => s.subagent);
   const navigate = useUi((s) => s.navigate);
   const project = useApp((s) => s.projects.find((p) => p.id === projectId));
   const sessions = useApp((s) => s.sessions);
-  const [detail, setDetail] = useState<Project | null>(null);
+  const [detail, setDetail] = useState<Project | null>(() => (projectId ? detailCache.get(projectId) ?? null : null));
+  const listRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    setDetail(null);
-    if (!projectId) return;
+    if (!projectId) {
+      setDetail(null);
+      return;
+    }
+    setDetail(detailCache.get(projectId) ?? null);
     // Switching projects quickly: an answer for the previous project may still arrive; drop it.
     // (The file tree below is keyed by project for the same reason.)
     let current = true;
-    api<{ project: Project }>(`projects/${encodeURIComponent(projectId)}`).then((r) => current && setDetail(r.project)).catch(() => undefined);
+    api<{ project: Project }>(`projects/${encodeURIComponent(projectId)}`)
+      .then((r) => {
+        detailCache.set(projectId, r.project);
+        if (current) setDetail(r.project);
+      })
+      .catch(() => undefined);
     return () => {
       current = false;
     };
@@ -48,6 +62,14 @@ export function RightPanel({ variant = "drawer", onClose }: Props) {
   );
 
   const cls = `rz-right${variant === "floating" ? " floating" : ""}`;
+  const showFiles = Boolean(project && tab === "files" && project.filesAllowed);
+
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el || !projectId || showFiles) return;
+    const saved = listScrollCache.get(projectId);
+    if (saved !== undefined) el.scrollTop = saved;
+  }, [projectId, showFiles]);
 
   if (!projectId || !project) {
     return (
@@ -57,11 +79,10 @@ export function RightPanel({ variant = "drawer", onClose }: Props) {
     );
   }
 
-  const activeSession = route.view === "session" ? route.sessionId : null;
+  const activeSession = !subagent && route.view === "session" ? route.sessionId : null;
   const branch = detail?.git?.branch;
   const changes = detail?.git?.changes ?? {};
   const changeCount = Object.keys(changes).length;
-  const showFiles = tab === "files" && project.filesAllowed;
 
   return (
     <aside className={cls}>
@@ -88,7 +109,13 @@ export function RightPanel({ variant = "drawer", onClose }: Props) {
       </div>
       <div className="rz-right-body">
         {!showFiles ? (
-          <div className="rz-side-list">
+          <div
+            ref={listRef}
+            className="rz-side-list"
+            onScroll={(e) => {
+              if (projectId) listScrollCache.set(projectId, e.currentTarget.scrollTop);
+            }}
+          >
             <SortableList items={list} getId={(s) => s.sessionId} onReorder={(ids) => void setOrder("session", ids)}>
               {(s) => <SessionRow session={s} active={s.sessionId === activeSession} allSubagents />}
             </SortableList>

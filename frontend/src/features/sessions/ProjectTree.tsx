@@ -64,11 +64,12 @@ interface NodeProps {
 
 function ProjectNode({ project, sessions, expanded, forceOpen, archived, dragging, handleProps, onToggle }: NodeProps) {
   const route = useUi((s) => s.route);
+  const subagent = useUi((s) => s.subagent);
   const navigate = useUi((s) => s.navigate);
   const live = useApp((s) => s.live);
   const [limit, setLimit] = useState(PAGE);
   const open = (expanded || forceOpen) && !dragging;
-  const activeSession = route.view === "session" ? route.sessionId : null;
+  const activeSession = !subagent && route.view === "session" ? route.sessionId : null;
   const activeProject = route.view === "project" && route.projectId === project.id;
   const running = sessions.filter((s) => live[s.sessionId]);
   const runningInfo = running.some((s) => live[s.sessionId]?.waiting)

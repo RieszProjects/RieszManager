@@ -76,7 +76,7 @@ function SessionRowImpl({ session, showProject, active, allSubagents }: Props) {
   const archived = useOrganize((s) => s.archived.session.has(session.sessionId));
   const scheduled = useSchedules((s) => s.items.some((x) => x.sessionId === session.sessionId && x.enabled));
   const agents = useSessionSubagents(session, live);
-  const agentsShown = agents.has && (agents.active > 0 || Boolean(allSubagents));
+  const agentsShown = agents.has && (agents.active > 0 || Boolean(allSubagents) || agents.hasSelected);
   const harnessName = useHarnessLabel(session.harness);
   const apiTag = useRouteTag(session.api, session.harness);
   return (

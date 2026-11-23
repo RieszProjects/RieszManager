@@ -23,8 +23,9 @@ function RecentList({ query }: { query: string }) {
   const sessions = useApp((s) => s.sessions);
   const live = useApp((s) => s.live);
   const route = useUi((s) => s.route);
+  const subagent = useUi((s) => s.subagent);
   const [limit, setLimit] = useState(RECENT_LIMIT);
-  const activeId = route.view === "session" ? route.sessionId : null;
+  const activeId = !subagent && route.view === "session" ? route.sessionId : null;
   const q = query.trim().toLowerCase();
   const view = useOrganizeView();
 

@@ -64,6 +64,8 @@ interface UiStore {
   subagent: SubagentTarget | null;
   /** Sessions whose subagents are shown (true) or hidden (false) in the session lists; unset: shown while one runs or just finished. */
   subagentsOpen: Record<string, boolean | undefined>;
+  /** Sessions whose "completed N" older subagents fold is expanded. */
+  subagentsOlderOpen: Record<string, boolean | undefined>;
   /** Session whose scheduled wake-ups are being managed (see ScheduleDialog). */
   scheduleSession: string | null;
   gallery: ImageGallery | null;
@@ -88,6 +90,7 @@ interface UiStore {
   openSubagent: (target: SubagentTarget | null) => void;
   /** `undefined` goes back to showing them only while there is activity. */
   setSubagentsOpen: (sessionId: string, open: boolean | undefined) => void;
+  setSubagentsOlderOpen: (sessionId: string, open: boolean | undefined) => void;
   setScheduleSession: (sessionId: string | null) => void;
   openGallery: (gallery: ImageGallery | null) => void;
   setSettingsOpen: (open: boolean) => void;
@@ -113,6 +116,7 @@ export const useUi = create<UiStore>((set) => ({
   file: null,
   subagent: null,
   subagentsOpen: {},
+  subagentsOlderOpen: {},
   scheduleSession: null,
   gallery: null,
   settingsOpen: false,
@@ -154,6 +158,7 @@ export const useUi = create<UiStore>((set) => ({
       ...(subagent ? { leftOpen: false, rightOverlay: false, contextProject: subagent.projectId ?? s.contextProject } : {}),
     })),
   setSubagentsOpen: (sessionId, open) => set((s) => ({ subagentsOpen: { ...s.subagentsOpen, [sessionId]: open } })),
+  setSubagentsOlderOpen: (sessionId, open) => set((s) => ({ subagentsOlderOpen: { ...s.subagentsOlderOpen, [sessionId]: open } })),
   setScheduleSession: (scheduleSession) => set({ scheduleSession }),
   openGallery: (gallery) => set({ gallery }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
