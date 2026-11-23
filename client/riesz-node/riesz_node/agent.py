@@ -281,6 +281,7 @@ class CommandEntry:
     exit_code: int | None = None
     output: str = ""
     proc: RunningProcess | None = None
+    kill_requested: bool = False
 
 
 class NodeAgent:
@@ -553,9 +554,11 @@ class NodeAgent:
 
     async def kill_command(self, cmd_id: str) -> bool:
         entry = self._cmd_by_id.get(cmd_id)
-        if entry is None or entry.proc is None or entry.status != "running":
+        if entry is None or entry.status != "running":
             return False
-        await entry.proc.kill()
+        entry.kill_requested = True
+        if entry.proc is not None:
+            await entry.proc.kill()
         self._log(f"[终止] 已终止命令：{entry.command}")
         self._emit()
         return True
@@ -682,6 +685,8 @@ class NodeAgent:
 
         def on_started(proc: RunningProcess) -> None:
             entry.proc = proc
+            if entry.kill_requested:
+                asyncio.create_task(proc.kill())
 
         async with self._sem:
             try:

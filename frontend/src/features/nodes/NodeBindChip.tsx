@@ -1,12 +1,15 @@
 /** Composer toolbar chip showing connected local computer nodes for THIS session. */
 import { Laptop } from "lucide-react";
-import { NODE_MODE_LABEL, useNodes } from "./store";
+import { useApp } from "@/store/app";
+import { accessibleNodeOwners, NODE_MODE_LABEL, useNodes } from "./store";
 
 export function NodeBindChip({ sessionId }: { sessionId: string }) {
   const nodes = useNodes((s) => s.nodes);
   const openForSession = useNodes((s) => s.openForSession);
+  const sessions = useApp((s) => s.sessions);
 
-  const mine = nodes.filter((n) => n.sessionId === sessionId);
+  const owners = accessibleNodeOwners(sessionId, sessions);
+  const mine = nodes.filter((n) => owners.has(n.sessionId));
   if (mine.length === 0) return null;
 
   const label = mine.length === 1

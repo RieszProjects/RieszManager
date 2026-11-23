@@ -2,17 +2,20 @@
 import { Button } from "@mui/material";
 import { Check, Laptop, X } from "lucide-react";
 import { useState } from "react";
+import { useApp } from "@/store/app";
 import { toast } from "@/store/ui";
-import { useNodes } from "./store";
+import { accessibleNodeOwners, useNodes } from "./store";
 
 const RISK_LABEL: Record<string, string> = { low: "低风险", medium: "中风险", high: "高风险" };
 
 export function NodeApprovalBanner({ sessionId }: { sessionId: string }) {
   const approvals = useNodes((s) => s.approvals);
   const resolveApproval = useNodes((s) => s.resolveApproval);
+  const sessions = useApp((s) => s.sessions);
   const [busy, setBusy] = useState(false);
 
-  const mine = approvals.filter((a) => a.sessionId === sessionId);
+  const owners = accessibleNodeOwners(sessionId, sessions);
+  const mine = approvals.filter((a) => owners.has(a.sessionId));
   if (!mine.length) return null;
   const ap = mine[0];
 

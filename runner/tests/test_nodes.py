@@ -174,6 +174,25 @@ class NodeEndToEndTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(r_ren.status, 200)
             msg = await ws2.receive_json()
             self.assertEqual(msg, {"type": "renamed", "name": "gpu-box"})
+
+            # Subagent (and nested grandchild subagent) inherit parent's nodes, while unrelated/sibling stay isolated
+            child_sid = "cccccccc-2222-4333-8444-555555555555"
+            grand_sid = "dddddddd-2222-4333-8444-555555555555"
+            hub.prefs.remember(child_sid, subagentOf=self.sid)
+            hub.prefs.remember(grand_sid, subagentOf=child_sid)
+            self.assertEqual(len(hub.nodes.session_nodes(child_sid)), 2)
+            self.assertEqual(len(hub.nodes.session_nodes(grand_sid)), 2)
+            # A node paired privately to child_sid is NOT visible to parent or sibling
+            sibling_sid = "eeeeeeee-2222-4333-8444-555555555555"
+            hub.prefs.remember(sibling_sid, subagentOf=self.sid)
+            n_child, _, _, ws_child = await self._pair_and_connect(session_id=child_sid, name="child-only")
+            try:
+                self.assertEqual(len(hub.nodes.session_nodes(child_sid)), 3)
+                self.assertEqual(len(hub.nodes.session_nodes(grand_sid)), 3)
+                self.assertEqual(len(hub.nodes.session_nodes(self.sid)), 2)
+                self.assertEqual(len(hub.nodes.session_nodes(sibling_sid)), 2)
+            finally:
+                await ws_child.close()
         finally:
             await ws1.close()
             await ws2.close()

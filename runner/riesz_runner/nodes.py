@@ -227,26 +227,48 @@ class NodeManager:
 
     # ---- session chain & unique naming --------------------------------------
 
-    def _chain(self, session_id: str) -> list[str]:
-        seen = [session_id]
-        cur = session_id
-        for _ in range(12):
+    def _handoff_group(self, session_id: str) -> set[str]:
+        """All session IDs in the same handoff lineage (walking both `handoffFrom` and `handedOffTo`)."""
+        seen: set[str] = {session_id}
+        queue = [session_id]
+        while queue and len(seen) < 24:
+            cur = queue.pop(0)
             s = self.hub.session_summary(cur) or {}
-            prev = s.get("handoffFrom")
-            if not prev or prev in seen:
-                break
-            seen.append(str(prev))
-            cur = str(prev)
+            pref = self.hub.prefs.get(cur) or {}
+            for nxt in (s.get("handoffFrom"), s.get("handedOffTo"), pref.get("handedOffTo")):
+                if isinstance(nxt, str) and nxt and nxt not in seen:
+                    seen.add(nxt)
+                    queue.append(nxt)
         return seen
 
-    def _same_session(self, sid_a: str, sid_b: str) -> bool:
-        if sid_a == sid_b:
-            return True
-        return sid_b in self._chain(sid_a) or sid_a in self._chain(sid_b)
+    def _accessible_owners(self, session_id: str) -> set[str]:
+        """Session IDs whose local nodes `session_id` may access:
+        - its own handoff lineage;
+        - any ancestor session's handoff lineage via `subagentOf` (subagents inherit parent nodes,
+          including multi-level nested subagents, while parents/siblings stay isolated).
+        """
+        owners: set[str] = set()
+        queue = [session_id]
+        visited: set[str] = set()
+        while queue and len(visited) < 32:
+            cur = queue.pop(0)
+            if cur in visited:
+                continue
+            visited.add(cur)
+            group = self._handoff_group(cur)
+            owners.update(group)
+            for sid in group:
+                pref = self.hub.prefs.get(sid) or {}
+                s = self.hub.session_summary(sid) or {}
+                parent = pref.get("subagentOf") or s.get("subagentOf")
+                if isinstance(parent, str) and parent and parent not in visited:
+                    queue.append(parent)
+        return owners
 
     def session_nodes(self, session_id: str) -> list[LiveNode]:
-        """All live nodes bound strictly to `session_id` (including its handoff chain)."""
-        return [live for live in self._live.values() if self._same_session(session_id, live.session_id)]
+        """All live nodes accessible to `session_id` (own + handoff lineage + inherited from parent sessions)."""
+        owners = self._accessible_owners(session_id)
+        return [live for live in self._live.values() if live.session_id in owners]
 
     def _unique_name(self, session_id: str, desired: str, *, exclude_node_id: str | None = None) -> str:
         base = _clean_name(desired)
@@ -841,10 +863,11 @@ class NodeManager:
             }
             for n in live_list
         ]
+        owners = self._accessible_owners(session_id) if session_id else None
         approvals = [
             a.summary()
             for a in sorted(self._approvals.values(), key=lambda x: x.created_at)
-            if not session_id or self._same_session(session_id, a.session_id)
+            if owners is None or a.session_id in owners
         ]
         pairings = [
             {
@@ -855,7 +878,7 @@ class NodeManager:
                 "expiresAt": p.expires_at,
             }
             for p in self._pairings.values()
-            if not session_id or self._same_session(session_id, p.session_id)
+            if owners is None or p.session_id in owners
         ]
         return {"nodes": nodes, "approvals": approvals, "pairings": pairings}
 

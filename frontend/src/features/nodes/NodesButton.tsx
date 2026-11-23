@@ -1,16 +1,19 @@
 /** Session AppBar button showing local computer nodes bound strictly to THIS session. */
 import { IconButton, Tooltip } from "@mui/material";
 import { Laptop } from "lucide-react";
-import { useNodes } from "./store";
+import { useApp } from "@/store/app";
+import { accessibleNodeOwners, useNodes } from "./store";
 
 export function NodesButton({ sessionId }: { sessionId: string }) {
   const nodes = useNodes((s) => s.nodes);
   const approvals = useNodes((s) => s.approvals);
   const dialogSessionId = useNodes((s) => s.dialogSessionId);
   const openForSession = useNodes((s) => s.openForSession);
+  const sessions = useApp((s) => s.sessions);
 
-  const mine = nodes.filter((n) => n.sessionId === sessionId);
-  const pending = approvals.filter((a) => a.sessionId === sessionId).length;
+  const owners = accessibleNodeOwners(sessionId, sessions);
+  const mine = nodes.filter((n) => owners.has(n.sessionId));
+  const pending = approvals.filter((a) => owners.has(a.sessionId)).length;
   const isOpen = dialogSessionId === sessionId;
 
   const title = pending > 0

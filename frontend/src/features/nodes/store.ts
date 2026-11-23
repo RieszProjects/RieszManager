@@ -2,7 +2,23 @@
 import { create } from "zustand";
 import { api } from "@/api/client";
 import { socket } from "@/api/socket";
+import type { SessionSummary } from "@/api/types";
 import { toast } from "@/store/ui";
+
+/** Return all session IDs whose local nodes `sessionId` can access (own + handoff + parent subagent ancestors). */
+export function accessibleNodeOwners(sessionId: string, sessions: Record<string, SessionSummary>): Set<string> {
+  const owners = new Set<string>();
+  const queue = [sessionId];
+  while (queue.length > 0 && owners.size < 24) {
+    const cur = queue.shift()!;
+    if (owners.has(cur)) continue;
+    owners.add(cur);
+    const s = sessions[cur];
+    if (s?.subagentOf && !owners.has(s.subagentOf)) queue.push(s.subagentOf);
+    if (s?.handoffFrom && !owners.has(s.handoffFrom)) queue.push(s.handoffFrom);
+  }
+  return owners;
+}
 
 export type NodeMode = "readonly" | "ask" | "auto" | "full";
 

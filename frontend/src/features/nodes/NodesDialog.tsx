@@ -7,7 +7,7 @@ import { useState } from "react";
 import { copyText } from "@/lib/clipboard";
 import { sessionTitle as getSessionTitle, useApp } from "@/store/app";
 import { toast } from "@/store/ui";
-import { NODE_MODE_LABEL, type LiveNodeInfo, type NodeCommand, useNodes } from "./store";
+import { NODE_MODE_LABEL, accessibleNodeOwners, type LiveNodeInfo, type NodeCommand, useNodes } from "./store";
 
 const RISK_TEXT: Record<string, string> = { low: "低风险", medium: "中风险", high: "高风险" };
 
@@ -38,7 +38,7 @@ function CmdItem({ cmd, onKill }: { cmd: NodeCommand; onKill: () => void }) {
   );
 }
 
-function NodeCard({ n }: { n: LiveNodeInfo }) {
+function NodeCard({ n, inherited }: { n: LiveNodeInfo; inherited?: boolean }) {
   const kick = useNodes((s) => s.kick);
   const rename = useNodes((s) => s.rename);
   const killCommand = useNodes((s) => s.killCommand);
@@ -92,6 +92,11 @@ function NodeCard({ n }: { n: LiveNodeInfo }) {
           <span className="dim">{n.os || n.platform || "未知系统"}</span>
         </div>
         <div className="rz-node-card-actions" style={{ gap: 6 }}>
+          {inherited && (
+            <Tooltip title={`继承自父会话「${n.sessionTitle}」`}>
+              <span className="rz-tag">继承自父会话</span>
+            </Tooltip>
+          )}
           <Tooltip title="权限模式由电脑端控制（在电脑端按 m 切换）">
             <span className="rz-tag">{NODE_MODE_LABEL[n.mode] ?? n.mode}</span>
           </Tooltip>
@@ -132,14 +137,16 @@ export function NodesDialog() {
   const rotateDownloadToken = useNodes((s) => s.rotateDownloadToken);
   const createPairing = useNodes((s) => s.createPairing);
   const resolveApproval = useNodes((s) => s.resolveApproval);
-  const summary = useApp((s) => (sessionId ? s.sessions[sessionId] : undefined));
+  const sessions = useApp((s) => s.sessions);
+  const summary = sessionId ? sessions[sessionId] : undefined;
 
   const [busy, setBusy] = useState(false);
 
   if (!sessionId) return null;
 
-  const myNodes = nodes.filter((n) => n.sessionId === sessionId);
-  const myApprovals = approvals.filter((a) => a.sessionId === sessionId);
+  const owners = accessibleNodeOwners(sessionId, sessions);
+  const myNodes = nodes.filter((n) => owners.has(n.sessionId));
+  const myApprovals = approvals.filter((a) => owners.has(a.sessionId));
   const myPairings = pairings.filter((p) => p.sessionId === sessionId);
   const sessionTitle = summary ? getSessionTitle(summary) : sessionId.slice(0, 8);
 
@@ -207,7 +214,7 @@ export function NodesDialog() {
             </div>
           ) : (
             <div className="rz-nodes-list">
-              {myNodes.map((n) => <NodeCard key={n.id} n={n} />)}
+              {myNodes.map((n) => <NodeCard key={n.id} n={n} inherited={n.sessionId !== sessionId} />)}
             </div>
           )}
         </section>
