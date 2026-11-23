@@ -115,6 +115,8 @@ class _SubagentMeta:
     role: str = ""
     agent_type: str = ""
     prompt: str = ""
+    model: str = ""
+    workspace: str = ""
     transcript_path: Path | None = None
     created_at: float = 0.0
     killed: bool = False
@@ -229,6 +231,8 @@ class AgySubagentStore:
                         "role": str(args.get("Role") or "").strip(),
                         "type": str(args.get("TypeName") or "").strip(),
                         "prompt": str(args.get("Prompt") or "").strip(),
+                        "model": str(args.get("Model") or "").strip(),
+                        "workspace": str(args.get("Workspace") or "").strip(),
                     })
                 elif name == "manage_subagents":
                     action = str(args.get("Action") or "").strip()
@@ -261,6 +265,8 @@ class AgySubagentStore:
                 meta.role = meta.role or pending.get("role") or ""
                 meta.agent_type = meta.agent_type or pending.get("type") or ""
                 meta.prompt = meta.prompt or pending.get("prompt") or ""
+                meta.model = meta.model or pending.get("model") or ""
+                meta.workspace = meta.workspace or pending.get("workspace") or ""
                 meta.transcript_path = _file_uri_to_path(info.get("logAbsoluteUri")) or meta.transcript_path
                 meta.killed = False
             for m in ACTIVE_LIST_RE.finditer(content):
@@ -360,6 +366,8 @@ class AgySubagentStore:
                 "description": desc,
                 "agentType": meta.agent_type or "subagent",
                 "harness": "antigravity",
+                "model": meta.model or "",
+                "workspace": meta.workspace or "",
                 "background": True,
                 "finished": not running,
                 "running": running,

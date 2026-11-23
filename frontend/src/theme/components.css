@@ -184,6 +184,11 @@
   color: var(--text2);
   font-size: 12.5px;
 }
+.rz-subagent-meta-tag { display: inline-flex; align-items: center; gap: 3px; }
+.rz-subagent-meta-tag.tier-readonly { color: #7aa7e0; border-color: rgba(122, 167, 224, 0.32); }
+.rz-subagent-meta-tag.tier-edits { color: var(--sage-strong); border-color: rgba(125, 168, 130, 0.35); }
+.rz-subagent-meta-tag.tier-auto { color: #d8a657; border-color: rgba(216, 166, 87, 0.35); }
+.rz-subagent-meta-tag.tier-full { color: var(--danger); border-color: rgba(212, 117, 107, 0.4); }
 .rz-fileviewer-audio { display: flex; align-items: center; justify-content: center; min-height: 100%; padding: 32px 20px; }
 .rz-fileviewer-audio audio { width: min(560px, 100%); color-scheme: dark; }
 

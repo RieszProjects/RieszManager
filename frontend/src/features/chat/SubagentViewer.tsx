@@ -1,9 +1,11 @@
 /** Main-area full-screen read-only view for a harness-native subagent's conversation. Refreshes while running. */
 import { Button, IconButton, Tooltip } from "@mui/material";
-import { ArrowLeft, Eye, LoaderCircle } from "lucide-react";
+import { ArrowLeft, Cpu, Eye, GitBranch, LoaderCircle, Shield } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/api/client";
 import type { Item, SessionState } from "@/api/types";
+import { modeTier, modelLabel, permissionLabel } from "@/lib/format";
+import { useHarnesses, useHarnessLabel, useRouteTag } from "@/lib/harnesses";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { sessionTitle, useApp } from "@/store/app";
 import { useSessions } from "@/store/sessions";
@@ -21,6 +23,9 @@ interface SubagentInfo {
   toolUseId: string | null;
   description: string;
   agentType: string;
+  harness?: string;
+  model?: string;
+  workspace?: string;
   running?: boolean;
 }
 
@@ -30,13 +35,20 @@ interface Page {
   running?: boolean;
 }
 
+const WORKSPACE_LABEL: Record<string, string> = {
+  branch: "独立分支工作区",
+  share: "共享仓库工作区",
+};
+
 export function SubagentViewer({ target }: { target: SubagentTarget }) {
   const openSubagent = useUi((s) => s.openSubagent);
   const navigate = useUi((s) => s.navigate);
   const setContextProject = useUi((s) => s.setContextProject);
   const isMobile = useIsMobile();
   const parentSummary = useApp((s) => s.sessions[target.sessionId]);
+  const projects = useApp((s) => s.projects);
   const state = useSessions((s) => s.data[target.sessionId]?.state as SessionState | undefined);
+  const harnesses = useHarnesses();
   const [agent, setAgent] = useState<SubagentInfo | null>(null);
   const [liveStatus, setLiveStatus] = useState<boolean | undefined>(undefined);
   const [items, setItems] = useState<Item[]>([]);
@@ -145,9 +157,41 @@ export function SubagentViewer({ target }: { target: SubagentTarget }) {
     navigate({ view: "session", sessionId: target.sessionId });
   };
 
+  const harness = agent?.harness ?? parentSummary?.harness ?? "claude";
+  const harnessName = useHarnessLabel(harness);
+  const apiTag = useRouteTag(harness, state?.api ?? parentSummary?.api);
+  const harnessSpec = harnesses.find((h) => h.id === harness);
+
+  // Resolve subagent model: transcript assistant model > explicit subagent model > parent session model
+  const transcriptModel = useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i];
+      if (it.kind === "assistant" && it.model) return it.model;
+    }
+    return null;
+  }, [items]);
+  const explicitModel = agent?.model && agent.model !== "inherit" ? agent.model : null;
+  const parentModel = state?.model ?? parentSummary?.model ?? null;
+  const effectiveModel = transcriptModel ?? explicitModel ?? parentModel;
+  const modelDisplay = effectiveModel ? modelLabel(effectiveModel) : null;
+  const modelInherited = !transcriptModel && !explicitModel && Boolean(parentModel);
+
+  // Resolve permission mode: research subagent runs read-only sandbox; otherwise inherits parent's permission mode
+  const isResearchSandbox = agent?.agentType === "research";
+  const rawPerm = isResearchSandbox ? "plan" : (state?.permissionMode ?? parentSummary?.permissionMode ?? "default");
+  const modeOptions = state?.modes ?? harnessSpec?.modes ?? null;
+  const permLabel = isResearchSandbox
+    ? "只读沙箱"
+    : (modeOptions?.find((m) => m.id === rawPerm)?.name ?? permissionLabel(rawPerm));
+  const permTier = isResearchSandbox ? "readonly" : modeTier(rawPerm, modeOptions);
+
+  const projectId = target.projectId ?? parentSummary?.project ?? null;
+  const project = projectId ? projects.find((pr) => pr.id === projectId) : undefined;
   const parentName = parentSummary ? sessionTitle(parentSummary) : target.sessionId.slice(0, 8);
+  const workspaceTag = agent?.workspace ? WORKSPACE_LABEL[agent.workspace] : null;
+
   const p = task?.progress;
-  const metaParts = [
+  const statsParts = [
     agent?.agentType,
     running ? "运行中" : "已完成",
     p?.toolUses != null ? `${p.toolUses} 次工具调用` : null,
@@ -167,9 +211,33 @@ export function SubagentViewer({ target }: { target: SubagentTarget }) {
           <div className="rz-chat-title">
             <div className="clamp-1 rz-chat-title-text">{target.title || agent?.description || "子代理"}</div>
             <div className="rz-chat-sub">
-              <span className="rz-tag"><Eye size={10} />内置子代理 · 只读</span>
-              <span className="dim clamp-1">父会话：{parentName}</span>
-              {metaParts.length > 0 && <span className="dim clamp-1">· {metaParts.join(" · ")}</span>}
+              <span className={`rz-tag harness harness-${harness}`}>{harnessName}</span>
+              {apiTag && <span className="rz-tag harness">{apiTag}</span>}
+              {modelDisplay && (
+                <span
+                  className="rz-tag rz-subagent-meta-tag"
+                  title={modelInherited ? `继承父会话模型：${effectiveModel}` : `模型：${effectiveModel}`}
+                >
+                  <Cpu size={10} />
+                  {modelDisplay}
+                </span>
+              )}
+              <span
+                className={`rz-tag rz-subagent-meta-tag tier-${permTier}`}
+                title={isResearchSandbox ? "研究型子代理运行在只读沙箱中" : `权限模式（继承父会话）：${permLabel}`}
+              >
+                <Shield size={10} />
+                {permLabel}
+              </span>
+              {workspaceTag && (
+                <span className="rz-tag rz-subagent-meta-tag">
+                  <GitBranch size={10} />
+                  {workspaceTag}
+                </span>
+              )}
+              {project && <span className="clamp-1">{project.name}</span>}
+              <span className="dim clamp-1">· 父会话：{parentName}</span>
+              {statsParts.length > 0 && <span className="dim clamp-1">· {statsParts.join(" · ")}</span>}
             </div>
           </div>
           {isMobile ? <MobileHeaderButtons side="right" /> : <RightPanelButton />}

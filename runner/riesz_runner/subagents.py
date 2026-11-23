@@ -130,6 +130,8 @@ class SubagentStore:
                 "toolUseId": meta.get("toolUseId"),
                 "description": meta.get("description") or "",
                 "agentType": meta.get("agentType") or "",
+                "harness": "claude",
+                "model": meta.get("model") or "",
                 "background": meta.get("requestShape") == "background",
                 "finished": bool(meta.get("finished")),
                 "size": st.st_size,
