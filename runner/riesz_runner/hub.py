@@ -122,6 +122,7 @@ class Hub:
             asyncio.create_task(self._reap_loop()),
             asyncio.create_task(self._keep_alive_loop()),
             asyncio.create_task(self.harnesses.loop()),
+            asyncio.create_task(self.subagent_watcher.loop()),
         ]
         if self.browser.available and self.extra_tools:
             self._tasks.append(asyncio.create_task(self.browser.start_background()))
@@ -146,6 +147,8 @@ class Hub:
 
     def _all_idle(self) -> bool:
         if self.delivery is not None and self.delivery.held:
+            return False
+        if self.subagent_watcher.has_in_flight():
             return False
         return all(not p.alive or not p.working for p in self.hosted.values()) and not self.harnesses.working()
 
@@ -296,6 +299,9 @@ class Hub:
             await asyncio.sleep(REAP_INTERVAL)
             now = time.time()
             for sid, proc in list(self.hosted.items()):
+                lock = self._spawn_locks.get(sid)
+                if lock is not None and lock.locked():
+                    continue
                 idle = now - proc.last_activity
                 # last_activity moves with every message from claude, including the
                 # task events, so the idle time counts from when the last task ended.

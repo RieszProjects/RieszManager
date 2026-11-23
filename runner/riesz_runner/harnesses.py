@@ -538,14 +538,18 @@ class Harnesses:
             rec["api"] = route
             driver = await self._make(rec["harness"], cwd=rec["cwd"], session_id=session_id, route=route,
                                       model=rec.get("model"), effort=rec.get("effort"), mode=rec.get("mode"))
+            # Refresh activity BEFORE registering the driver so the idle reaper cannot kill it mid-start().
+            self._active[session_id] = time.time()
             self.drivers[session_id] = driver
             try:
                 await driver.start()
             except JsonRpcError as exc:             # the harness refused: say why
                 self.drivers.pop(session_id, None)
+                self._active.pop(session_id, None)
                 raise ControlError(f"{HARNESSES[rec['harness']].name}: {exc.message}") from None
             except Exception:
                 self.drivers.pop(session_id, None)
+                self._active.pop(session_id, None)
                 raise
             self._active[session_id] = time.time()
             log.info("resumed %s session %s", rec["harness"], session_id[:8])
@@ -708,6 +712,7 @@ class Harnesses:
             await driver.stop()
         finally:
             self._stopping.discard(session_id)
+            self._active.pop(session_id, None)
         await self.hub.broadcast_global({"ev": "session_live", "sessionId": session_id, "live": None})
         return True
 
@@ -752,10 +757,16 @@ class Harnesses:
             now = time.time()
             for sid, driver in list(self.drivers.items()):
                 rec = self.records.get(sid) or {}
+                lock = self._locks.get(sid)
                 agy_busy = driver.harness == "antigravity" and self.hub.agy_subagents.has_running(sid, parent_alive=True)
-                if not driver.alive or driver.busy or driver.permissions or driver.tasks or agy_busy or rec.get("keepAlive"):
+                if (
+                    not driver.alive or not driver.ready
+                    or (lock is not None and lock.locked())
+                    or driver.busy or driver.permissions or driver.tasks or agy_busy or rec.get("keepAlive")
+                ):
                     continue
-                if now - self._active.get(sid, now) > self.cfg.idle_timeout:
+                last_active = max(self._active.get(sid, 0.0), getattr(driver, "started_at", 0.0) or 0.0)
+                if last_active and now - last_active > self.cfg.idle_timeout:
                     log.info("stopping idle %s session %s", driver.harness, sid[:8])
                     with contextlib.suppress(Exception):
                         await self.stop(sid)

@@ -287,6 +287,116 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("进程异常退出", parent_msgs()[-1])
         self.assertIn("137", parent_msgs()[-1])
 
+    async def test_idle_reaper_does_not_kill_resuming_session_mid_start(self):
+        from riesz_runner.harnesses import REAP_INTERVAL
+        hub = self.app[HUB]
+        me = await self.session("parent")
+        await hub.harnesses.stop(me)
+        # Simulate stale _active timestamp (e.g. idle-stopped 40 min ago) and slow driver.start().
+        hub.harnesses._active[me] = time.time() - 3600
+        gate = asyncio.Event()
+        entered_start = asyncio.Event()
+        orig_start = FakeDriver.start
+
+        async def slow_start(drv: FakeDriver) -> None:
+            drv.alive = True
+            drv.ready = False
+            drv.started_at = time.time()
+            entered_start.set()
+            await gate.wait()
+            await orig_start(drv)
+
+        FakeDriver.start = slow_start  # type: ignore[assignment]
+        self.addCleanup(setattr, FakeDriver, "start", orig_start)
+
+        hub.cfg = Config(workspace_root=self.tmp, claude_home=self.tmp / "claude", claude_bin="claude",
+                         state_dir=self.tmp / "state", socket_path=self.socket, token=TOKEN, idle_timeout=60)
+        hub.harnesses.cfg = hub.cfg
+        ensure_task = asyncio.create_task(hub.harnesses.ensure(me))
+        await asyncio.wait_for(entered_start.wait(), 2.0)
+
+        # Even if a reaper tick runs right now while driver.alive=True and driver.ready=False,
+        # _active was refreshed before start() and lock/ready guards prevent reaping.
+        drv = hub.harnesses.drivers[me]
+        self.assertFalse(drv.ready)
+        self.assertTrue(hub.harnesses._locks[me].locked())
+        self.assertLess(time.time() - hub.harnesses._active[me], 5.0)
+
+        # Simulate reaper check inline with a stale timestamp to verify ready+lock guards too.
+        hub.harnesses._active[me] = time.time() - 3600
+        now = time.time()
+        reaped = False
+        for sid, d in list(hub.harnesses.drivers.items()):
+            lock = hub.harnesses._locks.get(sid)
+            if not d.alive or not d.ready or (lock is not None and lock.locked()) or d.busy:
+                continue
+            last_active = max(hub.harnesses._active.get(sid, 0.0), getattr(d, "started_at", 0.0) or 0.0)
+            if last_active and now - last_active > hub.cfg.idle_timeout:
+                reaped = True
+        self.assertFalse(reaped)
+        self.assertGreater(REAP_INTERVAL, 0)
+
+        gate.set()
+        resumed = await asyncio.wait_for(ensure_task, 2.0)
+        self.assertTrue(resumed.alive and resumed.ready)
+
+    async def test_subagent_callback_retries_transient_error_and_persists_across_restart(self):
+        from riesz_runner.drivers.base import assistant_item
+        from riesz_runner.process import ControlError
+
+        hub = self.app[HUB]
+        me = await self.session("parent")
+        hub.harnesses.drivers[me].fake_pid = os.getpid()
+        parent_driver = hub.harnesses.drivers[me]
+        parent_msgs = lambda: [it["text"] for it in parent_driver.items.items if it.get("kind") == "user"]
+        relay = await self.relay()
+
+        # Start child asynchronously, then fail the first delivery.send with ControlError.
+        text, error = await relay.call("subagent_start", task="长耗时任务", harness="fake", wait=False)
+        self.assertFalse(error, text)
+        child_prefix = text.split("子代理 ")[1][:8]
+        child = next(s for s in hub.harnesses.drivers if s.startswith(child_prefix))
+        child_driver = hub.harnesses.drivers[child]
+        await asyncio.sleep(0.1)
+        before = len(parent_msgs())
+
+        orig_send = hub.delivery.send
+        fail_once = {"remaining": 1}
+
+        async def flaky_send(sid: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+            if sid == me and fail_once["remaining"] > 0:
+                fail_once["remaining"] -= 1
+                raise ControlError("Antigravity: context canceled")
+            return await orig_send(sid, *args, **kwargs)
+
+        hub.delivery.send = flaky_send  # type: ignore[assignment]
+        self.addCleanup(setattr, hub.delivery, "send", orig_send)
+
+        hub.subagent_watcher.prepare_prompt(child, sync_wait=False)
+        child_driver.items.put(assistant_item("final:1", [{"type": "text", "text": "全部渲染完成"}]))
+        await child_driver.emit({"ev": "result", "result": {"subtype": "success", "isError": False}, "text": "全部渲染完成"})
+        await asyncio.sleep(0.1)
+
+        # Must NOT be marked delivered yet; must be persisted in pending on disk!
+        self.assertEqual(len(parent_msgs()), before)
+        self.assertIn(child, hub.subagent_watcher._pending)
+        self.assertFalse(hub.subagent_watcher._is_delivered(child, "final:1", "全部渲染完成"))
+        saved = json.loads((self.cfg.state_dir / "subagent_callbacks.json").read_text(encoding="utf-8"))
+        self.assertIn(child, saved["pending"])
+
+        # Simulate runner restart: brand-new SubagentWatcher loads pending callback from disk and delivers it!
+        watcher2 = tools_mod.SubagentWatcher(hub)
+        self.assertIn(child, watcher2._pending)
+        watcher2._pending[child]["next_at"] = 0.0
+        await watcher2.flush_due()
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(len(parent_msgs()), before + 1)
+        self.assertIn("这一轮做完了", parent_msgs()[-1])
+        self.assertIn("全部渲染完成", parent_msgs()[-1])
+        self.assertNotIn(child, watcher2._pending)
+        self.assertTrue(watcher2._is_delivered(child, "final:1", "全部渲染完成"))
+
     async def test_a_process_outside_hosted_sessions_is_refused(self):
         await self.session("one")                                      # claims no process
         relay = await self.relay()                                     # the list is for anyone (a harness asks while it starts)

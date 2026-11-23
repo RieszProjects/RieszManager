@@ -14,6 +14,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import json
+import logging
 import os
 import re
 import socket
@@ -36,6 +39,8 @@ from .shares import ShareError
 
 if TYPE_CHECKING:
     from .hub import Hub
+
+log = logging.getLogger(__name__)
 
 SERVER_NAME = "riesz"
 INSTRUCTIONS = ("Riesz Manager 托管着这个会话。这里的工具可以定时唤醒本会话（到点给它发一条消息，重启后也有效）、"
@@ -452,18 +457,81 @@ async def _last_reply_item(hub: Hub, sid: str, *, include_error: bool = False) -
     return error_note or (None, "")
 
 
+def _reply_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
 class SubagentWatcher:
     """Delivers subagent turn replies to the parent session, including autonomous follow-up turns
-    after background commands or timers finish (e.g. Antigravity waking up on its own)."""
+    after background commands or timers finish (e.g. Antigravity waking up on its own).
+
+    Pending callbacks are persisted to `state_dir/subagent_callbacks.json` and retried with backoff
+    if parent delivery fails transiently or the runner restarts before delivery succeeds."""
+
+    RETRY_DELAYS = (5.0, 15.0, 30.0, 60.0, 120.0, 300.0)
+    MAX_ATTEMPTS = 24
+    MAX_DELIVERED = 500
+    PERMANENT_ERRORS = ("unknown session", "working directory no longer exists")
 
     def __init__(self, hub: Hub) -> None:
         self.hub = hub
+        self._path = Path(hub.cfg.state_dir) / "subagent_callbacks.json"
         self._sync: dict[str, asyncio.Event] = {}
         self._sync_saw_result: set[str] = set()
-        self._delivered: dict[str, tuple[str | None, str]] = {}
+        self._delivered: dict[str, dict[str, Any]] = {}
+        self._pending: dict[str, dict[str, Any]] = {}
         self._reported_this_prompt: set[str] = set()
         self._stop_after: set[str] = set()
         self._locks: dict[str, asyncio.Lock] = {}
+        self._in_flight: set[str] = set()
+        self._wakeup = asyncio.Event()
+        self._load()
+
+    def _load(self) -> None:
+        try:
+            raw = json.loads(self._path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if not isinstance(raw, dict):
+            return
+        delivered = raw.get("delivered")
+        if isinstance(delivered, dict):
+            self._delivered = {k: v for k, v in delivered.items() if isinstance(k, str) and isinstance(v, dict)}
+        pending = raw.get("pending")
+        if isinstance(pending, dict):
+            now = time.time()
+            for child, entry in pending.items():
+                if isinstance(child, str) and isinstance(entry, dict) and entry.get("parent") and entry.get("text"):
+                    entry = dict(entry)
+                    # Retry promptly after runner restart.
+                    entry["next_at"] = min(float(entry.get("next_at") or now), now + 1.0)
+                    self._pending[child] = entry
+
+    def _save(self) -> None:
+        if len(self._delivered) > self.MAX_DELIVERED:
+            ordered = sorted(self._delivered.items(), key=lambda kv: float(kv[1].get("ts") or 0.0))
+            self._delivered = dict(ordered[-self.MAX_DELIVERED:])
+        payload = {"delivered": self._delivered, "pending": self._pending}
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, self._path)
+        except OSError as exc:
+            log.warning("could not save subagent callback state: %s", exc)
+
+    def _is_delivered(self, child: str, key: str | None, text: str) -> bool:
+        prev = self._delivered.get(child)
+        if not prev:
+            return False
+        return prev.get("key") == key and prev.get("hash") == _reply_hash(text)
+
+    def _mark_delivered(self, child: str, key: str | None, text: str) -> None:
+        self._delivered[child] = {"key": key, "hash": _reply_hash(text), "ts": time.time()}
+        self._reported_this_prompt.add(child)
+
+    def has_in_flight(self) -> bool:
+        return bool(self._in_flight)
 
     def _lock(self, child: str) -> asyncio.Lock:
         lock = self._locks.get(child)
@@ -480,6 +548,9 @@ class SubagentWatcher:
     def prepare_prompt(self, child: str, *, sync_wait: bool, stop_after: bool = False) -> None:
         """Register before sending a prompt to `child`, so fast completions cannot race."""
         self._reported_this_prompt.discard(child)
+        if child in self._pending:
+            self._pending.pop(child, None)
+            self._save()
         if stop_after:
             self._stop_after.add(child)
         if sync_wait:
@@ -525,8 +596,9 @@ class SubagentWatcher:
             if finished:
                 key, text = await _last_reply_item(self.hub, child, include_error=True)
                 if text:
-                    self._delivered[child] = (key, text)
-                    self._reported_this_prompt.add(child)
+                    self._mark_delivered(child, key, text)
+                    self._pending.pop(child, None)
+                    self._save()
                 if child in self._stop_after:
                     self._stop_after.discard(child)
                     await self._stop_child(child)
@@ -564,6 +636,45 @@ class SubagentWatcher:
             return
         _keep(asyncio.get_running_loop().create_task(self._deliver_exit(child, event)))
 
+    async def _attempt_send(self, child: str) -> bool:
+        """Try to deliver `self._pending[child]` once. Caller holds `self._lock(child)`."""
+        entry = self._pending.get(child)
+        if not entry or child in self._sync:
+            return False
+        if self.hub.delivery is None or self.hub.closing or self.hub.reload_ready.is_set():
+            return False
+        parent = entry["parent"]
+        target = self.hub.final_handoff_target(parent)
+        payload = f"{entry['header']}\n\n{entry['text']}" if entry.get("header") else str(entry["text"])
+        self._in_flight.add(child)
+        try:
+            await self.hub.delivery.send(target, payload, [], str(uuidlib.uuid4()))
+        except Exception as exc:  # noqa: BLE001
+            attempts = int(entry.get("attempts") or 0) + 1
+            entry["attempts"] = attempts
+            msg = str(exc).lower()
+            permanent = any(marker in msg for marker in self.PERMANENT_ERRORS)
+            if permanent or attempts >= self.MAX_ATTEMPTS:
+                log.warning("subagent callback %s -> %s dropped after %d attempt(s): %s",
+                            child[:8], target[:8], attempts, exc)
+                self._pending.pop(child, None)
+            else:
+                delay = self.RETRY_DELAYS[min(attempts - 1, len(self.RETRY_DELAYS) - 1)]
+                entry["next_at"] = time.time() + delay
+                log.warning("subagent callback %s -> %s failed (attempt %d): %s; retrying in %.0fs",
+                            child[:8], target[:8], attempts, exc, delay)
+                self._wakeup.set()
+            self._save()
+            return False
+        finally:
+            self._in_flight.discard(child)
+        self._pending.pop(child, None)
+        if not entry.get("is_exit_error"):
+            self._mark_delivered(child, entry.get("key"), str(entry["text"]))
+        self._save()
+        _announce(self.hub, parent)
+        return True
+
     async def _deliver(self, child: str, event: dict[str, Any]) -> None:
         async with self._lock(child):
             if child in self._sync:
@@ -577,23 +688,21 @@ class SubagentWatcher:
                 return
             is_error = bool((event.get("result") or {}).get("isError"))
             key, text = await _last_reply_item(self.hub, child, include_error=is_error)
-            if not text:
+            if not text or self._is_delivered(child, key, text):
                 return
-            if self._delivered.get(child) == (key, text):
-                return
-            self._delivered[child] = (key, text)
             is_followup = child in self._reported_this_prompt
-            self._reported_this_prompt.add(child)
-            if child in self._stop_after:
-                self._stop_after.discard(child)
-                await self._stop_child(child)
-            target = self.hub.final_handoff_target(parent)
             label = "浏览器任务" if pref.get("browser") else "子代理"
             header = (f"[{label} {child[:8]} 后台任务完成后又更新了回复，最新结果如下]"
                       if is_followup else f"[{label} {child[:8]} 这一轮做完了，回复如下]")
-            if self.hub.delivery is not None:
-                await self.hub.delivery.send(target, f"{header}\n\n{text}", [], str(uuidlib.uuid4()))
-            _announce(self.hub, parent)
+            self._pending[child] = {
+                "parent": parent, "header": header, "text": text, "key": key,
+                "is_exit_error": False, "attempts": 0, "next_at": 0.0, "created_at": time.time(),
+            }
+            self._save()
+            if child in self._stop_after:
+                self._stop_after.discard(child)
+                await self._stop_child(child)
+            await self._attempt_send(child)
 
     async def _deliver_exit(self, child: str, event: dict[str, Any]) -> None:
         async with self._lock(child):
@@ -603,22 +712,48 @@ class SubagentWatcher:
             if not parent:
                 return
             key, text = await _last_reply_item(self.hub, child, include_error=True)
-            target = self.hub.final_handoff_target(parent)
             label = "浏览器任务" if pref.get("browser") else "子代理"
-            if text and self._delivered.get(child) != (key, text):
-                self._delivered[child] = (key, text)
+            if text and not self._is_delivered(child, key, text):
                 is_followup = child in self._reported_this_prompt
-                self._reported_this_prompt.add(child)
                 header = (f"[{label} {child[:8]} 后台任务完成后又更新了回复，最新结果如下]"
                           if is_followup else f"[{label} {child[:8]} 这一轮做完了，回复如下]")
-                if self.hub.delivery is not None:
-                    await self.hub.delivery.send(target, f"{header}\n\n{text}", [], str(uuidlib.uuid4()))
+                self._pending[child] = {
+                    "parent": parent, "header": header, "text": text, "key": key,
+                    "is_exit_error": False, "attempts": 0, "next_at": 0.0, "created_at": time.time(),
+                }
+                self._save()
+                await self._attempt_send(child)
             elif event.get("duringTurn") or event.get("code") not in (0, None):
                 code = event.get("code")
                 msg = f"[{label} {child[:8]} 进程异常退出（代码 {code}），未能完成这一轮]"
-                if self.hub.delivery is not None:
-                    await self.hub.delivery.send(target, msg, [], str(uuidlib.uuid4()))
-            _announce(self.hub, parent)
+                self._pending[child] = {
+                    "parent": parent, "header": "", "text": msg, "key": None,
+                    "is_exit_error": True, "attempts": 0, "next_at": 0.0, "created_at": time.time(),
+                }
+                self._save()
+                await self._attempt_send(child)
+            else:
+                _announce(self.hub, parent)
+
+    async def flush_due(self) -> None:
+        """Deliver any pending callbacks whose retry backoff has elapsed."""
+        now = time.time()
+        for child, entry in list(self._pending.items()):
+            if float(entry.get("next_at") or 0.0) <= now:
+                async with self._lock(child):
+                    await self._attempt_send(child)
+
+    async def loop(self) -> None:
+        """Background retry loop (also flushes callbacks persisted before a runner restart)."""
+        await asyncio.sleep(1.0)
+        while True:
+            try:
+                await self.flush_due()
+            except Exception:  # noqa: BLE001
+                log.exception("subagent callback retry loop error")
+            self._wakeup.clear()
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(self._wakeup.wait(), timeout=2.0)
 
 
 async def _reply_when_done(call: Call, child: str, wait: bool, label: str) -> str:
