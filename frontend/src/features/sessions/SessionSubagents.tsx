@@ -129,6 +129,7 @@ export function SessionSubagents({ session, live }: { session: SessionSummary; l
   const list = useSubagentLists((s) => s.lists[sessionId]);
   const openSubagent = useUi((s) => s.openSubagent);
   const navigate = useUi((s) => s.navigate);
+  const route = useUi((s) => s.route);
   const current = useUi((s) => (s.subagent?.sessionId === sessionId ? s.subagent : null));
   const now = useNowSeconds();
   useHarnesses();
@@ -139,7 +140,9 @@ export function SessionSubagents({ session, live }: { session: SessionSummary; l
     return <div className="rz-subagent-rows"><div className="rz-subagent-row dim"><LoaderCircle size={12} className="spin" /></div></div>;
   }
   const row = (a: SubagentEntry, active: boolean) => {
-    const selected = current ? (current.agentId ? current.agentId === a.agentId : current.toolUseId === a.toolUseId) : false;
+    const selected = a.sessionId
+      ? (!current && route.view === "session" && route.sessionId === a.sessionId)
+      : Boolean(current && (current.agentId ? current.agentId === a.agentId : current.toolUseId === a.toolUseId));
     return (
       <button
         key={a.agentId}

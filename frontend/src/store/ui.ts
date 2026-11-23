@@ -129,10 +129,11 @@ export const useUi = create<UiStore>((set) => ({
       if (replace || takeOverlayEntry()) window.history.replaceState(null, "", path);
       else window.history.pushState(null, "", path);
     }
-    set({ route, leftOpen: false, rightOverlay: false });
+    set({ route, subagent: null, leftOpen: false, rightOverlay: false });
   },
   // Back that only closed an overlay leaves the URL unchanged: keep the same route object.
-  syncFromLocation: () => set((s) => (routePath(s.route) === window.location.pathname ? {} : { route: parseRoute(window.location.pathname) })),
+  syncFromLocation: () =>
+    set((s) => (routePath(s.route) === window.location.pathname ? {} : { route: parseRoute(window.location.pathname), subagent: null })),
   setContextProject: (contextProject) => set({ contextProject }),
   setLeftOpen: (leftOpen) => set({ leftOpen }),
   setRightOverlay: (rightOverlay) => set({ rightOverlay }),
@@ -147,7 +148,11 @@ export const useUi = create<UiStore>((set) => ({
     set({ sidebarTab });
   },
   openFile: (file) => set({ file }),
-  openSubagent: (subagent) => set({ subagent }),
+  openSubagent: (subagent) =>
+    set((s) => ({
+      subagent,
+      ...(subagent ? { leftOpen: false, rightOverlay: false, contextProject: subagent.projectId ?? s.contextProject } : {}),
+    })),
   setSubagentsOpen: (sessionId, open) => set((s) => ({ subagentsOpen: { ...s.subagentsOpen, [sessionId]: open } })),
   setScheduleSession: (scheduleSession) => set({ scheduleSession }),
   openGallery: (gallery) => set({ gallery }),

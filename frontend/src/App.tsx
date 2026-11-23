@@ -78,6 +78,10 @@ function useLiveData(enabled: boolean) {
 
 function Router() {
   const route = useUi((s) => s.route);
+  const subagent = useUi((s) => s.subagent);
+  if (subagent) {
+    return <SubagentViewer key={`${subagent.sessionId}:${subagent.agentId ?? subagent.toolUseId ?? ""}`} target={subagent} />;
+  }
   if (route.view === "session") return <ChatView key={route.sessionId} sessionId={route.sessionId} />;
   if (route.view === "project") return <ProjectView key={route.projectId} projectId={route.projectId} />;
   return <HomeView />;
@@ -114,7 +118,6 @@ export function App() {
       </AppShell>
       <FileViewer />
       <ImageViewer />
-      <SubagentViewer />
       <ScheduleDialog />
       <ServerBrowser />
       <SettingsDialog />
