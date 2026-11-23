@@ -40,7 +40,7 @@ ROUTES: dict[str, list[str]] = {
 }
 
 DEEPSEEK_ANTHROPIC_URL = "https://api.deepseek.com/anthropic"
-DEEPSEEK_MODELS = ("deepseek-v4-pro", "deepseek-flash")
+DEEPSEEK_MODELS = ("deepseek-flash", "deepseek-v4-pro")
 
 
 def split(route: str) -> tuple[str, str]:
@@ -125,8 +125,8 @@ def claude_setup(route: str, credentials: Credentials) -> ClaudeSetup:
         setup.env.update({
             "ANTHROPIC_BASE_URL": DEEPSEEK_ANTHROPIC_URL,
             # Claude Code's model aliases and its background work (titles, summaries) go to DeepSeek models too.
-            "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-v4-pro",
-            "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-v4-pro",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-flash",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-flash",
             "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-flash",
             "ANTHROPIC_SMALL_FAST_MODEL": "deepseek-flash",
         })

@@ -54,11 +54,11 @@ from ..auto_resume import dsh_failure
 log = logging.getLogger(__name__)
 
 PROVIDER = "deepseek-official"
-DEFAULT_MODEL = "deepseek-v4-pro"
+DEFAULT_MODEL = "deepseek-flash"
 EFFORTS = ["off", "low", "high", "max"]
 FALLBACK_MODELS = [
-    {"value": "deepseek-v4-pro", "displayName": "DeepSeek V4 Pro", "supportedEffortLevels": EFFORTS},
     {"value": "deepseek-flash", "displayName": "DeepSeek V4.1 Flash", "supportedEffortLevels": EFFORTS},
+    {"value": "deepseek-v4-pro", "displayName": "DeepSeek V4 Pro", "supportedEffortLevels": EFFORTS},
 ]
 MODES = [
     Mode("read-only", "只读", "readonly", "只能读文件；要写文件时先问你"),

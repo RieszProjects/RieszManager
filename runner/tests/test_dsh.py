@@ -234,11 +234,11 @@ class SendTest(unittest.IsolatedAsyncioTestCase):
             restarts.append(driver.model)
         driver.restart = fake_restart
         driver.busy = True
-        await driver.set_model("deepseek-flash")
+        await driver.set_model("deepseek-v4-pro")
         self.assertEqual(restarts, [])
         self.assertTrue(driver._restart_pending)
         await driver._notification("session.status", {"sessionId": SESSION_ID, "status": "idle"})
-        self.assertEqual(restarts, ["deepseek-flash"])
+        self.assertEqual(restarts, ["deepseek-v4-pro"])
         with self.assertRaises(ValueError):
             await driver.set_effort("xhigh")
 
@@ -266,7 +266,7 @@ class SendTest(unittest.IsolatedAsyncioTestCase):
     async def test_models_without_a_key(self):
         driver = make_driver(Events())
         models = await driver.models()
-        self.assertEqual(models[0]["value"], "deepseek-v4-pro")
+        self.assertEqual(models[0]["value"], "deepseek-flash")
 
 
 class EventsTest(unittest.TestCase):

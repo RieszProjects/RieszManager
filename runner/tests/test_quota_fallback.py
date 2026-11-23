@@ -243,10 +243,11 @@ class QuotaFallbackTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(hub._ar_calls[0][1]["failure"]["cause"], "quota")
 
     async def test_model_compatibility_guard(self) -> None:
+        self.assertEqual(FALLBACK_MODEL, "deepseek-flash")
         self.assertTrue(_model_compatible("anthropic:subscription", "claude-opus-4-6"))
-        self.assertFalse(_model_compatible("anthropic:subscription", "deepseek-v4-pro"))
+        self.assertFalse(_model_compatible("anthropic:subscription", "deepseek-flash"))
         self.assertFalse(_model_compatible("anthropic:subscription", "<synthetic>"))
-        self.assertTrue(_model_compatible("deepseek:key", "deepseek-v4-pro"))
+        self.assertTrue(_model_compatible("deepseek:key", "deepseek-flash"))
         self.assertFalse(_model_compatible("deepseek:key", "claude-opus-4-6"))
 
 

@@ -3,7 +3,7 @@
 When a hosted Claude Code session running on the user's `anthropic:subscription`
 hits its quota limit (`failure.cause == "quota"`) and a DeepSeek API key is
 configured, this module switches that session in-place to `deepseek:key`
-(`deepseek-v4-pro`) and sends a continuation prompt so work carries on without
+(`deepseek-flash`) and sends a continuation prompt so work carries on without
 waiting for the subscription window to reset.
 
 State is persisted to `<state dir>/quota_fallback.json` so fallback sessions
@@ -34,7 +34,7 @@ log = logging.getLogger(__name__)
 
 SOURCE_ROUTE = "anthropic:subscription"
 FALLBACK_ROUTE = "deepseek:key"
-FALLBACK_MODEL = "deepseek-v4-pro"
+FALLBACK_MODEL = "deepseek-flash"
 AFTER_RESET = 60.0
 CHECK_INTERVAL = 30.0
 PROBE_INTERVAL = 600.0
