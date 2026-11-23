@@ -110,7 +110,7 @@ class ClaudeSetup:
         return env
 
 
-def claude_setup(route: str, credentials: Credentials) -> ClaudeSetup:
+def claude_setup(route: str, credentials: Credentials, *, deepseek_base_url: str | None = None) -> ClaudeSetup:
     provider, auth = split(route)
     if route not in ROUTES["claude"]:
         raise CredentialError(f"Claude Code cannot use {route}")
@@ -123,7 +123,7 @@ def claude_setup(route: str, credentials: Credentials) -> ClaudeSetup:
     setup.settings["apiKeyHelper"] = helper
     if provider == "deepseek":
         setup.env.update({
-            "ANTHROPIC_BASE_URL": DEEPSEEK_ANTHROPIC_URL,
+            "ANTHROPIC_BASE_URL": deepseek_base_url or DEEPSEEK_ANTHROPIC_URL,
             # Claude Code's model aliases and its background work (titles, summaries) go to DeepSeek models too.
             "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-flash",
             "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-flash",

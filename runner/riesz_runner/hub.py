@@ -20,6 +20,7 @@ from .tools import SubagentWatcher, server as tools_server
 from .projects import ProjectResolver
 from .session_prefs import SessionPrefs
 from .auto_resume import AutoResume
+from .deepseek_proxy import DeepSeekAnthropicProxy
 from .quota_fallback import ClaudeQuotaFallback
 from .balances import BalanceMonitor
 from .browser import ServerBrowser, mcp_server as browser_mcp_server
@@ -114,6 +115,7 @@ class Hub:
         self.nodes = NodeManager(self)             # reverse-connected personal computer nodes (nodes.py)
         self.subagent_watcher = SubagentWatcher(self)  # persistent parent callbacks for subagent turns
         self.limits = Limits(self)               # other subscriptions' usage limits (limits.py)
+        self.deepseek_proxy = DeepSeekAnthropicProxy()   # Anthropic-2026 -> DeepSeek compatibility proxy
         self.auto_resume = AutoResume(self)      # retry turns that failed for quota / billing / transient errors
         self.quota_fallback = ClaudeQuotaFallback(self)  # Claude subscription -> DeepSeek API fallback & restore
 
@@ -191,7 +193,7 @@ class Hub:
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*(p.stop() for p in list(self.hosted.values())), self.harnesses.close(),
-                             self.browser.stop(),
+                             self.browser.stop(), self.deepseek_proxy.close(),
                              *(self.nodes.kick_device(nid) for nid in list(self.nodes._live)),
                              return_exceptions=True)
 
@@ -824,7 +826,8 @@ class Hub:
         # Nothing available: try the login anyway (a failed check is not proof of no login; claude says if it is).
         route = route or await routes.default("claude", self.credentials, self.bins()) or "anthropic:subscription"
         try:
-            return routes.claude_setup(route, self.credentials)
+            deepseek_url = await self.deepseek_proxy.ensure_started() if route == "deepseek:key" else None
+            return routes.claude_setup(route, self.credentials, deepseek_base_url=deepseek_url)
         except CredentialError as exc:
             raise ControlError(str(exc)) from None
 
