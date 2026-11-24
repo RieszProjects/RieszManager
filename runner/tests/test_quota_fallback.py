@@ -306,6 +306,92 @@ class QuotaFallbackTest(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(ok2)
             self.assertLess(time.monotonic() - t0, 5.0)
 
+    async def test_compact_quota_failure_with_is_error_false_switches_to_deepseek(self) -> None:
+        """Real Claude Code emits `result.is_error=false` + `system/status` `compact_result=failed`
+        when `/compact` hits a weekly limit; both `ClaudeProcess` and `_compact_claude` must detect it."""
+        from riesz_runner.auto_resume import claude_failure
+        from riesz_runner.config import Config
+        from riesz_runner.hub import Hub
+        from riesz_runner.process import ClaudeProcess
+
+        # 1. claude_failure recognizes quota on is_error=False + compact_error (with and without rejected event)
+        f1 = claude_failure(
+            {"type": "result", "subtype": "success", "is_error": False},
+            None,
+            {"status": "rejected", "resetsAt": 1795687200},
+            "Error during compaction: You've hit your weekly limit · resets Nov 26, 5am",
+        )
+        self.assertIsNotNone(f1)
+        assert f1 is not None
+        self.assertEqual(f1["cause"], "quota")
+        self.assertEqual(f1["resetsAt"], 1795687200.0)
+
+        f2 = claude_failure(
+            {"type": "result", "subtype": "success", "is_error": False},
+            None,
+            None,
+            "Error during compaction: You've hit your weekly limit · resets Nov 26, 5am",
+        )
+        self.assertIsNotNone(f2)
+        assert f2 is not None
+        self.assertEqual(f2["cause"], "quota")
+
+        # 2. ClaudeProcess._handle captures compact_error from system/status and populates last_result
+        with tempfile.TemporaryDirectory() as td:
+            cfg = Config(claude_bin="claude", socket_path=Path(td) / "runner.sock", token="tok",
+                         state_dir=Path(td), claude_home=Path(td) / "claude", workspace_root=Path(td))
+            events: list[dict[str, Any]] = []
+
+            async def sink(_proc, ev):
+                events.append(ev)
+
+            p = ClaudeProcess(cfg, session_id="sess-real", cwd=td, sink=sink)
+            await p._handle({"type": "system", "subtype": "status", "status": "compacting"})
+            await p._handle({"type": "rate_limit_event", "rate_limit_info": {"status": "rejected", "resetsAt": 1795687200}})
+            await p._handle({
+                "type": "system", "subtype": "status", "status": None,
+                "compact_result": "failed",
+                "compact_error": "Error during compaction: You've hit your weekly limit · resets Nov 26, 5am",
+            })
+            await p._handle({"type": "result", "subtype": "success", "is_error": False, "num_turns": 0})
+            self.assertIsNotNone(p.last_result)
+            assert p.last_result is not None
+            self.assertFalse(p.last_result["isError"])
+            self.assertEqual((p.last_result.get("failure") or {}).get("cause"), "quota")
+            self.assertIn("weekly limit", p.last_result.get("compactError") or "")
+
+            # 3. _compact_claude detects that exact isError=False + failure.cause=quota result and retries on DeepSeek
+            hub = _fake_hub(Path(td) / "hub", deepseek_configured=True)
+            sid = "s-compact-quota"
+            proc = SimpleNamespace(alive=True, working=False, last_result=None)
+            hub.hosted[sid] = proc
+            compact_items = {"count": 0}
+            hub._source_items = AsyncMock(
+                side_effect=lambda _sid: [{"kind": "compact"}] * compact_items["count"]
+            )
+            calls = {"n": 0}
+
+            async def fake_send(target_sid, text, attachments, uuid, **kwargs):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    proc.last_result = {
+                        "isError": False,
+                        "subtype": "success",
+                        "ts": time.time(),
+                        "compactError": "Error during compaction: You've hit your weekly limit",
+                        "failure": {"cause": "quota", "resetsAt": 1795687200.0, "message": "weekly limit"},
+                    }
+                else:
+                    compact_items["count"] = 1
+                    proc.last_result = {"isError": False, "subtype": "success", "ts": time.time()}
+                return {"uuid": uuid, "held": False}
+
+            hub.delivery.send = fake_send
+            ok = await Hub._compact_claude(hub, sid, timeout=10.0)
+            self.assertTrue(ok)
+            self.assertEqual(calls["n"], 2)
+            self.assertEqual(hub._api_calls, [(sid, FALLBACK_ROUTE, FALLBACK_MODEL, True)])
+
 
 if __name__ == "__main__":
     unittest.main()

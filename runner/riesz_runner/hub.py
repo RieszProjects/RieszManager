@@ -979,18 +979,19 @@ class Hub:
             proc = self.get_hosted(session_id)
             res = proc.last_result if proc is not None else None
             if res and float(res.get("ts") or 0.0) >= started_at:
-                if res.get("isError"):
-                    cause = (res.get("failure") or {}).get("cause")
-                    if cause == "quota" and not retried_deepseek and await switch_to_deepseek():
-                        retried_deepseek = True
-                        started_at = time.time()
-                        try:
-                            await self.delivery.send(session_id, "/compact", [], str(uuidlib.uuid4()), _bypass_handoff=True)
-                            continue
-                        except Exception as exc:  # noqa: BLE001
-                            log.warning("handoff compact: retry /compact failed for %s: %s", session_id[:8], exc)
-                            return False
-                    log.warning("handoff compact failed for %s (%s); falling back to truncation", session_id[:8], cause or res.get("subtype"))
+                cause = (res.get("failure") or {}).get("cause")
+                if cause == "quota" and not retried_deepseek and await switch_to_deepseek():
+                    retried_deepseek = True
+                    started_at = time.time()
+                    try:
+                        await self.delivery.send(session_id, "/compact", [], str(uuidlib.uuid4()), _bypass_handoff=True)
+                        continue
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning("handoff compact: retry /compact failed for %s: %s", session_id[:8], exc)
+                        return False
+                if res.get("isError") or res.get("compactError"):
+                    log.warning("handoff compact failed for %s (%s); falling back to truncation",
+                                session_id[:8], cause or res.get("compactError") or res.get("subtype"))
                     return False
                 # Non-error result finished without adding a compact item (e.g., already short).
                 if not proc.working:

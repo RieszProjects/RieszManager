@@ -109,6 +109,7 @@ class ClaudeProcess:
         self.last_result: dict[str, Any] | None = None
         self._api_error: dict[str, Any] | None = None       # this turn's synthetic "API Error" message
         self._rejected: dict[str, Any] | None = None        # the last rate_limit_event that turned a request away
+        self._compact_error: str | None = None              # compact_error from system/status (when /compact fails)
         self.stderr_tail: deque[str] = deque(maxlen=STDERR_TAIL_LINES)
 
         self._pending_controls: dict[str, asyncio.Future[dict[str, Any]]] = {}
@@ -474,10 +475,12 @@ class ClaudeProcess:
                 "stopReason": msg.get("stop_reason"),
                 "ts": time.time(),
             }
-            fail = claude_failure(msg, self._api_error, self._rejected)
+            fail = claude_failure(msg, self._api_error, self._rejected, self._compact_error)
             if fail:
                 self.last_result["failure"] = fail
-            self._api_error = self._rejected = None
+            if self._compact_error:
+                self.last_result["compactError"] = self._compact_error
+            self._api_error = self._rejected = self._compact_error = None
             text = msg.get("result") if isinstance(msg.get("result"), str) else ""
             await self.sink(self, {"ev": "result", "result": self.last_result, "text": text[:400]})
             await self.sink(self, {"ev": "transcript"})
@@ -517,6 +520,10 @@ class ClaudeProcess:
             await self._emit_state()
         elif subtype == "status":
             self.status = msg.get("status")
+            if msg.get("compact_result") == "failed" and isinstance(msg.get("compact_error"), str):
+                self._compact_error = msg["compact_error"]
+            elif self.status == "compacting":
+                self._compact_error = None
             if msg.get("permissionMode"):
                 self.permission_mode = msg["permissionMode"]
             await self._emit_state()

@@ -89,10 +89,15 @@ _CLAUDE_ERRORS = {"billing_error": "balance", "oauth_org_not_allowed": "balance"
 
 
 def claude_failure(result: dict[str, Any], error_message: dict[str, Any] | None,
-                   rejected: dict[str, Any] | None) -> dict[str, Any] | None:
+                   rejected: dict[str, Any] | None, compact_error: str | None = None) -> dict[str, Any] | None:
     """Claude Code (stream-json): the `result` message of a failed turn, the synthetic assistant message
-    carrying the API error, and the last rate_limit_event that said "rejected"."""
+    carrying the API error, the last rate_limit_event that said "rejected", and any compact_error reported
+    on `system/status` (Claude emits `result.is_error=false` even when `/compact` fails due to quota)."""
     if not result.get("is_error"):
+        if compact_error:
+            if rejected and rejected.get("status") == "rejected":
+                return failure("quota", compact_error, rejected.get("resetsAt"))
+            return failure_from_text(compact_error)
         return None
     err = error_message or {}
     kind = err.get("error")

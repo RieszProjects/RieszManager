@@ -47,7 +47,7 @@ INSTRUCTIONS = ("Riesz Manager 托管着这个会话。这里的工具可以定�
                 "给别的会话发消息、开新会话、查看别的会话的状态和回复、把文件发给用户、"
                 "用 note_write 给用户写便签（持续显示在网页顶栏的浮动便签窗口里，不随上下文覆盖）、"
                 "以及当用户把自己的本地电脑节点绑定到本会话时，通过 node_info/node_exec/node_push/node_pull 在该电脑上执行命令和互传文件。"
-                "如果同时挂载了 `browser`（chrome-devtools-mcp）服务器，可直接用它操作服务器常驻浏览器。")
+                "如果同时挂载了 `browser`（chrome-devtools-mcp）服务器，它连接的就是本机常驻的已登录 Chrome 浏览器，请直接用它操作网页（若目标网站会话过期，直接点页面登录即可），不要为此通过 subagent_start 开子代理。")
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 DAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 MIN_PREFIX = 6
@@ -967,7 +967,8 @@ TOOLS: list[Tool] = [
     Tool("subagent_start",
          "开一个子代理：用指定的工具（claude=Claude Code、codex、dsh=DeepSeek Harness、gemini=Gemini CLI、antigravity）"
          "开一个会话替你做一件事，等它这一轮做完把回复交给你。它显示在你的子代理列表里，权限和你一样宽松。"
-         "之后用 subagent_send 接着跟它说话。最多等 8 分钟；超过或 wait=false 时先返回，做完后它的回复作为一条消息发给你。",
+         "之后用 subagent_send 接着跟它说话。最多等 8 分钟；超过或 wait=false 时先返回，做完后它的回复作为一条消息发给你。"
+         "网页操作请直接使用已挂载的 browser 工具，不要用 subagent_start 开浏览器子代理。",
          {"task": {"type": "string", "description": "交给它的事，写清楚背景、要求和要交回什么"},
           "harness": {"type": "string", "enum": list(HARNESS_IDS), "description": "用哪个工具（默认 claude）"},
           "model": {"type": "string", "description": "模型（不写就用该工具的默认）"},
