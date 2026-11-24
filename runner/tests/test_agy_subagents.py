@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import tempfile
+import time
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 from riesz_runner.agy_subagents import AgySubagentStore
@@ -231,6 +233,82 @@ class AgySubagentStoreTest(unittest.IsolatedAsyncioTestCase):
                 "tool_calls": [{"name": "manage_task", "args": {"Action": '"kill"', "TaskId": '"44444444/task-kill"'}}],
             }])
             self.assertFalse(store.has_active_work(parent, parent_alive=True, started_at=new_start))
+
+            # Truncated tool output / file read quoting the marker string must NOT create a phantom task
+            _write_jsonl(p_log, [{
+                "step_index": 6,
+                "type": "GENERIC",
+                "status": "DONE",
+                "created_at": "2026-11-23T10:08:00Z",
+                "content": (
+                    "Created At: 2026-11-23T10:08:00-05:00\n"
+                    "The tool's output was truncated due to being too long.\n"
+                    'Tool is running as a background task with task id: 44444444/task-live\\nTask\n'
+                    'BG_TASK_START_RE = re.compile(r"Tool is running as a background task with task id:\\s*([^\\s]+)")\n'
+                ),
+            }])
+            self.assertFalse(store.has_active_work(parent, parent_alive=True, started_at=new_start))
+
+            # One-shot schedule timer clears immediately when it fires via SYSTEM_MESSAGE sender=<tid>
+            _write_jsonl(p_log, [
+                {
+                    "step_index": 7,
+                    "type": "PLANNER_RESPONSE",
+                    "status": "DONE",
+                    "created_at": "2026-11-23T10:09:00Z",
+                    "tool_calls": [{"name": "schedule", "args": {"DurationSeconds": "90", "Prompt": '"Check lock"'}}],
+                },
+                {
+                    "step_index": 8,
+                    "type": "GENERIC",
+                    "status": "DONE",
+                    "created_at": "2026-11-23T10:09:01Z",
+                    "content": (
+                        "Created At: 2026-11-23T10:09:01-05:00\n"
+                        "Tool is running as a background task with task id: 44444444/task-timer1\n"
+                        "Task Description: Timer: 1m 30s, Prompt: Check lock\n"
+                    ),
+                },
+            ])
+            # Timer is in the past relative to wall-clock time unless createdAt is recent, so use a fresh timestamp
+            now_iso = datetime.fromtimestamp(time.time(), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            _write_jsonl(p_log, [
+                {
+                    "step_index": 9,
+                    "type": "PLANNER_RESPONSE",
+                    "status": "DONE",
+                    "created_at": now_iso,
+                    "tool_calls": [{"name": "schedule", "args": {"DurationSeconds": "180", "Prompt": '"Check progress"'}}],
+                },
+                {
+                    "step_index": 10,
+                    "type": "GENERIC",
+                    "status": "DONE",
+                    "created_at": now_iso,
+                    "content": (
+                        f"Created At: {now_iso}\n"
+                        "Tool is running as a background task with task id: 44444444/task-timer2\n"
+                        "Task Description: Timer: 3m, Prompt: Check progress\n"
+                    ),
+                },
+            ])
+            self.assertTrue(store.has_active_work(parent, parent_alive=True, started_at=new_start))
+            self.assertEqual(len(store.active_schedules(parent, parent_alive=True, started_at=new_start)), 1)
+
+            # Firing delivers a SYSTEM_MESSAGE with sender=<tid> (no "Task id ... finished" line)
+            _write_jsonl(p_log, [{
+                "step_index": 11,
+                "type": "SYSTEM_MESSAGE",
+                "status": "DONE",
+                "created_at": now_iso,
+                "content": (
+                    "<SYSTEM_MESSAGE>\n"
+                    f"[Message] timestamp={now_iso} sender=44444444/task-timer2 priority=MESSAGE_PRIORITY_HIGH content=Check progress\n"
+                    "</SYSTEM_MESSAGE>"
+                ),
+            }])
+            self.assertFalse(store.has_active_work(parent, parent_alive=True, started_at=new_start))
+            self.assertEqual(store.active_schedules(parent, parent_alive=True, started_at=new_start), [])
 
 
 if __name__ == "__main__":

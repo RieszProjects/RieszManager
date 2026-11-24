@@ -31,10 +31,12 @@ from .drivers.base import assistant_item, notice_item, tool_block, tool_result, 
 DEFAULT_BRAIN_DIR = Path("~/.gemini/antigravity-cli/brain")
 AGENT_PREFIX = "agy-"
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-CREATED_RE = re.compile(r"Created the following subagent:\s*(\{[\s\S]*?\})")
-ACTIVE_LIST_RE = re.compile(r"You have \d+ active subagent\(s\):\s*(\[[\s\S]*?\])")
+CREATED_RE = re.compile(r"^Created the following subagent:\s*(\{[\s\S]*?\})")
+ACTIVE_LIST_RE = re.compile(r"^You have \d+ active subagent\(s\):\s*(\[[\s\S]*?\])")
 TIMESTAMPS_RE = re.compile(r"^(?:(?:Created|Completed) At:[^\n]*\n)+")
-BG_TASK_START_RE = re.compile(r"Tool is running as a background task with task id:\s*([^\s]+)")
+BG_TASK_START_RE = re.compile(
+    r"^Tool is running as a background task with task id:\s*([A-Za-z0-9_-]+/task-[A-Za-z0-9_-]+)(?:\s|$)"
+)
 BG_TASK_DONE_RE = re.compile(r'Task id "([^"]+)" (?:finished|was canceled|stopped)')
 BG_TASK_RESET_MARKER = "All your subagents and background tasks have been stopped"
 BG_SCHEDULE_DESC_RE = re.compile(r"Task Description:\s*(Timer|Cron):\s*([^\n]+)")
@@ -282,69 +284,81 @@ class AgySubagentStore:
             content = str(step.get("content") or "")
             if not content:
                 return
+            clean = _clean_generic_content(content)
             ts = _step_ts(step)
-            sched_desc = BG_SCHEDULE_DESC_RE.search(content)
-            for m in BG_TASK_START_RE.finditer(content):
-                tid = m.group(1)
+            m_bg = BG_TASK_START_RE.match(clean)
+            if m_bg:
+                tid = m_bg.group(1)
                 idx.open_bg_tasks[tid] = ts
+                sched_desc = BG_SCHEDULE_DESC_RE.search(clean)
                 if sched_desc:
                     meta_s = idx.pending_schedules.pop(0) if idx.pending_schedules else {}
+                    kind = sched_desc.group(1)
                     idx.open_schedules[tid] = {
                         "id": tid,
+                        "kind": kind,
                         "createdAt": ts or time.time(),
                         "duration": meta_s.get("duration"),
-                        "cron": meta_s.get("cron"),
+                        "cron": meta_s.get("cron") or (sched_desc.group(2).strip() if kind == "Cron" else None),
                         "prompt": meta_s.get("prompt") or sched_desc.group(2).strip(),
                         "desc": sched_desc.group(2).strip(),
                     }
-            for m in CREATED_RE.finditer(content):
+            m_created = CREATED_RE.match(clean)
+            if m_created:
                 try:
-                    info = json.loads(m.group(1))
+                    info = json.loads(m_created.group(1))
                 except ValueError:
-                    continue
+                    info = None
                 cid = info.get("conversationId") if isinstance(info, dict) else None
-                if not isinstance(cid, str) or not UUID_RE.match(cid):
-                    continue
-                pending = idx.pending_invokes.pop(0) if idx.pending_invokes else {}
-                meta = idx.children.get(cid)
-                if meta is None:
-                    meta = _SubagentMeta(conversation_id=cid, created_at=time.time())
-                    idx.children[cid] = meta
-                meta.role = meta.role or pending.get("role") or ""
-                meta.agent_type = meta.agent_type or pending.get("type") or ""
-                meta.prompt = meta.prompt or pending.get("prompt") or ""
-                meta.model = meta.model or pending.get("model") or ""
-                meta.workspace = meta.workspace or pending.get("workspace") or ""
-                meta.transcript_path = _file_uri_to_path(info.get("logAbsoluteUri")) or meta.transcript_path
-                meta.killed = False
-            for m in ACTIVE_LIST_RE.finditer(content):
-                try:
-                    arr = json.loads(m.group(1))
-                except ValueError:
-                    continue
-                if not isinstance(arr, list):
-                    continue
-                for row in arr:
-                    if not isinstance(row, dict):
-                        continue
-                    cid = row.get("conversationId")
-                    if not isinstance(cid, str) or not UUID_RE.match(cid):
-                        continue
+                if isinstance(cid, str) and UUID_RE.match(cid):
+                    pending = idx.pending_invokes.pop(0) if idx.pending_invokes else {}
                     meta = idx.children.get(cid)
                     if meta is None:
                         meta = _SubagentMeta(conversation_id=cid, created_at=time.time())
                         idx.children[cid] = meta
-                    if row.get("role"):
-                        meta.role = str(row["role"])
-                    if row.get("type"):
-                        meta.agent_type = str(row["type"])
-                    if row.get("transcript"):
-                        meta.transcript_path = _file_uri_to_path(str(row["transcript"])) or meta.transcript_path
+                    meta.role = meta.role or pending.get("role") or ""
+                    meta.agent_type = meta.agent_type or pending.get("type") or ""
+                    meta.prompt = meta.prompt or pending.get("prompt") or ""
+                    meta.model = meta.model or pending.get("model") or ""
+                    meta.workspace = meta.workspace or pending.get("workspace") or ""
+                    meta.transcript_path = _file_uri_to_path(info.get("logAbsoluteUri")) or meta.transcript_path
+                    meta.killed = False
+            m_list = ACTIVE_LIST_RE.match(clean)
+            if m_list:
+                try:
+                    arr = json.loads(m_list.group(1))
+                except ValueError:
+                    arr = None
+                if isinstance(arr, list):
+                    for row in arr:
+                        if not isinstance(row, dict):
+                            continue
+                        cid = row.get("conversationId")
+                        if not isinstance(cid, str) or not UUID_RE.match(cid):
+                            continue
+                        meta = idx.children.get(cid)
+                        if meta is None:
+                            meta = _SubagentMeta(conversation_id=cid, created_at=time.time())
+                            idx.children[cid] = meta
+                        if row.get("role"):
+                            meta.role = str(row["role"])
+                        if row.get("type"):
+                            meta.agent_type = str(row["type"])
+                        if row.get("transcript"):
+                            meta.transcript_path = _file_uri_to_path(str(row["transcript"])) or meta.transcript_path
         elif stype == "SYSTEM_MESSAGE":
             content = str(step.get("content") or "")
             for m in BG_TASK_DONE_RE.finditer(content):
                 idx.open_bg_tasks.pop(m.group(1), None)
                 idx.open_schedules.pop(m.group(1), None)
+            # One-shot `schedule(DurationSeconds=...)` timers fire by sending a SYSTEM_MESSAGE
+            # whose `sender` is the task id, without a separate `Task id "..." finished` line.
+            for m in SYS_MSG_RE.finditer(content):
+                sender = m.group(1)
+                sched = idx.open_schedules.get(sender)
+                if sched is not None and not sched.get("cron"):
+                    idx.open_bg_tasks.pop(sender, None)
+                    idx.open_schedules.pop(sender, None)
             if BG_TASK_RESET_MARKER in content:
                 idx.open_bg_tasks.clear()
                 idx.open_schedules.clear()
@@ -384,12 +398,15 @@ class AgySubagentStore:
                 status.last_has_tools = bool(step.get("tool_calls"))
             elif stype == "GENERIC":
                 content = str(step.get("content") or "")
-                m = BG_TASK_START_RE.search(content)
+                clean = _clean_generic_content(content)
+                m = BG_TASK_START_RE.match(clean)
                 if m:
                     status.open_bg_tasks.add(m.group(1))
             elif stype == "SYSTEM_MESSAGE":
                 content = str(step.get("content") or "")
                 for m in BG_TASK_DONE_RE.finditer(content):
+                    status.open_bg_tasks.discard(m.group(1))
+                for m in SYS_MSG_RE.finditer(content):
                     status.open_bg_tasks.discard(m.group(1))
                 if BG_TASK_RESET_MARKER in content:
                     status.open_bg_tasks.clear()
@@ -448,11 +465,19 @@ class AgySubagentStore:
         idx = self._sync_parent(parent_sid)
         if idx is None or not idx.open_bg_tasks:
             return False
-        if started_at is None:
+        now = time.time()
+        cutoff = (started_at - 5.0) if started_at is not None else None
+        for tid, ts in idx.open_bg_tasks.items():
+            # Entries without a parsed timestamp (0.0) are treated as current; older ones belong to a prior process.
+            if cutoff is not None and ts > 0.0 and ts < cutoff:
+                continue
+            sched = idx.open_schedules.get(tid)
+            if sched is not None and not sched.get("cron") and sched.get("duration") is not None:
+                created = float(sched.get("createdAt") or ts or 0.0)
+                if created > 0.0 and created + float(sched["duration"]) < now - 120.0:
+                    continue
             return True
-        cutoff = started_at - 5.0
-        # Entries without a parsed timestamp (0.0) are treated as current; older ones belong to a prior process.
-        return any(ts == 0.0 or ts >= cutoff for ts in idx.open_bg_tasks.values())
+        return False
 
     def active_schedules(self, parent_sid: str, *, parent_alive: bool, started_at: float | None = None) -> list[dict[str, Any]]:
         """Live built-in `schedule` timers for an alive Antigravity session, shaped like `schedules.py` views."""

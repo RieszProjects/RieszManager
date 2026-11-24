@@ -507,12 +507,15 @@ class SubagentWatcher:
                     # Retry promptly after runner restart.
                     entry["next_at"] = min(float(entry.get("next_at") or now), now + 1.0)
                     self._pending[child] = entry
+        deferred = raw.get("deferred")
+        if isinstance(deferred, list):
+            self._deferred = {c for c in deferred if isinstance(c, str)}
 
     def _save(self) -> None:
         if len(self._delivered) > self.MAX_DELIVERED:
             ordered = sorted(self._delivered.items(), key=lambda kv: float(kv[1].get("ts") or 0.0))
             self._delivered = dict(ordered[-self.MAX_DELIVERED:])
-        payload = {"delivered": self._delivered, "pending": self._pending}
+        payload = {"delivered": self._delivered, "pending": self._pending, "deferred": sorted(self._deferred)}
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self._path.with_suffix(".tmp")
@@ -688,12 +691,17 @@ class SubagentWatcher:
             # Still busy, queued, waiting on a permission prompt, or running open background tasks:
             # defer delivery until either a later autonomous turn finishes or flush_due sees work end.
             if self.hub.session_working(child):
-                self._deferred.add(child)
+                if child not in self._deferred:
+                    self._deferred.add(child)
+                    self._save()
                 return
+            was_deferred = child in self._deferred
             self._deferred.discard(child)
             is_error = bool((event.get("result") or {}).get("isError"))
             key, text = await _last_reply_item(self.hub, child, include_error=is_error)
             if not text or self._is_delivered(child, key, text):
+                if was_deferred:
+                    self._save()
                 return
             is_followup = child in self._reported_this_prompt
             label = "浏览器任务" if pref.get("browser") else "子代理"
