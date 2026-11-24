@@ -744,6 +744,7 @@ class Harnesses:
         """Stop drivers idle for the runner's idle timeout (like Claude Code processes); start the ones kept running."""
         failures: dict[str, tuple[float, int]] = {}
         agy_seen: dict[str, tuple[int, tuple[str, ...]]] = {}
+        agy_sched_seen: dict[str, tuple[str, ...]] = {}
         ticks = 0
         while True:
             await asyncio.sleep(3.0)
@@ -752,6 +753,8 @@ class Harnesses:
             for sid, driver in list(self.drivers.items()):
                 if not driver.alive or driver.harness != "antigravity":
                     agy_seen.pop(sid, None)
+                    if agy_sched_seen.pop(sid, None):
+                        await self.hub.broadcast_global({"ev": "schedules"})
                     continue
                 entries = self.hub.agy_subagents.list(sid, parent_alive=True)
                 sig = (len(entries), tuple(a["agentId"] for a in entries if a["running"]))
@@ -759,6 +762,11 @@ class Harnesses:
                     agy_seen[sid] = sig
                     await self.hub.broadcast_global({"ev": "session_live", "sessionId": sid, "live": self.live_info(sid)})
                     await self.hub.broadcast_global({"ev": "sessions", "sessions": [self.summary(sid)], "removed": []})
+                scheds = self.hub.agy_subagents.active_schedules(sid, parent_alive=True, started_at=driver.started_at)
+                sched_sig = tuple(s["id"] for s in scheds)
+                if agy_sched_seen.get(sid, ()) != sched_sig:
+                    agy_sched_seen[sid] = sched_sig
+                    await self.hub.broadcast_global({"ev": "schedules"})
             if ticks % max(1, int(REAP_INTERVAL // 3)) != 0:
                 continue
             now = time.time()

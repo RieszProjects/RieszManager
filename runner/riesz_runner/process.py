@@ -100,6 +100,9 @@ class ClaudeProcess:
         self.permissions: dict[str, dict[str, Any]] = {}
         # Top-level tasks claude is running (foreground tool runs, subagents, background jobs).
         self.tasks: dict[str, dict[str, Any]] = {}
+        # In-process Claude Code timers (ScheduleWakeup / CronCreate), cleared when fired or process exits.
+        self.timers: dict[str, dict[str, Any]] = {}
+        self._cron_pending: dict[str, str] = {}   # CronCreate tool_use_id -> timer key
         self._permission_timers: dict[str, asyncio.TimerHandle] = {}
         self._progress_emitted = 0.0
         self.partial: dict[str, Any] | None = None
@@ -410,11 +413,16 @@ class ClaudeProcess:
         self._permission_timers.clear()
         self.queue.clear()
         self.tasks.clear()
+        had_timers = bool(self.timers)
+        self.timers.clear()
+        self._cron_pending.clear()
         self.partial = None
         for fut in self._pending_controls.values():
             if not fut.done():
                 fut.set_exception(ControlError("claude process exited"))
         log.info("claude for %s exited with %s", self.session_id, code)
+        if had_timers:
+            await self.sink(self, {"ev": "schedules_changed"})
         await self.sink(self, {"ev": "exit", "code": code, "stderr": list(self.stderr_tail)[-15:],
                                "duringTurn": during_turn, "requested": self.stop_requested})
         await self._emit_state()
@@ -481,6 +489,8 @@ class ClaudeProcess:
                 self.partial = None
                 if msg.get("error"):
                     self._api_error = msg
+            if self._track_timers(mtype, msg):
+                await self.sink(self, {"ev": "schedules_changed"})
             await self.sink(self, {"ev": "transcript"})
             return
         if mtype == "rate_limit_event":
@@ -644,7 +654,126 @@ class ClaudeProcess:
             self.queue.pop(cmd_uuid, None)
             if state == "started":
                 self.turn_active = True
+                if self._prune_fired_timers():
+                    await self.sink(self, {"ev": "schedules_changed"})
         await self._emit_state()
+
+    def _track_timers(self, mtype: str, msg: dict[str, Any]) -> bool:
+        """Track Claude Code's built-in ScheduleWakeup / CronCreate / CronDelete tool calls."""
+        if msg.get("parent_tool_use_id"):
+            return False
+        content = (msg.get("message") or {}).get("content")
+        if not isinstance(content, list):
+            return False
+        changed = False
+        now = time.time()
+        if mtype == "assistant":
+            for blk in content:
+                if not isinstance(blk, dict) or blk.get("type") != "tool_use":
+                    continue
+                name = blk.get("name")
+                inp = blk.get("input") if isinstance(blk.get("input"), dict) else {}
+                tid = str(blk.get("id") or uuidlib.uuid4().hex[:12])
+                if name == "ScheduleWakeup":
+                    try:
+                        delay = float(inp.get("delaySeconds"))
+                    except (TypeError, ValueError):
+                        continue
+                    # Replace any prior pending ScheduleWakeup (Claude Code keeps a single active wakeup timer).
+                    for k in [k for k, v in self.timers.items() if v.get("kind") == "wakeup"]:
+                        self.timers.pop(k, None)
+                    secs = max(1, round(delay))
+                    rule = f"{secs // 60} 分钟后唤醒" if secs >= 60 and secs % 60 == 0 else (f"约 {round(secs / 60)} 分钟后唤醒" if secs >= 90 else f"{secs} 秒后唤醒")
+                    self.timers[tid] = {
+                        "id": f"cc-{tid}",
+                        "kind": "wakeup",
+                        "oneshot": True,
+                        "next": now + delay,
+                        "prompt": str(inp.get("prompt") or inp.get("reason") or "")[:500],
+                        "rule": rule,
+                    }
+                    changed = True
+                elif name == "CronCreate":
+                    cron = str(inp.get("cron") or "").strip()
+                    if not cron:
+                        continue
+                    self.timers[tid] = {
+                        "id": f"cc-{tid}",
+                        "kind": "cron",
+                        "oneshot": not bool(inp.get("recurring", True)),
+                        "cron": cron,
+                        "prompt": str(inp.get("prompt") or "")[:500],
+                        "rule": f"Cron {cron}",
+                    }
+                    self._cron_pending[tid] = tid
+                    changed = True
+                elif name == "CronDelete":
+                    target = str(inp.get("id") or "").strip()
+                    for k, v in list(self.timers.items()):
+                        if target and (k == target or v.get("jobId") == target or v.get("id") == target):
+                            self.timers.pop(k, None)
+                            changed = True
+        elif mtype == "user" and self._cron_pending:
+            for blk in content:
+                if not isinstance(blk, dict) or blk.get("type") != "tool_result":
+                    continue
+                tuid = str(blk.get("tool_use_id") or "")
+                key = self._cron_pending.pop(tuid, None)
+                if key and key in self.timers:
+                    raw = blk.get("content")
+                    text = raw if isinstance(raw, str) else " ".join(
+                        str(x.get("text") or "") for x in (raw if isinstance(raw, list) else []) if isinstance(x, dict)
+                    )
+                    m = re.search(r"\b([a-f0-9]{8}|cron_[A-Za-z0-9_-]+)\b", text)
+                    if m:
+                        self.timers[key]["jobId"] = m.group(1)
+        return changed
+
+    def _prune_fired_timers(self) -> bool:
+        now = time.time()
+        changed = False
+        for k, v in list(self.timers.items()):
+            if v.get("oneshot") and v.get("next") is not None and now >= float(v["next"]) - 10.0:
+                self.timers.pop(k, None)
+                changed = True
+        return changed
+
+    def active_schedules(self) -> list[dict[str, Any]]:
+        """Live Claude Code built-in timers shaped identically to `schedules.py` views."""
+        if not self.alive or not self.timers:
+            return []
+        from .schedules import next_cron, system_timezone
+        tz = system_timezone()
+        now = time.time()
+        out: list[dict[str, Any]] = []
+        for k, v in list(self.timers.items()):
+            cron = v.get("cron")
+            if cron:
+                nxt = next_cron(cron, now, tz)
+            else:
+                nxt = v.get("next")
+                if nxt is not None and float(nxt) < now - 120.0:
+                    self.timers.pop(k, None)
+                    continue
+            out.append({
+                "id": v["id"],
+                "sessionId": self.session_id,
+                "name": "",
+                "prompt": v.get("prompt") or "",
+                "times": [],
+                "days": [],
+                "every": None,
+                "tz": tz,
+                "jitter": 0,
+                "catchUp": False,
+                "enabled": True,
+                "next": nxt,
+                "last": None,
+                "lastResult": None,
+                "rule": v.get("rule") or "定时唤醒",
+                "readonly": True,
+            })
+        return out
 
     async def _handle_control_request(self, msg: dict[str, Any]) -> None:
         request_id = msg.get("request_id")

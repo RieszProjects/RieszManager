@@ -353,10 +353,10 @@ export function ChatView({ sessionId }: { sessionId: string }) {
             <button
               type="button"
               className="rz-tag keep rz-tag-btn"
-              title={Number.isFinite(nextWake) ? `下次 ${clockTime(nextWake)}` : "定时唤醒"}
+              title={Number.isFinite(nextWake) ? `定时唤醒 · 下次 ${clockTime(nextWake)}` : "定时唤醒"}
               onClick={() => setScheduleSession(sessionId)}
             >
-              <AlarmClock size={10} />定时
+              <AlarmClock size={10} />{Number.isFinite(nextWake) ? clockTime(nextWake) : "定时"}
             </button>
           )}
         </>

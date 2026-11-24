@@ -37,6 +37,7 @@ TIMESTAMPS_RE = re.compile(r"^(?:(?:Created|Completed) At:[^\n]*\n)+")
 BG_TASK_START_RE = re.compile(r"Tool is running as a background task with task id:\s*([^\s]+)")
 BG_TASK_DONE_RE = re.compile(r'Task id "([^"]+)" (?:finished|was canceled|stopped)')
 BG_TASK_RESET_MARKER = "All your subagents and background tasks have been stopped"
+BG_SCHEDULE_DESC_RE = re.compile(r"Task Description:\s*(Timer|Cron):\s*([^\n]+)")
 SYS_MSG_RE = re.compile(
     r"\[Message\]\s+timestamp=[^\s]+\s+sender=([^\s]+)\s+priority=[^\s]+\s+content=([\s\S]*?)(?:\n</SYSTEM_MESSAGE>|$)"
 )
@@ -139,8 +140,10 @@ class _ParentIndex:
     inode: int = 0
     offset: int = 0
     pending_invokes: list[dict[str, str]] = field(default_factory=list)
+    pending_schedules: list[dict[str, Any]] = field(default_factory=list)
     children: dict[str, _SubagentMeta] = field(default_factory=dict)
     open_bg_tasks: dict[str, float] = field(default_factory=dict)
+    open_schedules: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass
@@ -247,11 +250,23 @@ class AgySubagentStore:
                         "model": str(args.get("Model") or "").strip(),
                         "workspace": str(args.get("Workspace") or "").strip(),
                     })
+                elif name == "schedule":
+                    dur = args.get("DurationSeconds")
+                    try:
+                        duration_s = float(dur) if dur is not None and str(dur).strip() != "" else None
+                    except (TypeError, ValueError):
+                        duration_s = None
+                    idx.pending_schedules.append({
+                        "duration": duration_s,
+                        "cron": str(args.get("CronExpression") or "").strip() or None,
+                        "prompt": str(args.get("Prompt") or "").strip(),
+                    })
                 elif name == "manage_task":
                     action = str(args.get("Action") or "").strip()
                     tid = str(args.get("TaskId") or "").strip()
                     if action == "kill" and tid:
                         idx.open_bg_tasks.pop(tid, None)
+                        idx.open_schedules.pop(tid, None)
                 elif name == "manage_subagents":
                     action = str(args.get("Action") or "").strip()
                     if action == "kill_all":
@@ -268,8 +283,20 @@ class AgySubagentStore:
             if not content:
                 return
             ts = _step_ts(step)
+            sched_desc = BG_SCHEDULE_DESC_RE.search(content)
             for m in BG_TASK_START_RE.finditer(content):
-                idx.open_bg_tasks[m.group(1)] = ts
+                tid = m.group(1)
+                idx.open_bg_tasks[tid] = ts
+                if sched_desc:
+                    meta_s = idx.pending_schedules.pop(0) if idx.pending_schedules else {}
+                    idx.open_schedules[tid] = {
+                        "id": tid,
+                        "createdAt": ts or time.time(),
+                        "duration": meta_s.get("duration"),
+                        "cron": meta_s.get("cron"),
+                        "prompt": meta_s.get("prompt") or sched_desc.group(2).strip(),
+                        "desc": sched_desc.group(2).strip(),
+                    }
             for m in CREATED_RE.finditer(content):
                 try:
                     info = json.loads(m.group(1))
@@ -317,8 +344,10 @@ class AgySubagentStore:
             content = str(step.get("content") or "")
             for m in BG_TASK_DONE_RE.finditer(content):
                 idx.open_bg_tasks.pop(m.group(1), None)
+                idx.open_schedules.pop(m.group(1), None)
             if BG_TASK_RESET_MARKER in content:
                 idx.open_bg_tasks.clear()
+                idx.open_schedules.clear()
 
     def _sync_status(self, meta: _SubagentMeta) -> _SubagentStatus:
         path = self._safe_transcript(meta)
@@ -424,6 +453,56 @@ class AgySubagentStore:
         cutoff = started_at - 5.0
         # Entries without a parsed timestamp (0.0) are treated as current; older ones belong to a prior process.
         return any(ts == 0.0 or ts >= cutoff for ts in idx.open_bg_tasks.values())
+
+    def active_schedules(self, parent_sid: str, *, parent_alive: bool, started_at: float | None = None) -> list[dict[str, Any]]:
+        """Live built-in `schedule` timers for an alive Antigravity session, shaped like `schedules.py` views."""
+        if not parent_alive:
+            return []
+        idx = self._sync_parent(parent_sid)
+        if idx is None or not idx.open_schedules:
+            return []
+        from .schedules import next_cron, system_timezone
+        tz = system_timezone()
+        now = time.time()
+        cutoff = (started_at - 5.0) if started_at is not None else None
+        out: list[dict[str, Any]] = []
+        for tid, info in list(idx.open_schedules.items()):
+            created = float(info.get("createdAt") or 0.0)
+            if cutoff is not None and created > 0.0 and created < cutoff:
+                continue
+            cron = info.get("cron")
+            duration = info.get("duration")
+            if cron:
+                nxt = next_cron(cron, now, tz)
+                rule = f"Cron {cron}"
+            elif duration is not None:
+                nxt = (created or now) + float(duration)
+                if nxt < now - 120.0:
+                    continue
+                secs = max(1, round(float(duration)))
+                rule = f"{secs // 60} 分钟后唤醒" if secs >= 60 and secs % 60 == 0 else (f"约 {round(secs / 60)} 分钟后唤醒" if secs >= 90 else f"{secs} 秒后唤醒")
+            else:
+                nxt = None
+                rule = info.get("desc") or "定时唤醒"
+            out.append({
+                "id": f"agy-{tid}",
+                "sessionId": parent_sid,
+                "name": "",
+                "prompt": str(info.get("prompt") or "")[:500],
+                "times": [],
+                "days": [],
+                "every": None,
+                "tz": tz,
+                "jitter": 0,
+                "catchUp": False,
+                "enabled": True,
+                "next": nxt,
+                "last": None,
+                "lastResult": None,
+                "rule": rule,
+                "readonly": True,
+            })
+        return out
 
     async def items(self, parent_sid: str, agent_id: str, *, parent_alive: bool) -> tuple[list[dict[str, Any]], float, bool] | None:
         """All display items of one Antigravity built-in subagent, plus `(mtime, running)`."""

@@ -159,6 +159,81 @@ def plan(s: dict[str, Any], after: float) -> None:
     s["next"] = None if base is None else base + random.uniform(0, s.get("jitter", 0) * 60)
 
 
+def _cron_field(spec: str, lo: int, hi: int, *, dow: bool = False) -> set[int] | None:
+    values: set[int] = set()
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            return None
+        step = 1
+        if "/" in part:
+            base, step_s = part.split("/", 1)
+            if not step_s.isdigit() or int(step_s) <= 0:
+                return None
+            step = int(step_s)
+        else:
+            base = part
+        if base == "*":
+            start, end = lo, hi
+        elif "-" in base:
+            a, b = base.split("-", 1)
+            if not (a.isdigit() and b.isdigit()):
+                return None
+            start, end = int(a), int(b)
+        elif base.isdigit():
+            start = end = int(base)
+        else:
+            return None
+        if dow:
+            # Standard cron allows 0 or 7 for Sunday; convert to Python weekday (0=Mon..6=Sun).
+            for v in range(start, end + 1, step):
+                if not 0 <= v <= 7:
+                    return None
+                values.add(6 if v in (0, 7) else v - 1)
+        else:
+            if not (lo <= start <= end <= hi):
+                return None
+            values.update(range(start, end + 1, step))
+    return values or None
+
+
+def next_cron(expr: str, after: float, tz_name: str | None = None) -> float | None:
+    """Next fire time (unix seconds) strictly after `after` for a standard 5-field cron expression."""
+    parts = (expr or "").split()
+    if len(parts) != 5:
+        return None
+    mins = _cron_field(parts[0], 0, 59)
+    hours = _cron_field(parts[1], 0, 23)
+    doms = _cron_field(parts[2], 1, 31)
+    months = _cron_field(parts[3], 1, 12)
+    dows = _cron_field(parts[4], 0, 7, dow=True)
+    if not (mins and hours and doms and months and dows):
+        return None
+    dom_any = parts[2] == "*"
+    dow_any = parts[4] == "*"
+    try:
+        tz = ZoneInfo(tz_name or system_timezone())
+    except (ZoneInfoNotFoundError, ValueError):
+        tz = ZoneInfo("UTC")
+    cur = datetime.fromtimestamp(after, tz).replace(second=0, microsecond=0) + timedelta(minutes=1)
+    limit = cur + timedelta(days=366)
+    while cur <= limit:
+        if cur.month not in months:
+            cur = (cur.replace(day=1, hour=0, minute=0) + timedelta(days=32)).replace(day=1)
+            continue
+        day_ok = (cur.day in doms and cur.weekday() in dows) if (dom_any or dow_any) else (cur.day in doms or cur.weekday() in dows)
+        if not day_ok:
+            cur = cur.replace(hour=0, minute=0) + timedelta(days=1)
+            continue
+        if cur.hour not in hours:
+            cur = cur.replace(minute=0) + timedelta(hours=1)
+            continue
+        if cur.minute in mins:
+            return cur.timestamp()
+        cur += timedelta(minutes=1)
+    return None
+
+
 class Scheduler:
     def __init__(self, hub: Hub) -> None:
         self.hub = hub
@@ -193,8 +268,65 @@ class Scheduler:
     # ---- API ---------------------------------------------------------------------
 
     def list(self, session_id: str | None = None) -> list[dict[str, Any]]:
-        out = [s for s in self.items.values() if session_id is None or s["sessionId"] == session_id]
+        target = self.hub.final_handoff_target(session_id) if session_id and hasattr(self.hub, "final_handoff_target") else session_id
+        out = []
+        for s in self.items.values():
+            eff = self.hub.final_handoff_target(s["sessionId"]) if hasattr(self.hub, "final_handoff_target") else s["sessionId"]
+            if target is None or eff == target:
+                out.append(s)
         return sorted(out, key=lambda s: (s.get("next") or float("inf")))
+
+    def list_all(self, session_id: str | None = None) -> list[dict[str, Any]]:
+        """Unified view of runner-managed schedules plus live harness built-in timers (same schema)."""
+        resolve = getattr(self.hub, "final_handoff_target", lambda x: x)
+        target = resolve(session_id) if session_id else None
+        out: list[dict[str, Any]] = []
+        for s in self.items.values():
+            eff = resolve(s["sessionId"])
+            if target is not None and eff != target:
+                continue
+            view = {k: v for k, v in s.items() if k not in ("lastUuid", "nextBase", "lastBase")}
+            view["sessionId"] = eff
+            view["rule"] = describe(s)
+            view["readonly"] = False
+            out.append(view)
+
+        # Live Antigravity built-in `schedule` timers.
+        harnesses = getattr(self.hub, "harnesses", None)
+        agy_store = getattr(self.hub, "agy_subagents", None)
+        if harnesses is not None and agy_store is not None:
+            for sid, driver in list(harnesses.drivers.items()):
+                if not driver.alive or driver.harness != "antigravity":
+                    continue
+                eff = resolve(sid)
+                if target is not None and eff != target:
+                    continue
+                for entry in agy_store.active_schedules(sid, parent_alive=True, started_at=driver.started_at):
+                    out.append({**entry, "sessionId": eff})
+
+        # Live Claude Code built-in `ScheduleWakeup` / `CronCreate` timers.
+        hosted = getattr(self.hub, "hosted", None) or {}
+        for sid, proc in list(hosted.items()):
+            if not proc.alive or not hasattr(proc, "active_schedules"):
+                continue
+            eff = resolve(sid)
+            if target is not None and eff != target:
+                continue
+            for entry in proc.active_schedules():
+                out.append({**entry, "sessionId": eff})
+
+        return sorted(out, key=lambda s: (s.get("next") or float("inf")))
+
+    async def reassign(self, old_session_id: str, new_session_id: str) -> int:
+        """Move runner-managed schedules from a handed-off source session to its target."""
+        moved = 0
+        for s in self.items.values():
+            if s.get("sessionId") == old_session_id:
+                s["sessionId"] = new_session_id
+                moved += 1
+        if moved:
+            await self._changed()
+        return moved
 
     def get(self, sid: str) -> dict[str, Any]:
         s = self.items.get(sid)

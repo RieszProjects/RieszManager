@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from riesz_runner.schedules import Scheduler
+from riesz_runner.schedules import Scheduler, next_cron
 
 
 class FakeDelivery:
@@ -105,6 +105,84 @@ class ReloadTest(unittest.IsolatedAsyncioTestCase):
         await sched._tick()
         self.assertLess(time.monotonic() - t0, 0.45)
         self.assertEqual({t for _, t in hub.delivery.sent}, {"A", "B"})
+
+    async def test_unified_list_all_includes_handoff_agy_and_claude_timers(self):
+        import json
+        from datetime import datetime, timezone
+        from riesz_runner.agy_subagents import AgySubagentStore
+        from riesz_runner.config import Config
+        from riesz_runner.process import ClaudeProcess
+
+        tmp = Path(tempfile.mkdtemp())
+        hub = fake_hub(tmp)
+        old_sid = "6e0f5a52-0000-4000-8000-000000000001"
+        new_sid = "6e0f5a52-0000-4000-8000-000000000002"
+        agy_sid = "6e0f5a52-0000-4000-8000-000000000003"
+        hub.final_handoff_target = lambda sid: new_sid if sid == old_sid else sid
+
+        # 1) Antigravity built-in schedule timer in transcript
+        agy_store = AgySubagentStore(tmp / "brain")
+        tlog = tmp / "brain" / agy_sid / ".system_generated" / "logs" / "transcript.jsonl"
+        tlog.parent.mkdir(parents=True, exist_ok=True)
+        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        tlog.write_text(
+            json.dumps({
+                "type": "PLANNER_RESPONSE", "status": "DONE", "created_at": now_iso,
+                "tool_calls": [{"name": "schedule", "args": {"DurationSeconds": "600", "Prompt": '"check build"'}}],
+            }) + "\n" +
+            json.dumps({
+                "type": "GENERIC", "status": "RUNNING", "created_at": now_iso,
+                "content": f"Tool is running as a background task with task id: {agy_sid}/task-1\nTask Description: Timer: 10m, Prompt: check build\n",
+            }) + "\n",
+            encoding="utf-8",
+        )
+        hub.agy_subagents = agy_store
+        hub.harnesses = SimpleNamespace(drivers={
+            agy_sid: SimpleNamespace(alive=True, harness="antigravity", started_at=time.time() - 60),
+        })
+
+        # 2) Claude Code built-in ScheduleWakeup + CronCreate / CronDelete
+        cfg = Config(workspace_root=tmp, claude_home=tmp, claude_bin="claude", state_dir=tmp, socket_path=tmp / "s.sock", token="t")
+        proc = ClaudeProcess(cfg, session_id=new_sid, cwd=str(tmp), sink=lambda p, e: asyncio.sleep(0))
+        proc.alive = True
+        self.assertTrue(proc._track_timers("assistant", {
+            "message": {"content": [
+                {"type": "tool_use", "id": "tu-1", "name": "ScheduleWakeup", "input": {"delaySeconds": 300, "reason": "check tests"}},
+                {"type": "tool_use", "id": "tu-2", "name": "CronCreate", "input": {"cron": "*/15 * * * *", "prompt": "poll status", "recurring": True}},
+            ]}
+        }))
+        hub.hosted = {new_sid: proc}
+
+        # 3) Runner schedule originally on old_sid (handed off to new_sid)
+        sched = Scheduler(hub)
+        await sched.create({"sessionId": old_sid, "prompt": "早上好", "every": 60})
+
+        all_items = sched.list_all()
+        self.assertEqual(len(all_items), 4)
+        for_new = sched.list_all(new_sid)
+        self.assertEqual(len(for_new), 3)
+        self.assertEqual(sum(1 for x in for_new if not x["readonly"]), 1)
+        self.assertEqual(sum(1 for x in for_new if x["readonly"]), 2)
+        for_agy = sched.list_all(agy_sid)
+        self.assertEqual(len(for_agy), 1)
+        self.assertTrue(for_agy[0]["readonly"])
+        self.assertIn("check build", for_agy[0]["prompt"])
+
+        # Reassign updates stored sessionId directly
+        moved = await sched.reassign(old_sid, new_sid)
+        self.assertEqual(moved, 1)
+        self.assertEqual(next(iter(sched.items.values()))["sessionId"], new_sid)
+
+        # CronDelete removes the cron timer
+        self.assertTrue(proc._track_timers("assistant", {
+            "message": {"content": [{"type": "tool_use", "id": "tu-3", "name": "CronDelete", "input": {"id": "tu-2"}}]}
+        }))
+        self.assertEqual(len(proc.active_schedules()), 1)
+
+        # Verify next_cron calculation
+        nxt = next_cron("*/5 * * * *", 1795470000.0, "UTC")
+        self.assertIsNotNone(nxt)
+        self.assertGreater(nxt, 1795470000.0)
 
 
 if __name__ == "__main__":

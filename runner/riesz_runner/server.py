@@ -590,7 +590,7 @@ async def call_tool(request: web.Request) -> web.Response:
 async def list_schedules(request: web.Request) -> web.Response:
     hub = request.app[HUB]
     sid = request.query.get("session")
-    return _json({"schedules": [_schedule_view(hub, s) for s in hub.schedules.list(sid or None)],
+    return _json({"schedules": hub.schedules.list_all(sid or None),
                   "timezone": system_timezone()})
 
 

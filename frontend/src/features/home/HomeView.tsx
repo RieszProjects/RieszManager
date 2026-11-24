@@ -244,8 +244,10 @@ function HomeSchedules() {
               <span className="dim clamp-1">{s.rule} · {s.enabled && s.next ? `下次 ${clockTime(s.next)}` : "已暂停"}</span>
             </span>
           </button>
-          <Switch size="small" checked={s.enabled}
-            onChange={(e) => void useSchedules.getState().update(s.id, { enabled: e.target.checked }).catch((err: Error) => toast(err.message, "error"))} />
+          {!s.readonly && (
+            <Switch size="small" checked={s.enabled}
+              onChange={(e) => void useSchedules.getState().update(s.id, { enabled: e.target.checked }).catch((err: Error) => toast(err.message, "error"))} />
+          )}
         </div>
       ))}
     </section>

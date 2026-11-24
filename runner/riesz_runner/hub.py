@@ -548,6 +548,9 @@ class Hub:
         if ev == "transcript":
             self._poke(proc.session_id)
             return
+        if ev == "schedules_changed":
+            await self.broadcast_global({"ev": "schedules"})
+            return
         if ev == "rate_limit":
             self.usage.note_rate_limit(event.get("info"))
             self.quota_fallback.on_rate_limit(event.get("info"))
@@ -926,17 +929,77 @@ class Hub:
         await self.broadcast_session(session_id, {"ev": "state", "state": self.session_state(session_id)})
         return True
 
-    async def _compact_claude(self, session_id: str, timeout: float = 300.0) -> None:
-        """Have Claude Code compact a session (as /compact would) and wait for it."""
+    async def _compact_claude(self, session_id: str, timeout: float = 300.0) -> bool:
+        """Have Claude Code compact a session (as /compact would) and wait for it.
+
+        If the Claude subscription quota is exhausted (known ahead of time or hit by `/compact`)
+        and DeepSeek API is configured, switches this Claude session to DeepSeek (`deepseek-flash`)
+        so compaction can finish cleanly. Returns False if compaction fails or times out so handoff
+        can still proceed via `handoff.fit()`.
+        """
+        from .quota_fallback import FALLBACK_MODEL, FALLBACK_ROUTE, SOURCE_ROUTE
+
         before = sum(1 for it in await self._source_items(session_id) if it.get("kind") == "compact")
         assert self.delivery is not None
-        await self.delivery.send(session_id, "/compact", [], str(uuidlib.uuid4()), _bypass_handoff=True)
+
+        async def switch_to_deepseek() -> bool:
+            route = (self.prefs.get(session_id) or {}).get("api") or SOURCE_ROUTE
+            if route != SOURCE_ROUTE or not self.credentials.configured("deepseek"):
+                return False
+            proc = self.get_hosted(session_id)
+            drain = time.monotonic() + 3.0
+            while proc is not None and proc.working and time.monotonic() < drain:
+                await asyncio.sleep(0.1)
+                proc = self.get_hosted(session_id)
+            try:
+                await self.set_api(session_id, FALLBACK_ROUTE, model=FALLBACK_MODEL, _internal=True)
+                log.info("handoff compact: switched %s to %s (%s) after Claude quota exhaustion",
+                         session_id[:8], FALLBACK_ROUTE, FALLBACK_MODEL)
+                return True
+            except Exception as exc:  # noqa: BLE001
+                log.warning("handoff compact: could not switch %s to %s: %s", session_id[:8], FALLBACK_ROUTE, exc)
+                return False
+
+        retried_deepseek = False
+        if self.usage.reset_time() is not None:
+            retried_deepseek = await switch_to_deepseek()
+
+        started_at = time.time()
+        try:
+            await self.delivery.send(session_id, "/compact", [], str(uuidlib.uuid4()), _bypass_handoff=True)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("handoff compact: could not send /compact to %s: %s", session_id[:8], exc)
+            return False
+
         deadline = time.time() + timeout
         while time.time() < deadline:
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(1.0)
             if sum(1 for it in await self._source_items(session_id) if it.get("kind") == "compact") > before:
-                return
-        raise ControlError("compacting the conversation took too long; try again later")
+                return True
+            proc = self.get_hosted(session_id)
+            res = proc.last_result if proc is not None else None
+            if res and float(res.get("ts") or 0.0) >= started_at:
+                if res.get("isError"):
+                    cause = (res.get("failure") or {}).get("cause")
+                    if cause == "quota" and not retried_deepseek and await switch_to_deepseek():
+                        retried_deepseek = True
+                        started_at = time.time()
+                        try:
+                            await self.delivery.send(session_id, "/compact", [], str(uuidlib.uuid4()), _bypass_handoff=True)
+                            continue
+                        except Exception as exc:  # noqa: BLE001
+                            log.warning("handoff compact: retry /compact failed for %s: %s", session_id[:8], exc)
+                            return False
+                    log.warning("handoff compact failed for %s (%s); falling back to truncation", session_id[:8], cause or res.get("subtype"))
+                    return False
+                # Non-error result finished without adding a compact item (e.g., already short).
+                if not proc.working:
+                    return sum(1 for it in await self._source_items(session_id) if it.get("kind") == "compact") > before
+            if proc is None or not proc.alive:
+                await asyncio.sleep(0.5)
+                return sum(1 for it in await self._source_items(session_id) if it.get("kind") == "compact") > before
+        log.warning("handoff compact timed out for %s; falling back to truncation", session_id[:8])
+        return False
 
     def _mode_tier(self, session_id: str, summary: dict[str, Any]) -> str:
         """The tier (modes.py) of the mode a session uses now."""
@@ -982,9 +1045,9 @@ class Hub:
             items = await self._source_items(session_id)
             msgs = handoff.conversation(handoff.since_last_compaction(items))
             if handoff.size(msgs) > handoff.BUDGET_CHARS and source == "claude" and not self.harnesses.has(session_id):
-                await self._compact_claude(session_id)            # the usual way out of a long conversation
-                items = await self._source_items(session_id)
-                msgs = handoff.conversation(handoff.since_last_compaction(items))
+                if await self._compact_claude(session_id):            # the usual way out of a long conversation
+                    items = await self._source_items(session_id)
+                    msgs = handoff.conversation(handoff.since_last_compaction(items))
             if not msgs:
                 raise ControlError("the session has no conversation to move")
             record_dir = self.cfg.state_dir / "handoff"
@@ -1029,6 +1092,9 @@ class Hub:
                     self.prefs.remember(session_id, handedOffTo=new_id)
                     await self.stop_process(session_id)
                 await self.auto_resume.taken_over(session_id)
+                await self.quota_fallback.on_manual_api_change(session_id, "handoff")
+                if hasattr(self, "schedules"):
+                    await self.schedules.reassign(session_id, new_id)
             log.info("moved the conversation of %s (%s) to %s session %s", session_id[:8], source, target, new_id[:8])
             await self.broadcast_global({"ev": "sessions", "sessions": [self.session_summary(new_id), self.session_summary(session_id)],
                                          "removed": []})

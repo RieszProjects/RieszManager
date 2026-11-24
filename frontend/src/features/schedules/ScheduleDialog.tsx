@@ -125,15 +125,19 @@ function ScheduleCard({ s, onEdit }: { s: Schedule; onEdit: () => void }) {
         {s.last && <div className="dim">上次 {clockTime(s.last)}{s.lastResult && s.lastResult !== "sent" ? ` · ${s.lastResult}` : ""}</div>}
         <div className="rz-sched-prompt clamp-1">{s.prompt}</div>
       </div>
-      <Switch size="small" checked={s.enabled} onChange={(e) => act(() => update(s.id, { enabled: e.target.checked }))} />
-      <Tooltip title="立即运行"><IconButton size="small" onClick={() => act(() => runNow(s.id))}><Play size={15} /></IconButton></Tooltip>
-      <Tooltip title="编辑"><IconButton size="small" onClick={onEdit}><Pencil size={15} /></IconButton></Tooltip>
-      <Tooltip title={confirm ? "再点一次删除" : "删除"}>
-        <IconButton size="small" className={confirm ? "rz-danger" : ""}
-          onClick={() => (confirm ? act(() => remove(s.id)) : (setConfirm(true), window.setTimeout(() => setConfirm(false), 3000)))}>
-          <Trash2 size={15} />
-        </IconButton>
-      </Tooltip>
+      {!s.readonly && (
+        <>
+          <Switch size="small" checked={s.enabled} onChange={(e) => act(() => update(s.id, { enabled: e.target.checked }))} />
+          <Tooltip title="立即运行"><IconButton size="small" onClick={() => act(() => runNow(s.id))}><Play size={15} /></IconButton></Tooltip>
+          <Tooltip title="编辑"><IconButton size="small" onClick={onEdit}><Pencil size={15} /></IconButton></Tooltip>
+          <Tooltip title={confirm ? "再点一次删除" : "删除"}>
+            <IconButton size="small" className={confirm ? "rz-danger" : ""}
+              onClick={() => (confirm ? act(() => remove(s.id)) : (setConfirm(true), window.setTimeout(() => setConfirm(false), 3000)))}>
+              <Trash2 size={15} />
+            </IconButton>
+          </Tooltip>
+        </>
+      )}
     </div>
   );
 }

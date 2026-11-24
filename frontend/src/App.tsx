@@ -19,7 +19,7 @@ import { startNotes, useNotes } from "@/features/notes/store";
 import { NodesDialog } from "@/features/nodes/NodesDialog";
 import { startNodes, useNodes } from "@/features/nodes/store";
 import { ScheduleDialog } from "@/features/schedules/ScheduleDialog";
-import { startSchedules } from "@/features/schedules/store";
+import { startSchedules, useSchedules } from "@/features/schedules/store";
 import { NewSessionDialog } from "@/features/sessions/NewSessionDialog";
 import { RenameDialog } from "@/features/sessions/RenameDialog";
 import { ServerBrowser } from "@/features/browser/ServerBrowser";
@@ -54,6 +54,7 @@ function useLiveData(enabled: boolean) {
         // Catch up on anything missed while disconnected.
         void useApp.getState().loadSessions().catch(() => undefined);
         void useApp.getState().loadProjects().catch(() => undefined);
+        void useSchedules.getState().load().catch(() => undefined);
         void useNotes.getState().load().catch(() => undefined);
         void useNodes.getState().load().catch(() => undefined);
       }

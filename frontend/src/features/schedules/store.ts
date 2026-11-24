@@ -21,6 +21,8 @@ export interface Schedule {
   last: number | null;
   lastResult: string | null;
   rule: string;
+  /** True for non-editable wake-ups managed inside an active session process. */
+  readonly?: boolean;
 }
 
 export type ScheduleInput = Partial<Pick<Schedule, "name" | "prompt" | "times" | "days" | "every" | "tz" | "jitter" | "catchUp" | "enabled">>;

@@ -250,6 +250,62 @@ class QuotaFallbackTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(_model_compatible("deepseek:key", "deepseek-flash"))
         self.assertFalse(_model_compatible("deepseek:key", "claude-opus-4-6"))
 
+    async def test_handoff_compact_switches_to_deepseek_on_quota_or_falls_back_cleanly(self) -> None:
+        from riesz_runner.hub import Hub
+
+        with tempfile.TemporaryDirectory() as td:
+            hub = _fake_hub(Path(td))
+            sid = "s1"
+            hub._handing_off = {sid}
+
+            # While handing off, quota_fallback.on_result must NOT hijack the session.
+            self.assertFalse(await hub.quota_fallback.on_result(
+                sid, {"isError": True, "failure": {"cause": "quota", "message": "weekly limit"}},
+            ))
+
+            # Bind real Hub._compact_claude onto our fake hub to test quota -> DeepSeek retry!
+            compact_items = {"count": 0}
+
+            async def source_items(_sid: str):
+                return [{"kind": "compact"}] * compact_items["count"]
+
+            proc = SimpleNamespace(alive=True, working=False, last_result=None)
+            hub.hosted[sid] = proc
+            hub._source_items = source_items
+
+            calls = {"n": 0}
+
+            async def fake_send(target_sid, text, attachments, uuid, **kwargs):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    proc.last_result = {"isError": True, "ts": time.time(), "failure": {"cause": "quota", "message": "limit"}}
+                else:
+                    compact_items["count"] = 1
+                    proc.last_result = {"isError": False, "ts": time.time(), "subtype": "success"}
+                return {"uuid": uuid, "held": False}
+
+            hub.delivery.send = fake_send
+            ok = await Hub._compact_claude(hub, sid, timeout=10.0)
+            self.assertTrue(ok)
+            self.assertEqual(calls["n"], 2)
+            self.assertEqual(hub._api_calls, [(sid, FALLBACK_ROUTE, FALLBACK_MODEL, True)])
+
+            # Without DeepSeek key, _compact_claude fails fast (returns False instead of hanging 300s).
+            hub2 = _fake_hub(Path(td) / "nokey", deepseek_configured=False)
+            proc2 = SimpleNamespace(alive=True, working=False, last_result=None)
+            hub2.hosted[sid] = proc2
+            hub2._source_items = AsyncMock(return_value=[])
+
+            async def quota_only(target_sid, text, attachments, uuid, **kwargs):
+                proc2.last_result = {"isError": True, "ts": time.time(), "failure": {"cause": "quota", "message": "limit"}}
+                return {"uuid": uuid, "held": False}
+
+            hub2.delivery.send = quota_only
+            t0 = time.monotonic()
+            ok2 = await Hub._compact_claude(hub2, sid, timeout=60.0)
+            self.assertFalse(ok2)
+            self.assertLess(time.monotonic() - t0, 5.0)
+
 
 if __name__ == "__main__":
     unittest.main()

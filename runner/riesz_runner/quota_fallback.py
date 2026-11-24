@@ -154,6 +154,8 @@ class ClaudeQuotaFallback:
         """
         if self.hub.harnesses.has(sid):
             return False
+        if sid in getattr(self.hub, "_handing_off", ()):
+            return False
 
         # If this session is on fallback and quota already recovered while it was mid-turn, restore now.
         existing = self.items.get(sid)
