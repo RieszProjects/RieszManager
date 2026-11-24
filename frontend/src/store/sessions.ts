@@ -25,6 +25,8 @@ export interface SessionData {
   hasMore: boolean;
   loaded: boolean;
   loadingOlder: boolean;
+  /** Incremented whenever the server replaces the item list (reset or disjoint snapshot). */
+  resetSeq: number;
   state: SessionState | null;
   stream: StreamOverlay | null;
   notices: EphemeralNotice[];
@@ -37,12 +39,39 @@ const empty = (): SessionData => ({
   hasMore: false,
   loaded: false,
   loadingOlder: false,
+  resetSeq: 0,
   state: null,
   stream: null,
   notices: [],
   turnStartedAt: null,
   exited: null,
 });
+
+/**
+ * Reconcile a fresh `snapshot` with already-loaded items (e.g. after a WebSocket reconnect).
+ * Preserves older items the user already had loaded before the snapshot window so the list's
+ * front never shifts forward unexpectedly and yanks scroll upward.
+ */
+export function mergeSnapshot(
+  current: Item[],
+  incoming: Item[],
+  curHasMore: boolean,
+  inHasMore: boolean,
+): { items: Item[]; hasMore: boolean; replaced: boolean } {
+  if (!current.length) return { items: incoming, hasMore: inHasMore, replaced: false };
+  if (!incoming.length) return { items: incoming, hasMore: inHasMore, replaced: true };
+  const incomingKeys = new Set(incoming.map((it) => it.key));
+  const overlaps = current.some((it) => incomingKeys.has(it.key));
+  if (!overlaps) return { items: incoming, hasMore: inHasMore, replaced: true };
+  const firstInSeq = incoming[0].seq;
+  if (current[0].seq < firstInSeq) {
+    const older = current.filter((it) => it.seq < firstInSeq && !incomingKeys.has(it.key));
+    if (older.length) {
+      return { items: [...older, ...incoming], hasMore: curHasMore, replaced: false };
+    }
+  }
+  return { items: incoming, hasMore: inHasMore, replaced: false };
+}
 
 function mergeItems(current: Item[], incoming: Item[]): Item[] {
   if (incoming.length === 0) return current;
@@ -142,18 +171,27 @@ export const useSessions = create<SessionsStore>((set, get) => {
       const sid = event.sessionId;
       switch (event.ev) {
         case "snapshot":
+          update(sid, (d) => {
+            const merged = mergeSnapshot(d.items, event.items, d.hasMore, event.hasMore);
+            return {
+              items: merged.items,
+              hasMore: merged.hasMore,
+              loaded: true,
+              resetSeq: merged.replaced ? d.resetSeq + 1 : d.resetSeq,
+              state: event.state,
+              stream: overlayFromPartial(event.state),
+              turnStartedAt: event.state.busy ? d.turnStartedAt ?? Date.now() : null,
+              notices: event.state.busy ? d.notices : [],
+            };
+          });
+          break;
+        case "reset":
           update(sid, (d) => ({
             items: event.items,
             hasMore: event.hasMore,
             loaded: true,
-            state: event.state,
-            stream: overlayFromPartial(event.state),
-            turnStartedAt: event.state.busy ? d.turnStartedAt ?? Date.now() : null,
-            notices: event.state.busy ? d.notices : [],
+            resetSeq: d.resetSeq + 1,
           }));
-          break;
-        case "reset":
-          update(sid, () => ({ items: event.items, hasMore: event.hasMore, loaded: true }));
           break;
         case "items":
           update(sid, (d) => {

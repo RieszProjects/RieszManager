@@ -378,6 +378,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
             items={items}
             hasMore={Boolean(data?.hasMore)}
             loadingOlder={Boolean(data?.loadingOlder)}
+            resetSeq={data?.resetSeq ?? 0}
             onLoadOlder={() => void loadOlder(sessionId)}
             footer={footer}
             emptyState={
