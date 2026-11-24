@@ -251,9 +251,18 @@ class Scheduler:
         except (OSError, ValueError) as exc:
             log.warning("cannot read %s: %s", self.path, exc)
             return
+        resolve = getattr(self.hub, "final_handoff_target", None)
+        migrated = False
         for s in data.get("schedules", []) if isinstance(data, dict) else []:
             if isinstance(s, dict) and isinstance(s.get("id"), str):
+                if callable(resolve) and isinstance(s.get("sessionId"), str):
+                    target = resolve(s["sessionId"])
+                    if target and target != s["sessionId"]:
+                        s["sessionId"] = target
+                        migrated = True
                 self.items[s["id"]] = s
+        if migrated:
+            self._save()
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -415,7 +424,10 @@ class Scheduler:
 
     async def _fire(self, s: dict[str, Any], manual: bool = False) -> None:
         now = time.time()
-        sid = s["sessionId"]
+        resolve = getattr(self.hub, "final_handoff_target", None)
+        sid = resolve(s["sessionId"]) if callable(resolve) else s["sessionId"]
+        if sid != s["sessionId"]:
+            s["sessionId"] = sid
         retry_scheduled = False
         if self.hub.message_queued(sid, s.get("lastUuid")):
             s["lastResult"] = "skipped: the previous message is still queued"

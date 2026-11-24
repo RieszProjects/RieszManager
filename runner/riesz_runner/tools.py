@@ -149,7 +149,8 @@ class Call:
 
     async def other(self, ident: Any) -> str:
         sid = await self.resolve(ident)
-        if sid == self.session_id:
+        sid = self.hub.final_handoff_target(sid)
+        if sid == self.hub.final_handoff_target(self.session_id):
             raise ToolError("这是你自己所在的会话")
         return sid
 
@@ -847,8 +848,9 @@ async def subagent_start(call: Call, a: dict[str, Any]) -> str:
 
 async def subagent_send(call: Call, a: dict[str, Any]) -> str:
     hub = call.hub
-    child = await call.resolve(a.get("agent_id"))
-    if (hub.prefs.get(child) or {}).get("subagentOf") != call.session_id:
+    child = hub.final_handoff_target(await call.resolve(a.get("agent_id")))
+    owner = (hub.prefs.get(child) or {}).get("subagentOf")
+    if not owner or hub.final_handoff_target(owner) != hub.final_handoff_target(call.session_id):
         raise ToolError("这不是你开的子代理（用 subagent_start 开的才行）")
     text = str(a.get("message") or "").strip()
     if not text:

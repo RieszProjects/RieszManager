@@ -1085,13 +1085,27 @@ class Hub:
 
             # One session for the user: the source steps aside, stops running, and points to the new one.
             if not fork:
+                was_keep_alive = False
                 if self.harnesses.has(session_id):
+                    was_keep_alive = bool(self.harnesses.records[session_id].get("keepAlive"))
                     self.harnesses.records[session_id]["handedOffTo"] = new_id
+                    if was_keep_alive:
+                        self.harnesses.records[session_id]["keepAlive"] = False
                     self.harnesses._save()
                     await self.harnesses.stop(session_id)
                 else:
+                    was_keep_alive = self.prefs.keep_alive(session_id)
                     self.prefs.remember(session_id, handedOffTo=new_id)
+                    if was_keep_alive:
+                        self.prefs.set_keep_alive(session_id, False)
                     await self.stop_process(session_id)
+                if was_keep_alive:
+                    if self.harnesses.has(new_id):
+                        self.harnesses.records[new_id]["keepAlive"] = True
+                        self.harnesses._save()
+                    else:
+                        self.prefs.set_keep_alive(new_id, True)
+                self.prefs.reassign_parent(session_id, new_id)
                 await self.auto_resume.taken_over(session_id)
                 await self.quota_fallback.on_manual_api_change(session_id, "handoff")
                 if hasattr(self, "schedules"):

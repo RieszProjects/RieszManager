@@ -15,6 +15,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import signal
 import shutil
 import time
@@ -75,17 +76,29 @@ def mcp_server(cfg: Config) -> ToolServer | None:
     return ToolServer(name="browser", command=command, args=args, config_dir=str(cfg.state_dir / "tools"))
 
 
+_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://")
+_LOCAL_HOST_RE = re.compile(r"^(localhost|(\d{1,3}\.){3}\d{1,3}|\[[0-9a-fA-F:]+\])(:\d+)?([/?#].*)?$", re.I)
+_DOMAIN_RE = re.compile(r"^([a-zA-Z0-9-]+\.)+([a-zA-Z]{2,}|xn--[a-zA-Z0-9-]+)(:\d+)?([/?#].*)?$")
+
+
 def normalize_url(raw: str) -> str:
+    """Chrome-like omnibox normalization: navigate URLs/domains directly, Google search plain text."""
     url = raw.strip()
     if not url:
         return "about:blank"
     if re_scheme(url):
         return url
-    return "https://" + url
+    if any(ch.isspace() for ch in url):
+        return "https://www.google.com/search?q=" + urllib.parse.quote_plus(url)
+    if _LOCAL_HOST_RE.match(url):
+        return "http://" + url
+    if _DOMAIN_RE.match(url):
+        return "https://" + url
+    return "https://www.google.com/search?q=" + urllib.parse.quote_plus(url)
 
 
 def re_scheme(url: str) -> bool:
-    return "://" in url or url.startswith(("about:", "chrome:", "data:"))
+    return bool(_SCHEME_RE.match(url)) or url.lower().startswith(("about:", "chrome:", "data:", "javascript:", "view-source:"))
 
 
 def _pick_free_display(start: int = 98, end: int = 199) -> str | None:

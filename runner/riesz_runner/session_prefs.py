@@ -61,6 +61,17 @@ class SessionPrefs:
         found = [(v.get("time") or 0, k) for k, v in self._data.items() if v.get("subagentOf") == parent]
         return [k for _, k in sorted(found)]
 
+    def reassign_parent(self, old_parent: str, new_parent: str) -> int:
+        """Move `subagentOf` links from a handed-off parent session to its target."""
+        moved = 0
+        for v in self._data.values():
+            if v.get("subagentOf") == old_parent:
+                v["subagentOf"] = new_parent
+                moved += 1
+        if moved:
+            self._save()
+        return moved
+
     def keep_alive(self, session_id: str) -> bool:
         return bool(self._data.get(session_id, {}).get("keepAlive"))
 

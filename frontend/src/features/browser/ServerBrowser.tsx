@@ -48,6 +48,25 @@ function wsUrl(targetId: string): string {
   return `${proto}//${window.location.host}/ws/browser?target=${encodeURIComponent(targetId)}`;
 }
 
+/** Chrome-like omnibox normalization: URLs navigate directly; plain keywords search Google. */
+export function resolveAddressInput(raw: string): string {
+  const s = raw.trim();
+  if (!s) return "";
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(s) || /^(about|chrome|data|javascript|view-source):/i.test(s)) {
+    return s;
+  }
+  if (/\s/.test(s)) {
+    return `https://www.google.com/search?q=${encodeURIComponent(s)}`;
+  }
+  if (/^(localhost|(\d{1,3}\.){3}\d{1,3}|\[[0-9a-fA-F:]+\])(:\d+)?([/?#].*)?$/i.test(s)) {
+    return `http://${s}`;
+  }
+  if (/^([a-zA-Z0-9-]+\.)+([a-zA-Z]{2,}|xn--[a-zA-Z0-9-]+)(:\d+)?([/?#].*)?$/.test(s)) {
+    return `https://${s}`;
+  }
+  return `https://www.google.com/search?q=${encodeURIComponent(s)}`;
+}
+
 export function ServerBrowser() {
   const open = useUi((s) => s.browserOpen);
   const setOpen = useUi((s) => s.setBrowserOpen);
@@ -229,8 +248,10 @@ export function ServerBrowser() {
 
   const submitUrl = (e: FormEvent) => {
     e.preventDefault();
-    if (!urlInput.trim()) return;
-    send({ op: "navigate", url: urlInput.trim() });
+    const url = resolveAddressInput(urlInput);
+    if (!url) return;
+    setUrlInput(url);
+    send({ op: "navigate", url });
     stageRef.current?.focus();
   };
 
@@ -331,7 +352,7 @@ export function ServerBrowser() {
               type="text"
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
-              placeholder="输入网址…"
+              placeholder="搜索 Google 或输入网址…"
               spellCheck={false}
             />
           </form>

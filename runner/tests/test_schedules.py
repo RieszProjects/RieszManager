@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import tempfile
 import time
 import unittest
@@ -183,6 +184,60 @@ class ReloadTest(unittest.IsolatedAsyncioTestCase):
         nxt = next_cron("*/5 * * * *", 1795470000.0, "UTC")
         self.assertIsNotNone(nxt)
         self.assertGreater(nxt, 1795470000.0)
+
+    async def test_scheduler_load_and_fire_follow_handoff_and_prefs_reassign_parent(self) -> None:
+        from riesz_runner.session_prefs import SessionPrefs
+
+        old_sid = "11111111-1111-4111-8111-111111111111"
+        new_sid = "22222222-2222-4222-8222-222222222222"
+        child_sid = "33333333-3333-4333-8333-333333333333"
+
+        with tempfile.TemporaryDirectory() as td:
+            # 1. Legacy schedules.json pointing at an old handed-off session auto-migrates on load
+            (Path(td) / "schedules.json").write_text(json.dumps({
+                "schedules": [{
+                    "id": "legacy01",
+                    "sessionId": old_sid,
+                    "prompt": "ping",
+                    "every": 30,
+                    "times": [],
+                    "days": [],
+                    "tz": "UTC",
+                    "jitter": 0,
+                    "catchUp": False,
+                    "enabled": True,
+                    "next": time.time() - 5,
+                    "nextBase": time.time() - 5,
+                    "last": None,
+                    "lastBase": None,
+                    "lastResult": None,
+                    "lastUuid": "prev-u",
+                    "retries": 0,
+                }],
+            }), encoding="utf-8")
+
+            hub = fake_hub(Path(td))
+            hub.final_handoff_target = lambda sid: new_sid if sid == old_sid else sid
+            queued_checked: list[str] = []
+            hub.message_queued = lambda sid, _u: (queued_checked.append(sid), False)[1]
+
+            sched = Scheduler(hub)
+            self.assertEqual(sched.items["legacy01"]["sessionId"], new_sid)
+            # Even if still pointing at old_sid dynamically, _fire resolves before checking message_queued
+            sched.items["legacy01"]["sessionId"] = old_sid
+            await sched._fire(sched.items["legacy01"])
+            self.assertEqual(queued_checked, [new_sid])
+            self.assertEqual(sched.items["legacy01"]["sessionId"], new_sid)
+            self.assertEqual(hub.delivery.sent[0][0], new_sid)
+
+            # 2. SessionPrefs.reassign_parent moves subagentOf to new parent
+            prefs = SessionPrefs(Path(td) / "prefs.json")
+            prefs.remember(child_sid, subagentOf=old_sid, subagentTask="work")
+            self.assertEqual(prefs.children(old_sid), [child_sid])
+            moved = prefs.reassign_parent(old_sid, new_sid)
+            self.assertEqual(moved, 1)
+            self.assertEqual(prefs.children(old_sid), [])
+            self.assertEqual(prefs.children(new_sid), [child_sid])
 
 
 if __name__ == "__main__":

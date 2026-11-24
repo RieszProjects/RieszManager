@@ -762,19 +762,21 @@ body.rz-dragging, body.rz-dragging * { cursor: grabbing !important; user-select:
   border-bottom: 1px solid var(--line); background: var(--bg2);
 }
 .rz-browser-globe { color: var(--sage); flex-shrink: 0; margin-right: 4px; }
-.rz-browser-tabs { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; }
+.rz-browser-tabs { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; }
 .rz-browser-tab {
-  display: inline-flex; align-items: center; gap: 2px; max-width: 210px; min-width: 80px;
+  display: inline-flex; align-items: center; gap: 2px; max-width: 210px; min-width: 88px; flex-shrink: 0; overflow: hidden;
   border-radius: 7px; background: rgba(255, 255, 255, 0.03); border: 1px solid transparent;
 }
 .rz-browser-tab.on { background: var(--bg1); border-color: var(--line); }
 .rz-browser-tab-btn {
-  flex: 1; min-width: 0; border: 0; background: none; color: var(--text2);
-  font-size: 12px; text-align: left; padding: 5px 6px 5px 9px; cursor: pointer;
+  flex: 1; min-width: 0; display: flex; align-items: center; overflow: hidden;
+  border: 0; background: none; color: var(--text2);
+  font-size: 12px; text-align: left; padding: 5px 4px 5px 9px; cursor: pointer;
 }
+.rz-browser-tab-btn > .clamp-1 { display: block; flex: 1; min-width: 0; }
 .rz-browser-tab.on .rz-browser-tab-btn { color: var(--text1); }
 .rz-browser-tab-close {
-  border: 0; background: none; color: var(--text3); padding: 4px 6px; cursor: pointer;
+  flex-shrink: 0; border: 0; background: none; color: var(--text3); padding: 4px 6px; cursor: pointer;
   display: inline-flex; align-items: center; border-radius: 5px;
 }
 .rz-browser-tab-close:hover { color: var(--text1); background: rgba(255, 255, 255, 0.06); }

@@ -32,8 +32,15 @@ class BrowserConfigAndMountTest(unittest.TestCase):
     def test_normalize_url(self) -> None:
         self.assertEqual(normalize_url(""), "about:blank")
         self.assertEqual(normalize_url("example.com"), "https://example.com")
+        self.assertEqual(normalize_url("arxiv.org/abs/2401.00001"), "https://arxiv.org/abs/2401.00001")
+        self.assertEqual(normalize_url("localhost:3000/test"), "http://localhost:3000/test")
+        self.assertEqual(normalize_url("127.0.0.1:8080/a"), "http://127.0.0.1:8080/a")
         self.assertEqual(normalize_url("http://127.0.0.1:8080/a"), "http://127.0.0.1:8080/a")
         self.assertEqual(normalize_url("about:blank"), "about:blank")
+        self.assertEqual(normalize_url("hello world"), "https://www.google.com/search?q=hello+world")
+        self.assertEqual(normalize_url("overleaf"), "https://www.google.com/search?q=overleaf")
+        self.assertEqual(normalize_url("python3.12"), "https://www.google.com/search?q=python3.12")
+        self.assertEqual(normalize_url("量子力学"), "https://www.google.com/search?q=%E9%87%8F%E5%AD%90%E5%8A%9B%E5%AD%A6")
 
     def test_mcp_server_builds_tool_server(self) -> None:
         with tempfile.TemporaryDirectory() as td:
