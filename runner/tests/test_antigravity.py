@@ -284,6 +284,34 @@ class ModelsTest(unittest.TestCase):
         out = "Fetching available models...\nAvailable models:\n  gemini-4-argon  Gemini 4 Argon (default)\n  - claude-opus-5-5\n"
         self.assertEqual([m["value"] for m in agy_models(out)], ["gemini-4-argon", "claude-opus-5-5"])
 
+    def test_agy_env_prefers_newer_file_token_over_stale_keyring(self):
+        from pathlib import Path
+        from riesz_runner.drivers.antigravity import agy_env, prefer_file_token
+
+        with tempfile.TemporaryDirectory() as td:
+            tok = Path(td) / "antigravity-oauth-token"
+            kr = Path(td) / "Default_keyring.keyring"
+            # Neither exists -> no SSH_CONNECTION injected
+            self.assertFalse(prefer_file_token(tok, kr))
+            self.assertNotIn("SSH_CONNECTION", agy_env({"HOME": td}, token_path=tok, keyring_path=kr))
+
+            # File token exists with no keyring -> prefers file token
+            tok.write_text("oauth-json", encoding="utf-8")
+            self.assertTrue(prefer_file_token(tok, kr))
+            self.assertIn("SSH_CONNECTION", agy_env({"HOME": td}, token_path=tok, keyring_path=kr))
+
+            # Newer keyring than file token -> keeps keyring
+            kr.write_text("keyring", encoding="utf-8")
+            os.utime(tok, (1000, 1000))
+            os.utime(kr, (2000, 2000))
+            self.assertFalse(prefer_file_token(tok, kr))
+            self.assertNotIn("SSH_CONNECTION", agy_env({"HOME": td}, token_path=tok, keyring_path=kr))
+
+            # Newer file token than keyring -> prefers file token
+            os.utime(tok, (3000, 3000))
+            self.assertTrue(prefer_file_token(tok, kr))
+            self.assertIn("SSH_CONNECTION", agy_env({"HOME": td}, token_path=tok, keyring_path=kr))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,11 +8,46 @@ or passes its tokens. Telemetry is turned off with --disable-telemetry.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from .acp import AcpDriver
 from .base import Capabilities, Mode
 from .jsonrpc import JsonRpcError
+
+FILE_TOKEN_PATH = Path("~/.gemini/antigravity-cli/antigravity-oauth-token")
+KEYRING_PATH = Path("~/.local/share/keyrings/Default_keyring.keyring")
+
+
+def prefer_file_token(token_path: Path | None = None, keyring_path: Path | None = None) -> bool:
+    """Whether `agy` should read its SSH/headless file OAuth token instead of GNOME Keyring.
+
+    When signed in over SSH, `agy` stores credentials in `~/.gemini/antigravity-cli/antigravity-oauth-token`.
+    Under `systemd --user` (where `SSH_CONNECTION` is unset), `agy` defaults to GNOME Keyring and would
+    keep using a stale desktop login unless `SSH_CONNECTION` is present. Prefer the file token whenever
+    it exists and is at least as recent as the GNOME keyring (or no keyring file exists).
+    """
+    tpath = (token_path or FILE_TOKEN_PATH).expanduser()
+    try:
+        tst = tpath.stat()
+    except OSError:
+        return False
+    if tst.st_size == 0:
+        return False
+    kpath = (keyring_path or KEYRING_PATH).expanduser()
+    try:
+        kst = kpath.stat()
+    except OSError:
+        return True
+    return tst.st_mtime >= kst.st_mtime
+
+
+def agy_env(env: dict[str, str], *, token_path: Path | None = None, keyring_path: Path | None = None) -> dict[str, str]:
+    """Adjust child env so `agy` picks the freshest OAuth credential store (file token vs desktop keyring)."""
+    out = dict(env)
+    if "SSH_CONNECTION" not in out and prefer_file_token(token_path, keyring_path):
+        out["SSH_CONNECTION"] = "127.0.0.1 0 127.0.0.1 22"
+    return out
 
 # What `agy acp` offers (checked 11-20 with a Google sign-in): default, accept-edits, auto and plan.
 # Its plan mode is not read-only: it plans first, then works and asks like default. Auto needs its
@@ -39,6 +74,9 @@ class AntigravityDriver(AcpDriver):
         super().__init__(argv=[agy, "acp", "--disable-telemetry"], **kwargs)
         self.api = api or "gemini:subscription"
         self.mode = self.mode or "default"
+
+    def _env(self) -> dict[str, str]:
+        return agy_env(super()._env())
 
     def wakeup_after(self, name: str, inp: dict[str, Any]) -> float | None:
         """Its schedule tool ("Run schedule", DurationSeconds): it wakes itself up after that long."""

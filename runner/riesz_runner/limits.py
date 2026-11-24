@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from .credentials import _child_env, _output
+from .drivers.antigravity import agy_env
 from .drivers.codex import CLIENT_INFO
 from .drivers.jsonrpc import JsonRpcPeer
 
@@ -138,7 +139,7 @@ class Limits:
             agy = self.hub.harnesses.bin("antigravity")
             if not agy:
                 raise RuntimeError("agy is not installed")
-            entry["windows"] = agy_windows(await _output([agy, "-p", "/quota"]))
+            entry["windows"] = agy_windows(await _output([agy, "-p", "/quota"], env=agy_env(_child_env())))
             if not entry["windows"]:
                 raise RuntimeError("agy /quota printed no quota")
             entry["limited"] = any(w["percent"] >= 100 for w in entry["windows"])

@@ -254,7 +254,8 @@ class Credentials:
                     found = {"plan": None}
             elif provider == "gemini" and bins.get("agy"):
                 # Antigravity's Google sign-in: `agy models` lists models when signed in, else asks to sign in.
-                models = agy_models(await _output([bins["agy"], "models"]))
+                from .drivers.antigravity import agy_env
+                models = agy_models(await _output([bins["agy"], "models"], env=agy_env(_child_env())))
                 if models:
                     found = {"plan": None, "models": models}
         except Exception as exc:  # noqa: BLE001 - no login found
@@ -263,8 +264,8 @@ class Credentials:
         return found
 
 
-async def _output(argv: list[str]) -> str:
-    env = _child_env()
+async def _output(argv: list[str], *, env: dict[str, str] | None = None) -> str:
+    env = dict(env) if env is not None else _child_env()
     env["PATH"] = os.path.dirname(argv[0]) + os.pathsep + env.get("PATH", "")
     proc = await asyncio.create_subprocess_exec(*argv, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
                                                 stderr=asyncio.subprocess.STDOUT, env=env)
