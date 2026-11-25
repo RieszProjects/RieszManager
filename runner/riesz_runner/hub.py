@@ -188,7 +188,14 @@ class Hub:
         self._save_working(set())  # nothing is interrupted by a reload
         self.reload_ready.set()
 
+    def _current_working(self) -> set[str]:
+        return {sid for sid, p in self.hosted.items() if p.alive and p.working} | set(self.harnesses.working_ids())
+
     async def close(self) -> None:
+        if not self.reload_ready.is_set():
+            # Refresh working.json right before stopping so sessions that finished within the
+            # last snapshot interval are not falsely marked interrupted on next startup.
+            self._save_working(self._current_working())
         self.closing = True
         for task in self._tasks:
             task.cancel()
@@ -355,7 +362,7 @@ class Hub:
             await asyncio.sleep(WORKING_SNAPSHOT_INTERVAL)
             if self.reload_ready.is_set():
                 continue
-            self._save_working({sid for sid, p in self.hosted.items() if p.alive and p.working} | set(self.harnesses.working_ids()))
+            self._save_working(self._current_working())
 
     async def clear_interrupted(self, session_id: str) -> None:
         if self.prefs.set_interrupted(session_id, None):
