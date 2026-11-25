@@ -1,9 +1,15 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
 const backend = process.env.RIESZ_DEV_BACKEND ?? "http://127.0.0.1:18601";
+const pushSwVersion = createHash("sha256")
+  .update(readFileSync(new URL("./public/push-sw.js", import.meta.url)))
+  .digest("hex")
+  .slice(0, 8);
 
 export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
@@ -40,7 +46,8 @@ export default defineConfig({
         // The optional doll widget's art is fetched only when it is switched on.
         globIgnores: ["doll/**", "push-sw.js"],
         // Push notification handlers (shown and tapped), kept as a plain file in public/.
-        importScripts: ["/push-sw.js"],
+        // Version query ensures sw.js bytes change whenever push-sw.js updates (required by Safari SW update checks).
+        importScripts: [`/push-sw.js?v=${pushSwVersion}`],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         runtimeCaching: [
           {
