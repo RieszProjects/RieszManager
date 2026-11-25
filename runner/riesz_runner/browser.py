@@ -11,6 +11,7 @@ the same browser through the mounted `browser` MCP server (`chrome-devtools-mcp`
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 import contextlib
 import json
 import logging
@@ -34,6 +35,7 @@ log = logging.getLogger(__name__)
 
 DEFAULT_WIDTH = 1280
 DEFAULT_HEIGHT = 800
+WATCHDOG_INTERVAL = 15.0
 _CHROME_BINS = ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser")
 _SINGLETON_FILES = ("SingletonLock", "SingletonSocket", "SingletonCookie")
 
@@ -120,6 +122,9 @@ class ServerBrowser:
         self._xvfb: asyncio.subprocess.Process | None = None
         self._display: str | None = None
         self._last_error: str | None = None
+        self._user_stopped = False
+        self._stderr_tail: deque[str] = deque(maxlen=20)
+        self._stderr_task: asyncio.Task[None] | None = None
 
     @property
     def enabled(self) -> bool:
@@ -149,12 +154,41 @@ class ServerBrowser:
         except Exception:  # noqa: BLE001
             return False
 
+    async def _drain_stderr(self, proc: asyncio.subprocess.Process) -> None:
+        """Continuously drain Chrome stderr so its pipe buffer never fills and blocks the browser."""
+        stream = proc.stderr
+        if stream is None:
+            return
+        while True:
+            try:
+                line = await stream.readline()
+            except Exception:  # noqa: BLE001
+                break
+            if not line:
+                break
+            text = line.decode("utf-8", "replace").rstrip()
+            if text:
+                self._stderr_tail.append(text)
+
     async def start_background(self) -> None:
-        try:
-            await self.ensure_running()
-        except Exception as exc:  # noqa: BLE001
-            self._last_error = str(exc)
-            log.warning("server browser did not start on boot: %s", exc)
+        """Start the persistent server Chrome and watch it, auto-restarting if it crashes unexpectedly."""
+        failures = 0
+        while True:
+            if not self._user_stopped and not await self._cdp_ready():
+                try:
+                    if failures > 0 or self._chrome is not None:
+                        log.warning("server browser is offline; restarting")
+                    await self.ensure_running()
+                    failures = 0
+                except Exception as exc:  # noqa: BLE001
+                    self._last_error = str(exc)
+                    failures += 1
+                    delay = min(300.0, WATCHDOG_INTERVAL * (2 ** min(failures - 1, 4)))
+                    log.warning("server browser did not start (attempt %d): %s; retrying in %.0fs",
+                                failures, exc, delay)
+                    await asyncio.sleep(delay)
+                    continue
+            await asyncio.sleep(WATCHDOG_INTERVAL)
 
     async def ensure_running(self) -> None:
         if not self.enabled:
@@ -162,6 +196,7 @@ class ServerBrowser:
         chrome_bin = self.chrome_bin
         if not chrome_bin:
             raise RuntimeError("未找到 Chrome / Chromium 可执行文件")
+        self._user_stopped = False
         async with self._lock:
             if await self._cdp_ready():
                 self._last_error = None
@@ -224,6 +259,7 @@ class ServerBrowser:
 
             log.info("starting server browser on 127.0.0.1:%d (%s)", self.port,
                      "headless" if use_headless else f"Xvfb {self._display}")
+            self._stderr_tail.clear()
             self._chrome = await asyncio.create_subprocess_exec(
                 *args, env=env,
                 stdin=asyncio.subprocess.DEVNULL,
@@ -231,13 +267,12 @@ class ServerBrowser:
                 stderr=asyncio.subprocess.PIPE,
                 start_new_session=True,
             )
+            self._stderr_task = asyncio.create_task(self._drain_stderr(self._chrome))
             deadline = time.monotonic() + 20.0
             while time.monotonic() < deadline:
                 if self._chrome.returncode is not None:
-                    err = ""
-                    if self._chrome.stderr:
-                        with contextlib.suppress(Exception):
-                            err = (await self._chrome.stderr.read(4096)).decode("utf-8", "replace").strip()
+                    await asyncio.sleep(0.05)
+                    err = " | ".join(list(self._stderr_tail)[-5:])
                     await self._stop_procs()
                     self._last_error = f"Chrome exited ({self._chrome.returncode}): {err[:240]}"
                     raise RuntimeError(self._last_error)
@@ -249,11 +284,18 @@ class ServerBrowser:
             self._last_error = "Chrome remote debugging port did not open in time"
             raise RuntimeError(self._last_error)
 
-    async def stop(self) -> None:
+    async def stop(self, *, by_user: bool = True) -> None:
+        if by_user:
+            self._user_stopped = True
         async with self._lock:
             await self._stop_procs()
 
     async def _stop_procs(self) -> None:
+        if self._stderr_task is not None:
+            self._stderr_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._stderr_task
+            self._stderr_task = None
         if self._chrome is not None:
             await self._kill_proc(self._chrome)
             self._chrome = None

@@ -102,6 +102,39 @@ class ServerBrowserStatusTest(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(st["available"])
             self.assertFalse(st["running"])
 
+    async def test_watchdog_restarts_chrome_unless_stopped_by_user(self) -> None:
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        with tempfile.TemporaryDirectory() as td:
+            b = ServerBrowser(_cfg(Path(td)))
+            calls = {"start": 0}
+            ready_seq = [False, True, False, True]
+
+            async def fake_ready() -> bool:
+                return ready_seq.pop(0) if ready_seq else False
+
+            async def fake_ensure() -> None:
+                calls["start"] += 1
+
+            b._cdp_ready = fake_ready  # type: ignore[method-assign]
+            b.ensure_running = fake_ensure  # type: ignore[method-assign]
+            with patch("riesz_runner.browser.WATCHDOG_INTERVAL", 0.01):
+                task = asyncio.create_task(b.start_background())
+                await asyncio.sleep(0.08)
+                # Should have started on boot and auto-restarted after dropping offline
+                self.assertGreaterEqual(calls["start"], 2)
+                # Explicit user stop suppresses auto-restart
+                await b.stop(by_user=True)
+                before = calls["start"]
+                await asyncio.sleep(0.05)
+                self.assertEqual(calls["start"], before)
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
 
 if __name__ == "__main__":
     unittest.main()
