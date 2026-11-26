@@ -427,6 +427,12 @@
 .rz-composer.readonly .rz-chip:disabled,
 .rz-composer-readonly-chips .rz-chip:disabled { opacity: 0.8; }
 .rz-composer-readonly-stat { font-size: 11.5px; margin-right: 4px; white-space: nowrap; }
+.rz-tps {
+  font-family: var(--font-mono); font-size: 11px; line-height: 1; color: var(--text4);
+  font-variant-numeric: tabular-nums; white-space: nowrap; margin-right: 4px; user-select: none;
+  transition: color 0.2s;
+}
+.rz-tps.live { color: var(--text3); }
 .rz-composer textarea {
   width: 100%; resize: none; border: none; outline: none; background: transparent; color: var(--text);
   font: inherit; font-size: 15px; line-height: 1.55; padding: 4px 2px 6px; min-height: 30px; max-height: 40vh; display: block;

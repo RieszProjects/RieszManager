@@ -1,7 +1,8 @@
 /** Per-session live data: transcript items, process state and the streaming overlay. */
 import { create } from "zustand";
 import { api } from "@/api/client";
-import type { Item, PartialBlock, ServerEvent, SessionState } from "@/api/types";
+import type { AssistantItem, Item, PartialBlock, ServerEvent, SessionState } from "@/api/types";
+import { emptyTps, onStepReset, onTurnEnd, onTurnStart, recordChunk, recordUsage, type TpsState } from "@/lib/tps";
 
 export interface OverlayBlock extends PartialBlock {
   index: number;
@@ -32,6 +33,7 @@ export interface SessionData {
   notices: EphemeralNotice[];
   turnStartedAt: number | null;
   exited: { code: number; stderr: string[] } | null;
+  tps: TpsState;
 }
 
 const empty = (): SessionData => ({
@@ -45,6 +47,7 @@ const empty = (): SessionData => ({
   notices: [],
   turnStartedAt: null,
   exited: null,
+  tps: emptyTps(),
 });
 
 /**
@@ -123,6 +126,55 @@ function pruneOverlay(stream: StreamOverlay | null, items: Item[]): StreamOverla
   return blocks.length ? { ...stream, blocks } : null;
 }
 
+function assistantText(item: AssistantItem): string {
+  let out = "";
+  for (const b of item.blocks) {
+    if (b.type === "text" || b.type === "thinking") out += b.text;
+  }
+  return out;
+}
+
+function toolResultCount(item: AssistantItem): number {
+  let count = 0;
+  for (const b of item.blocks) {
+    if (b.type === "tool" && b.result !== null) count++;
+  }
+  return count;
+}
+
+function updateTpsFromItems(d: SessionData, incoming: Item[], now: number): TpsState {
+  if (!d.loaded || incoming.length === 0) return d.tps;
+  const active = Boolean(d.state?.busy || d.stream || d.turnStartedAt);
+  const prevByKey = new Map<string, Item>();
+  for (const it of d.items) prevByKey.set(it.key, it);
+  let tps = d.tps;
+  for (const inc of incoming) {
+    if (inc.kind === "user") {
+      tps = onStepReset(tps, now);
+      continue;
+    }
+    if (inc.kind !== "assistant" || inc.synthetic) continue;
+    const prev = prevByKey.get(inc.key);
+    const prevAssistant = prev?.kind === "assistant" ? prev : undefined;
+    if (toolResultCount(inc) > (prevAssistant ? toolResultCount(prevAssistant) : 0)) {
+      tps = onStepReset(tps, now);
+    }
+    if (active && d.state?.harness !== "claude") {
+      const incText = assistantText(inc);
+      const prevText = prevAssistant ? assistantText(prevAssistant) : "";
+      if (incText.length > prevText.length && (!inc.usage?.output_tokens || prevAssistant !== undefined)) {
+        tps = recordChunk(tps, incText.slice(prevText.length), now);
+      }
+    }
+    const outTokens = inc.usage?.output_tokens;
+    const prevOut = prevAssistant?.usage?.output_tokens ?? 0;
+    if (active && typeof outTokens === "number" && outTokens > 0 && outTokens !== prevOut) {
+      tps = recordUsage(tps, outTokens, now);
+    }
+  }
+  return tps;
+}
+
 interface SessionsStore {
   data: Record<string, SessionData>;
   get: (sid: string) => SessionData;
@@ -144,11 +196,17 @@ export const useSessions = create<SessionsStore>((set, get) => {
     get: (sid) => get().data[sid] ?? empty(),
 
     setState: (sid, state) =>
-      update(sid, (d) => ({
-        state,
-        turnStartedAt: state.busy ? d.turnStartedAt ?? Date.now() : null,
-        stream: state.busy ? d.stream : null,
-      })),
+      update(sid, (d) => {
+        const wasBusy = Boolean(d.state?.busy);
+        const now = Date.now();
+        const tps = state.busy && !wasBusy ? onTurnStart(d.tps, now) : !state.busy && wasBusy ? onTurnEnd(d.tps) : d.tps;
+        return {
+          state,
+          turnStartedAt: state.busy ? d.turnStartedAt ?? now : null,
+          stream: state.busy ? d.stream : null,
+          tps,
+        };
+      }),
 
     dismissNotice: (sid, id) => update(sid, (d) => ({ notices: d.notices.filter((n) => n.id !== id) })),
 
@@ -182,6 +240,7 @@ export const useSessions = create<SessionsStore>((set, get) => {
               stream: overlayFromPartial(event.state),
               turnStartedAt: event.state.busy ? d.turnStartedAt ?? Date.now() : null,
               notices: event.state.busy ? d.notices : [],
+              tps: event.state.busy && d.tps.stepStartedAt === null ? onStepReset(d.tps, Date.now()) : d.tps,
             };
           });
           break;
@@ -195,10 +254,12 @@ export const useSessions = create<SessionsStore>((set, get) => {
           break;
         case "items":
           update(sid, (d) => {
+            const now = Date.now();
+            const tps = updateTpsFromItems(d, event.items, now);
             const items = mergeItems(d.items, event.items);
             // A reply (or its error) arrived: the request a retry notice was about is over.
             const answered = event.items.some((it) => it.kind === "assistant" || it.kind === "notice" || it.kind === "interrupted");
-            return { items, stream: pruneOverlay(d.stream, items), ...(answered && d.notices.length ? { notices: [] } : {}) };
+            return { items, tps, stream: pruneOverlay(d.stream, items), ...(answered && d.notices.length ? { notices: [] } : {}) };
           });
           break;
         case "state":
@@ -207,11 +268,15 @@ export const useSessions = create<SessionsStore>((set, get) => {
           break;
         case "stream":
           update(sid, (d) => {
-            if (event.op === "start") return { stream: { msgId: event.msgId, blocks: [] }, notices: [] };
+            const now = Date.now();
+            if (event.op === "start") {
+              return { stream: { msgId: event.msgId, blocks: [] }, notices: [], tps: onTurnStart(d.tps, now) };
+            }
             const stream: StreamOverlay = d.stream && d.stream.msgId === event.msgId
               ? { ...d.stream, blocks: [...d.stream.blocks] }
               : { msgId: event.msgId, blocks: [] };
             const idx = stream.blocks.findIndex((b) => b.index === event.index);
+            let tps = d.tps;
             if (event.op === "block") {
               const block: OverlayBlock = {
                 index: event.index ?? 0, type: event.blockType ?? "text", text: "", name: event.name, id: event.id, done: false,
@@ -219,13 +284,15 @@ export const useSessions = create<SessionsStore>((set, get) => {
               if (idx >= 0) stream.blocks[idx] = block;
               else stream.blocks.push(block);
             } else if (event.op === "delta" && idx >= 0) {
-              stream.blocks[idx] = { ...stream.blocks[idx], text: stream.blocks[idx].text + (event.text ?? "") };
+              const chunk = event.text ?? "";
+              stream.blocks[idx] = { ...stream.blocks[idx], text: stream.blocks[idx].text + chunk };
+              if (chunk) tps = recordChunk(tps, chunk, now);
             } else if (event.op === "block_stop" && idx >= 0) {
               stream.blocks[idx] = { ...stream.blocks[idx], done: true };
-              return { stream: pruneOverlay(stream, d.items), turnStartedAt: d.turnStartedAt ?? Date.now(), notices: [] };
+              return { stream: pruneOverlay(stream, d.items), turnStartedAt: d.turnStartedAt ?? now, notices: [], tps };
             }
             // Output is arriving, so the retry worked.
-            return { stream, turnStartedAt: d.turnStartedAt ?? Date.now(), notices: [] };
+            return { stream, turnStartedAt: d.turnStartedAt ?? now, notices: [], tps };
           });
           break;
         case "result":
@@ -233,6 +300,7 @@ export const useSessions = create<SessionsStore>((set, get) => {
             stream: null,
             turnStartedAt: null,
             notices: [],
+            tps: onTurnEnd(d.tps),
             state: d.state ? { ...d.state, lastResult: event.result } : d.state,
           }));
           break;
@@ -242,7 +310,13 @@ export const useSessions = create<SessionsStore>((set, get) => {
           update(sid, () => ({ notices: [{ id: ++noticeId, level: event.level, text: event.text, ts: Date.now() }] }));
           break;
         case "exit":
-          update(sid, () => ({ exited: { code: event.code, stderr: event.stderr }, stream: null, turnStartedAt: null, notices: [] }));
+          update(sid, (d) => ({
+            exited: { code: event.code, stderr: event.stderr },
+            stream: null,
+            turnStartedAt: null,
+            notices: [],
+            tps: onTurnEnd(d.tps),
+          }));
           break;
         default:
           break;

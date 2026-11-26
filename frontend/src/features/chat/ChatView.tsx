@@ -14,6 +14,7 @@ import { StatusDot } from "@/components/StatusDot";
 import { copyText } from "@/lib/clipboard";
 import { clockTime } from "@/lib/format";
 import { handOff } from "@/lib/handoff";
+import { formatTps } from "@/lib/tps";
 import { harnessLabel, resumeCommand, useHarnessLabel, useHarnesses, useRouteTag } from "@/lib/harnesses";
 import { sessionTitle, useApp } from "@/store/app";
 import { useOrganize } from "@/store/organize";
@@ -236,6 +237,8 @@ export function ChatView({ sessionId }: { sessionId: string }) {
   const waitingSince = turn.waitingSince ? Date.parse(turn.waitingSince) : null;
   const background = turn.backgroundTasks;
   const waiting = Boolean(state?.permissions?.length);
+  const tps = data?.tps;
+  const tpsText = formatTps(tps?.tps ?? null);
 
   useEffect(() => {
     document.title = `${sessionTitle(summary)} · Riesz Manager`;
@@ -404,6 +407,16 @@ export function ChatView({ sessionId }: { sessionId: string }) {
             api={state?.api ?? summary?.api}
             autoFocus
             dropRef={dropRef}
+            rightNote={
+              tpsText ? (
+                <span
+                  className={`rz-tps${tps?.live ? " live" : ""}`}
+                  title={tps?.live ? "当前输出速度（估算）" : tps?.exact ? "最近输出速度" : "最近输出速度（估算）"}
+                >
+                  {tpsText}
+                </span>
+              ) : undefined
+            }
           />
         </>
       }
