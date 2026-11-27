@@ -30,6 +30,8 @@ log = logging.getLogger(__name__)
 
 # Maximum request body size accepted from Claude Code (long transcripts + images).
 MAX_REQUEST_BYTES = 128 * 1024 * 1024
+# An upstream silent for this long mid-request is dead (Claude Code gives up on a request after 10 minutes).
+STALL_SECONDS = 600.0
 
 _HOP_BY_HOP = frozenset({
     "host", "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -155,6 +157,16 @@ def sanitize_anthropic_request(body: dict[str, Any]) -> dict[str, Any]:
     return {**body, "messages": out_msgs}
 
 
+def _sanitized_body(raw: bytes) -> bytes:
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return raw
+    if isinstance(parsed, dict) and "messages" in parsed:
+        return json.dumps(sanitize_anthropic_request(parsed), ensure_ascii=False).encode("utf-8")
+    return raw
+
+
 class DeepSeekAnthropicProxy:
     """Loopback reverse proxy forwarding `/anthropic/*` to DeepSeek's Anthropic endpoint."""
 
@@ -183,7 +195,9 @@ class DeepSeekAnthropicProxy:
             sockets = site._server.sockets if site._server else ()
             assert sockets, "failed to bind DeepSeek compatibility proxy socket"
             self.port = int(sockets[0].getsockname()[1])
-            self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=None, sock_connect=30))
+            # No total limit (long streamed turns), but an upstream that stops sending is given up on.
+            self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=None, sock_connect=30,
+                                                                                sock_read=STALL_SECONDS))
             log.info("DeepSeek Anthropic proxy listening on 127.0.0.1:%d -> %s", self.port, self.upstream)
             return f"http://127.0.0.1:{self.port}/anthropic"
 
@@ -208,13 +222,10 @@ class DeepSeekAnthropicProxy:
         raw = await request.read()
         data: bytes = raw
         if raw and "json" in (request.headers.get("content-type") or "").lower():
-            try:
-                parsed = json.loads(raw)
-                if isinstance(parsed, dict) and "messages" in parsed:
-                    data = json.dumps(sanitize_anthropic_request(parsed), ensure_ascii=False).encode("utf-8")
-            except ValueError:
-                pass
+            # In a thread: a long conversation's request is many megabytes, too long to parse on the event loop.
+            data = await asyncio.to_thread(_sanitized_body, raw)
 
+        out: web.StreamResponse | None = None
         try:
             async with self._session.request(request.method, target, headers=headers, data=data or None) as upstream_resp:
                 resp_headers = {k: v for k, v in upstream_resp.headers.items() if k.lower() not in _HOP_BY_HOP}
@@ -229,6 +240,12 @@ class DeepSeekAnthropicProxy:
             raise
         except Exception as exc:  # noqa: BLE001
             log.warning("DeepSeek proxy upstream error (%s): %s", tail or "/", exc)
+            if out is not None and out.prepared:
+                # The status line went out already: a second response would land inside this one's body.
+                # Cut the connection so the client sees the stream break.
+                if request.transport is not None:
+                    request.transport.close()
+                return out
             return web.json_response(
                 {"type": "error", "error": {"type": "api_error", "message": f"DeepSeek proxy error: {exc}"}},
                 status=502,

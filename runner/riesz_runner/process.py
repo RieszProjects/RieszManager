@@ -110,6 +110,10 @@ class ClaudeProcess:
         self._api_error: dict[str, Any] | None = None       # this turn's synthetic "API Error" message
         self._rejected: dict[str, Any] | None = None        # the last rate_limit_event that turned a request away
         self._compact_error: str | None = None              # compact_error from system/status (when /compact fails)
+        # Whether the running turn is a `/compact` the user (or a handoff) asked for: only then does a failed
+        # compaction fail the turn (an automatic one can fail inside a turn that still finishes its work).
+        self._turn_compact = False
+        self._compact_uuids: set[str] = set()                # `/compact` prompts queued behind a running turn
         self.stderr_tail: deque[str] = deque(maxlen=STDERR_TAIL_LINES)
 
         self._pending_controls: dict[str, asyncio.Future[dict[str, Any]]] = {}
@@ -311,6 +315,11 @@ class ClaudeProcess:
             match = _EFFORT_COMMAND.match(content.strip())
             if match:
                 self.effort = match.group(1)
+            if content.strip().split(maxsplit=1)[:1] == ["/compact"]:
+                if self.turn_active:
+                    self._compact_uuids.add(message_uuid)
+                else:
+                    self._turn_compact = True
         self.queue[message_uuid] = {
             "uuid": message_uuid,
             "preview": preview[:300],
@@ -475,12 +484,14 @@ class ClaudeProcess:
                 "stopReason": msg.get("stop_reason"),
                 "ts": time.time(),
             }
-            fail = claude_failure(msg, self._api_error, self._rejected, self._compact_error)
+            compact_error = self._compact_error if self._turn_compact else None
+            fail = claude_failure(msg, self._api_error, self._rejected, compact_error)
             if fail:
                 self.last_result["failure"] = fail
-            if self._compact_error:
-                self.last_result["compactError"] = self._compact_error
+            if compact_error:
+                self.last_result["compactError"] = compact_error
             self._api_error = self._rejected = self._compact_error = None
+            self._turn_compact = False
             text = msg.get("result") if isinstance(msg.get("result"), str) else ""
             await self.sink(self, {"ev": "result", "result": self.last_result, "text": text[:400]})
             await self.sink(self, {"ev": "transcript"})
@@ -659,6 +670,9 @@ class ClaudeProcess:
             entry["state"] = "queued"
         elif state in ("started", "completed", "cancelled", "failed"):
             self.queue.pop(cmd_uuid, None)
+            if cmd_uuid in self._compact_uuids:
+                self._compact_uuids.discard(cmd_uuid)
+                self._turn_compact = self._turn_compact or state == "started"
             if state == "started":
                 self.turn_active = True
                 if self._prune_fired_timers():

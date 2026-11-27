@@ -130,5 +130,48 @@ class ProxyStreamingTest(unittest.IsolatedAsyncioTestCase):
             await runner.cleanup()
 
 
+class ProxyBrokenUpstreamTest(unittest.IsolatedAsyncioTestCase):
+    async def test_upstream_dying_mid_stream_does_not_append_a_second_response(self) -> None:
+        import asyncio
+
+        async def upstream(request: web.Request) -> web.StreamResponse:
+            resp = web.StreamResponse(status=200, headers={"Content-Type": "text/event-stream"})
+            await resp.prepare(request)
+            await resp.write(b"event: message_start\ndata: {}\n\n")
+            await asyncio.sleep(0.1)
+            assert request.transport is not None
+            request.transport.close()
+            return resp
+
+        app = web.Application()
+        app.router.add_post("/anthropic/v1/messages", upstream)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]  # type: ignore[union-attr]
+        proxy = DeepSeekAnthropicProxy(upstream=f"http://127.0.0.1:{port}/anthropic")
+        await proxy.ensure_started()
+        try:
+            reader, writer = await asyncio.open_connection("127.0.0.1", proxy.port)
+            body = b'{"model":"x","messages":[{"role":"user","content":"hi"}]}'
+            writer.write(b"POST /anthropic/v1/messages HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"
+                         b"Content-Length: %d\r\n\r\n" % len(body) + body)
+            await writer.drain()
+            data = b""
+            while True:
+                chunk = await asyncio.wait_for(reader.read(65536), timeout=5)
+                if not chunk:
+                    break
+                data += chunk
+            writer.close()
+        finally:
+            await proxy.close()
+            await runner.cleanup()
+        self.assertIn(b"message_start", data)
+        self.assertEqual(data.count(b"HTTP/1.1"), 1)
+        self.assertNotIn(b"502", data)
+
+
 if __name__ == "__main__":
     unittest.main()

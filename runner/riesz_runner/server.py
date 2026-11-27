@@ -561,6 +561,7 @@ async def send_message(request: web.Request) -> web.Response:
     text, attachments, message_uuid = _prompt(request, body)
     if request.headers.get("X-Riesz-From") == "web":
         await hub.auto_resume.taken_over(sid)
+        await hub.quota_fallback.taken_over(sid)
     result = await request.app[DELIVERY].send(
         sid, text, attachments, message_uuid,
         model=body.get("model") or None, permission_mode=mode, effort=_validate_effort(body.get("effort")),
@@ -667,7 +668,9 @@ async def clear_notes(request: web.Request) -> web.Response:
     hub = request.app[HUB]
     body = await _body(request)
     sid = str(body.get("sessionId") or "")
-    ids = set(_handoff_chain(hub, sid)) if sid else None
+    # Only sessions whose conversation moved into this one: a fork's source goes on with its own notes.
+    here = hub.final_handoff_target(sid) if sid else ""
+    ids = {s for s in _handoff_chain(hub, sid) if hub.final_handoff_target(s) == here} if sid else None
     removed = await hub.notes.clear(ids)
     return _json({"ok": True, "removed": removed})
 
@@ -751,6 +754,7 @@ async def resume_session(request: web.Request) -> web.Response:
     sid = _session_id(request)
     if request.headers.get("X-Riesz-From") == "web":
         await hub.auto_resume.taken_over(sid)
+        await hub.quota_fallback.taken_over(sid)
     result = await request.app[DELIVERY].send(sid, RESUME_TEXT, [], str(uuidlib.uuid4()))
     return _json({**result, "state": hub.session_state(sid)})
 
@@ -764,6 +768,7 @@ async def cancel_auto_resume(request: web.Request) -> web.Response:
     hub = request.app[HUB]
     sid = _session_id(request)
     cancelled = await hub.auto_resume.taken_over(sid)
+    await hub.quota_fallback.taken_over(sid)
     return _json({"cancelled": cancelled, "state": hub.session_state(sid)})
 
 
@@ -782,6 +787,7 @@ async def stop_session(request: web.Request) -> web.Response:
     sid = _session_id(request)
     # Stopping a session by hand also ends "keep running"; otherwise it would come straight back.
     await hub.auto_resume.taken_over(sid)
+    await hub.quota_fallback.taken_over(sid)
     kept = hub.prefs.keep_alive(sid)
     if kept:
         await hub.set_keep_alive(sid, False)

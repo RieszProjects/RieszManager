@@ -21,7 +21,7 @@ from pathlib import Path
 from riesz_runner.drivers.codex import CodexDriver
 from riesz_runner.drivers.dsh import DshDriver
 
-from .helpers import Events
+from tests.helpers import Events
 
 LIVE = os.environ.get("RZ_LIVE") == "1"
 KEYFILE = os.environ.get("RZ_DSH_KEYFILE")

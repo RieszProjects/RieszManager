@@ -228,7 +228,8 @@ def next_cron(expr: str, after: float, tz_name: str | None = None) -> float | No
         if cur.hour not in hours:
             cur = cur.replace(minute=0) + timedelta(hours=1)
             continue
-        if cur.minute in mins:
+        # Wall-clock steps lose `fold`: in the hour repeated when clocks go back they land an hour early.
+        if cur.minute in mins and cur.timestamp() > after:
             return cur.timestamp()
         cur += timedelta(minutes=1)
     return None
@@ -357,7 +358,11 @@ class Scheduler:
         current = self.get(sid)
         s = validate(data, current)
         timing = any(k in data for k in ("times", "days", "every", "tz", "jitter")) or (s["enabled"] and not current.get("enabled"))
-        self.items[sid] = s
+        # In place: a run in progress holds this dict and moves its `next` on when it is done; a new dict
+        # would keep the old (past) `next` and run once more on the next check.
+        current.clear()
+        current.update(s)
+        s = current
         if timing:
             s["retries"] = 0
             plan(s, time.time())
@@ -403,8 +408,8 @@ class Scheduler:
                 continue
             if s["next"] > now:
                 continue
-            late = now - s["next"]
-            if late > GRACE_SECONDS + s.get("jitter", 0) * 60 and not s.get("catchUp"):
+            late = now - s["next"]                   # `next` already includes the random delay
+            if late > GRACE_SECONDS and not s.get("catchUp"):
                 s["lastResult"] = "missed"
                 s["retries"] = 0
                 log.info("schedule %s for %s missed its run %.0f min ago", s["id"], s["sessionId"][:8], late / 60)

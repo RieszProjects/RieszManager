@@ -38,6 +38,10 @@ class BrowserConfigAndMountTest(unittest.TestCase):
         self.assertEqual(normalize_url("http://127.0.0.1:8080/a"), "http://127.0.0.1:8080/a")
         self.assertEqual(normalize_url("about:blank"), "about:blank")
         self.assertEqual(normalize_url("hello world"), "https://www.google.com/search?q=hello+world")
+        self.assertEqual(normalize_url("my-server:8080/x"), "http://my-server:8080/x")
+        self.assertEqual(normalize_url("nas.local:5000"), "http://nas.local:5000")
+        self.assertEqual(normalize_url("mailto:a@example.com"), "mailto:a@example.com")
+        self.assertEqual(normalize_url("python"), "https://www.google.com/search?q=python")
         self.assertEqual(normalize_url("overleaf"), "https://www.google.com/search?q=overleaf")
         self.assertEqual(normalize_url("python3.12"), "https://www.google.com/search?q=python3.12")
         self.assertEqual(normalize_url("量子力学"), "https://www.google.com/search?q=%E9%87%8F%E5%AD%90%E5%8A%9B%E5%AD%A6")
@@ -134,6 +138,40 @@ class ServerBrowserStatusTest(unittest.IsolatedAsyncioTestCase):
                     await task
                 except asyncio.CancelledError:
                     pass
+
+
+class ServerBrowserStartFailureTest(unittest.IsolatedAsyncioTestCase):
+    async def test_chrome_exiting_at_once_reports_its_code_and_stderr(self) -> None:
+        import os
+        import socket
+        with tempfile.TemporaryDirectory() as td:
+            fake = Path(td) / "fake-chrome"
+            fake.write_text("#!/bin/sh\necho 'fatal: profile is locked' >&2\nexit 3\n")
+            os.chmod(fake, 0o755)
+            with socket.socket() as sock:            # a port nothing listens on
+                sock.bind(("127.0.0.1", 0))
+                port = sock.getsockname()[1]
+            b = ServerBrowser(_cfg(Path(td), browser_bin=str(fake), browser_port=port, browser_headless="true"))
+            with self.assertRaises(RuntimeError) as ctx:
+                await b.ensure_running()
+            self.assertIn("Chrome exited (3)", str(ctx.exception))
+            self.assertIn("profile is locked", b._last_error or "")
+
+    async def test_stderr_drain_survives_a_very_long_line(self) -> None:
+        import asyncio
+        import sys
+        with tempfile.TemporaryDirectory() as td:
+            b = ServerBrowser(_cfg(Path(td), browser_enabled=False))
+            code = ("import sys; sys.stderr.write('x'*200000+'\\n'); "
+                    "[sys.stderr.write('line %d\\n' % i) for i in range(20000)]; sys.stderr.flush(); print('DONE', flush=True)")
+            proc = await asyncio.create_subprocess_exec(sys.executable, "-c", code, stdout=asyncio.subprocess.PIPE,
+                                                        stderr=asyncio.subprocess.PIPE)
+            drain = asyncio.create_task(b._drain_stderr(proc))
+            out = await asyncio.wait_for(proc.stdout.readline(), 10)   # would hang if the pipe stopped being read
+            self.assertEqual(out, b"DONE\n")
+            await proc.wait()
+            await asyncio.wait_for(drain, 5)
+            self.assertEqual(b._stderr_tail[-1], "line 19999")
 
 
 if __name__ == "__main__":

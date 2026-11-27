@@ -311,5 +311,72 @@ class AgySubagentStoreTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(store.active_schedules(parent, parent_alive=True, started_at=new_start), [])
 
 
+def _iso(t: float) -> str:
+    return datetime.fromtimestamp(t, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class AgyTimerBookkeepingTest(unittest.TestCase):
+    PARENT = "44444444-4444-4444-8444-444444444444"
+
+    def test_failed_schedule_call_does_not_shift_later_timers(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            brain = Path(td)
+            log = brain / self.PARENT / ".system_generated" / "logs" / "transcript.jsonl"
+            now = time.time()
+            _write_jsonl(log, [
+                # A cron the tool turned down: no "running as a background task" line follows it.
+                {"type": "PLANNER_RESPONSE", "status": "DONE", "created_at": _iso(now - 1000),
+                 "tool_calls": [{"name": "schedule", "args": {"CronExpression": '"*/61 * * * *"', "Prompt": '"bad"'}}]},
+                {"type": "GENERIC", "status": "ERROR", "created_at": _iso(now - 999), "content": "invalid cron expression"},
+                {"type": "PLANNER_RESPONSE", "status": "DONE", "created_at": _iso(now - 900),
+                 "tool_calls": [{"name": "schedule", "args": {"DurationSeconds": "60", "Prompt": '"ping"'}}]},
+                {"type": "GENERIC", "status": "RUNNING", "created_at": _iso(now - 899),
+                 "content": "Tool is running as a background task with task id: 44444444/task-9\n"
+                            "Task Description: Timer: 1m, Prompt: ping in 1m\n"},
+            ])
+            store = AgySubagentStore(brain)
+            sched = store.active_schedules(self.PARENT, parent_alive=True, started_at=now - 3600)
+            self.assertEqual(len(sched), 0)                       # fired long ago (60 s timer, 15 min back)
+            info = store._parents[self.PARENT].open_schedules["44444444/task-9"]
+            self.assertIsNone(info["cron"])
+            self.assertEqual(info["duration"], 60.0)
+            self.assertEqual(info["prompt"], "ping in 1m")
+            self.assertFalse(store.has_active_work(self.PARENT, parent_alive=True, started_at=now - 3600))
+
+    def test_timer_description_durations(self) -> None:
+        from riesz_runner.agy_subagents import _timer_seconds
+        self.assertEqual(_timer_seconds("3m 35s"), 215.0)
+        self.assertEqual(_timer_seconds("45s"), 45.0)
+        self.assertEqual(_timer_seconds("1h 5m"), 3900.0)
+        self.assertIsNone(_timer_seconds("*/5 * * * *"))
+
+    def test_background_command_progress_message_does_not_end_a_subagent(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            brain = Path(td)
+            parent, child = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
+            p_log = brain / parent / ".system_generated" / "logs" / "transcript.jsonl"
+            c_log = brain / child / ".system_generated" / "logs" / "transcript.jsonl"
+            _write_jsonl(p_log, [
+                {"type": "PLANNER_RESPONSE", "status": "DONE",
+                 "tool_calls": [{"name": "invoke_subagent", "args": {"Role": '"R"', "Prompt": '"x"'}}]},
+                {"type": "GENERIC", "status": "DONE", "content": "Created the following subagent:\n"
+                 + json.dumps({"conversationId": child, "logAbsoluteUri": f"file://{c_log}"})},
+            ])
+            task = f"{child}/task-5"
+            _write_jsonl(c_log, [
+                {"type": "PLANNER_RESPONSE", "status": "DONE",
+                 "tool_calls": [{"name": "run_command", "args": {"CommandLine": '"sleep 900"'}}]},
+                {"type": "GENERIC", "status": "RUNNING",
+                 "content": f"Tool is running as a background task with task id: {task}\nTask Description: sleep 900\n"},
+                {"type": "SYSTEM_MESSAGE", "status": "DONE", "content":
+                    f"<SYSTEM_MESSAGE>\n[Message] timestamp=2026-11-24T04:22:38Z sender={task} priority=MESSAGE_PRIORITY_HIGH "
+                    "content=Background command is still running after 180s: sleep 900\n</SYSTEM_MESSAGE>"},
+                {"type": "PLANNER_RESPONSE", "status": "DONE", "content": "Still waiting."},
+            ])
+            store = AgySubagentStore(brain)
+            self.assertTrue(store.list(parent, parent_alive=True)[0]["running"])
+            self.assertTrue(store.has_active_work(parent, parent_alive=True))
+
+
 if __name__ == "__main__":
     unittest.main()

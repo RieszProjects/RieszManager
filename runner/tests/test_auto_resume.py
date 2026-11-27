@@ -81,6 +81,7 @@ def _fake_hub(state_dir: Path) -> SimpleNamespace:
         store=SimpleNamespace(entries={"s1": object()}),
         hosted={},
         limits=SimpleNamespace(reset_time=lambda route: None),
+        usage=SimpleNamespace(reset_time=lambda: None),
         closing=False,
         reload_ready=asyncio.Event(),
         session_working=lambda sid: False,
@@ -196,6 +197,40 @@ class AutoResumeLifecycleTest(unittest.IsolatedAsyncioTestCase):
             await ar._tick()
             self.assertIsNone(ar.items["s1"]["sentAt"])
             self.assertIsNotNone(ar.items["s1"]["nextAt"])
+
+
+class AutoResumeGiveUpTest(unittest.IsolatedAsyncioTestCase):
+    async def test_resume_that_cannot_be_sent_is_dropped_on_permanent_error(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            hub = _fake_hub(Path(td))
+            hub.delivery.send = AsyncMock(side_effect=RuntimeError("unknown session"))
+            ar = AutoResume(hub)
+            await ar.on_result("s1", {"isError": True, "failure": failure("server", "overloaded")})
+            ar.items["s1"]["nextAt"] = time.time() - 1
+            await ar._tick()
+            self.assertNotIn("s1", ar.items)
+
+    async def test_resume_that_keeps_failing_gives_up_after_the_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            hub = _fake_hub(Path(td))
+            hub.delivery.send = AsyncMock(side_effect=RuntimeError("runner busy"))
+            ar = AutoResume(hub)
+            await ar.on_result("s1", {"isError": True, "failure": failure("exit", "died")})
+            for _ in range(5):
+                if "s1" not in ar.items:
+                    break
+                ar.items["s1"]["nextAt"] = time.time() - 1
+                await ar._tick()
+            self.assertNotIn("s1", ar.items)     # exit resumes are capped at EXIT_ATTEMPTS, sent or not
+
+    async def test_claude_quota_without_reset_uses_usage_reset_time(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            hub = _fake_hub(Path(td))
+            reset = time.time() + 1800
+            hub.usage = SimpleNamespace(reset_time=lambda: reset)
+            ar = AutoResume(hub)
+            await ar.on_result("s1", {"isError": True, "failure": failure("quota", "weekly limit")})
+            self.assertAlmostEqual(ar.items["s1"]["nextAt"], reset + 60, delta=1)
 
 
 if __name__ == "__main__":

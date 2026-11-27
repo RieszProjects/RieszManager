@@ -176,7 +176,12 @@ def split_message(history: str, text: str, limit: int = MESSAGE_BYTES) -> list[s
     current = ""
     for record in re.split(r"\n\n(?=【(?:用户|助手)】)", body):
         while _bytes(record) > room:                  # one record bigger than a message
-            piece, record = _cut(record, room - _bytes(current) - 2 if current else room)
+            space = room - _bytes(current) - 2 if current else room
+            if current and space < 256:               # (almost) no room left in this part: start the next one
+                chunks.append(current)
+                current = ""
+                continue
+            piece, record = _cut(record, space)
             chunks.append(current + ("\n\n" if current else "") + piece)
             current = ""
         if current and _bytes(current) + 2 + _bytes(record) > room:

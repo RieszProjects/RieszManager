@@ -51,6 +51,7 @@ class Delivery:
         self.history = history
         self.held: dict[str, list[HeldPrompt]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        self._flushes: set[asyncio.Task[None]] = set()   # referenced so the loop does not drop them midway
 
     def _lock(self, session_id: str) -> asyncio.Lock:
         return self._locks.setdefault(session_id, asyncio.Lock())
@@ -138,7 +139,9 @@ class Delivery:
         for session_id in list(self.held):
             live = self.hub.live.get(session_id)
             if live is None or not self._external_working(live):
-                asyncio.create_task(self._flush(session_id))
+                task = asyncio.create_task(self._flush(session_id))
+                self._flushes.add(task)
+                task.add_done_callback(self._flushes.discard)
 
     # ---- internals --------------------------------------------------------------
 

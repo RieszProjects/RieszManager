@@ -36,6 +36,8 @@ log = logging.getLogger(__name__)
 DEFAULT_WIDTH = 1280
 DEFAULT_HEIGHT = 800
 WATCHDOG_INTERVAL = 15.0
+# A browser that goes down again within this long after starting is crash-looping: restarts back off.
+CRASH_WINDOW = 120.0
 _CHROME_BINS = ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser")
 _SINGLETON_FILES = ("SingletonLock", "SingletonSocket", "SingletonCookie")
 
@@ -79,7 +81,10 @@ def mcp_server(cfg: Config) -> ToolServer | None:
 
 
 _SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://")
-_LOCAL_HOST_RE = re.compile(r"^(localhost|(\d{1,3}\.){3}\d{1,3}|\[[0-9a-fA-F:]+\])(:\d+)?([/?#].*)?$", re.I)
+# Plain http: loopback, IP addresses, LAN names (nas.local, router.lan) and bare host:port (my-server:8080).
+_LOCAL_HOST_RE = re.compile(
+    r"^(localhost|(\d{1,3}\.){3}\d{1,3}|\[[0-9a-fA-F:]+\]|([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+\.(local|lan|internal|home\.arpa))"
+    r"(:\d+)?([/?#].*)?$|^[a-zA-Z0-9-]+:\d+([/?#].*)?$", re.I)
 _DOMAIN_RE = re.compile(r"^([a-zA-Z0-9-]+\.)+([a-zA-Z]{2,}|xn--[a-zA-Z0-9-]+)(:\d+)?([/?#].*)?$")
 
 
@@ -100,7 +105,8 @@ def normalize_url(raw: str) -> str:
 
 
 def re_scheme(url: str) -> bool:
-    return bool(_SCHEME_RE.match(url)) or url.lower().startswith(("about:", "chrome:", "data:", "javascript:", "view-source:"))
+    return bool(_SCHEME_RE.match(url)) or url.lower().startswith(
+        ("about:", "chrome:", "data:", "javascript:", "view-source:", "mailto:", "tel:"))
 
 
 def _pick_free_display(start: int = 98, end: int = 199) -> str | None:
@@ -159,27 +165,46 @@ class ServerBrowser:
         stream = proc.stderr
         if stream is None:
             return
+        pending = b""
         while True:
             try:
-                line = await stream.readline()
+                # Chunks rather than lines: readline() gives up on a line longer than its buffer, and a
+                # pipe nobody reads any more fills up until Chrome blocks writing to it.
+                chunk = await stream.read(65536)
             except Exception:  # noqa: BLE001
                 break
-            if not line:
+            if not chunk:
                 break
-            text = line.decode("utf-8", "replace").rstrip()
-            if text:
-                self._stderr_tail.append(text)
+            *lines, pending = (pending + chunk).split(b"\n")
+            pending = pending[-4096:]
+            for line in lines:
+                text = line[:4096].decode("utf-8", "replace").rstrip()
+                if text:
+                    self._stderr_tail.append(text)
 
     async def start_background(self) -> None:
         """Start the persistent server Chrome and watch it, auto-restarting if it crashes unexpectedly."""
         failures = 0
+        crashes = 0            # starts that came up but went down again soon after
+        started_at = 0.0
         while True:
             if not self._user_stopped and not await self._cdp_ready():
+                if started_at and time.monotonic() - started_at < CRASH_WINDOW:
+                    crashes += 1
+                    delay = min(300.0, WATCHDOG_INTERVAL * (2 ** min(crashes - 1, 4)))
+                    log.warning("server browser went down %.0fs after starting (%d in a row); waiting %.0fs",
+                                time.monotonic() - started_at, crashes, delay)
+                    started_at = 0.0
+                    await asyncio.sleep(delay)
+                    continue
+                if started_at:
+                    crashes = 0
                 try:
                     if failures > 0 or self._chrome is not None:
                         log.warning("server browser is offline; restarting")
                     await self.ensure_running()
                     failures = 0
+                    started_at = time.monotonic()
                 except Exception as exc:  # noqa: BLE001
                     self._last_error = str(exc)
                     failures += 1
@@ -271,10 +296,11 @@ class ServerBrowser:
             deadline = time.monotonic() + 20.0
             while time.monotonic() < deadline:
                 if self._chrome.returncode is not None:
+                    code = self._chrome.returncode
                     await asyncio.sleep(0.05)
                     err = " | ".join(list(self._stderr_tail)[-5:])
-                    await self._stop_procs()
-                    self._last_error = f"Chrome exited ({self._chrome.returncode}): {err[:240]}"
+                    await self._stop_procs()                    # clears self._chrome
+                    self._last_error = f"Chrome exited ({code}): {err[:240]}"
                     raise RuntimeError(self._last_error)
                 if await self._cdp_ready():
                     self._last_error = None
@@ -360,7 +386,8 @@ class ServerBrowser:
             await http.get(f"{self.base_url}/json/close/{urllib.parse.quote(target_id, safe='')}")
 
     async def status(self) -> dict[str, Any]:
-        running = await self._cdp_ready()
+        # A disabled browser is never reported as running, even if some other Chrome holds the port.
+        running = self.available and await self._cdp_ready()
         tabs = await self.list_tabs() if running else []
         return {
             "enabled": self.enabled,

@@ -19,7 +19,7 @@ from pathlib import Path
 
 from riesz_runner.drivers.dsh import DshDriver, DshEvents, list_sessions, read_log
 
-from .helpers import FIXTURES, Events, FakePeer, load_traffic
+from tests.helpers import FIXTURES, Events, FakePeer, load_traffic
 
 TRAFFIC = load_traffic("dsh-session.jsonl")
 SESSION_ID = next(r["msg"]["params"]["sessionId"] for r in TRAFFIC

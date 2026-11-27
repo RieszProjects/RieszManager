@@ -13,7 +13,7 @@ from pathlib import Path
 from riesz_runner.drivers.acp import tool_input
 from riesz_runner.drivers.gemini import GeminiDriver, settings_file
 
-from .helpers import Events
+from tests.helpers import Events
 
 AGENT = str(Path(__file__).parent / "fake_acp_agent.py")
 

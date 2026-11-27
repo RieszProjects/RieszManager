@@ -53,6 +53,8 @@ EXIT_ATTEMPTS = 3
 CHECK_INTERVAL = 15.0
 BUSY_RETRY = 60
 STUCK_SENT_GRACE = 60.0
+# Errors from sending the resume that no later attempt can get past.
+PERMANENT_ERRORS = ("unknown session", "working directory no longer exists", "directory does not exist")
 
 NETWORK_RE = re.compile(r"ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|fetch failed|can't reach|"
                         r"network|connection (lost|reset|refused|closed|error)|timed? ?out|stream (disconnected|closed)", re.I)
@@ -259,7 +261,10 @@ class AutoResume:
         if not resets_at and fail.get("cause") == "quota":
             rec = self.hub.harnesses.records.get(sid)
             route = rec.get("api") if rec else (self.hub.prefs.get(sid) or {}).get("api")
-            resets_at = self.hub.limits.reset_time(route)
+            if rec is None and (route or "anthropic:subscription") == "anthropic:subscription":
+                resets_at = self.hub.usage.reset_time()        # Claude Code: what /usage and rate-limit events said
+            else:
+                resets_at = self.hub.limits.reset_time(route)
         entry.update(cause=fail.get("cause") or "server", message=fail.get("message") or "", resetsAt=resets_at, sentAt=None)
         entry.pop("sentUuid", None)
         if now - entry["since"] > GIVE_UP_AFTER or (entry["cause"] == "exit" and entry["attempts"] >= EXIT_ATTEMPTS):
@@ -282,11 +287,18 @@ class AutoResume:
 
     async def taken_over(self, sid: str) -> bool:
         """The user sent the session a message or stopped it: no more waiting."""
+        return await self.discard(sid, "the user took over")
+
+    async def discard(self, sid: str, why: str) -> bool:
         if self.items.pop(sid, None) is None:
             return False
-        log.info("auto-resume of %s dropped: the user took over", sid[:8])
+        log.info("auto-resume of %s dropped: %s", sid[:8], why)
         await self._changed(sid)
         return True
+
+    def _expired(self, entry: dict[str, Any], now: float) -> bool:
+        return now - float(entry.get("since") or now) > GIVE_UP_AFTER or (
+            entry.get("cause") == "exit" and entry.get("attempts", 0) >= EXIT_ATTEMPTS)
 
     # ---- running ---------------------------------------------------------------------------
 
@@ -303,9 +315,7 @@ class AutoResume:
         """Recover an entry left in `sentAt != None, nextAt == None` after a restart or dropped result."""
         entry["sentAt"] = None
         entry.pop("sentUuid", None)
-        if now - float(entry.get("since") or now) > GIVE_UP_AFTER or (
-            entry.get("cause") == "exit" and entry.get("attempts", 0) >= EXIT_ATTEMPTS
-        ):
+        if self._expired(entry, now):
             log.info("auto-resume of %s given up during reconcile after %d attempts", sid[:8], entry.get("attempts", 0))
             self.items.pop(sid, None)
             return
@@ -347,10 +357,15 @@ class AutoResume:
             await self.hub.delivery.send(sid, resume_text(entry), [], message_uuid)
             log.info("auto-resume: picked %s up again (attempt %d)", sid[:8], entry["attempts"])
         except Exception as exc:  # noqa: BLE001 - tried again later
-            log.warning("auto-resume: could not message %s: %s", sid[:8], exc)
             entry["sentAt"] = None
             entry.pop("sentUuid", None)
-            entry["nextAt"] = self._next(entry, time.time())
+            now = time.time()
+            if self._expired(entry, now) or any(m in str(exc).lower() for m in PERMANENT_ERRORS):
+                log.warning("auto-resume of %s given up: could not message it: %s", sid[:8], exc)
+                self.items.pop(sid, None)
+            else:
+                log.warning("auto-resume: could not message %s: %s", sid[:8], exc)
+                entry["nextAt"] = self._next(entry, now)
         await self._changed(sid)
 
 

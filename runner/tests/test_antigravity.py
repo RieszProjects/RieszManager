@@ -13,7 +13,7 @@ from riesz_runner.credentials import agy_models
 from riesz_runner.drivers.antigravity import AntigravityDriver
 from riesz_runner.drivers.jsonrpc import JsonRpcError
 
-from .helpers import Events
+from tests.helpers import Events
 
 AGENT = str(Path(__file__).parent / "fake_acp_agent.py")
 

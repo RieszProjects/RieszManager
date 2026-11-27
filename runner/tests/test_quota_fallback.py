@@ -93,7 +93,8 @@ def _fake_hub(state_dir: Path, *, deepseek_configured: bool = True, harness_sids
         broadcast_global=AsyncMock(),
         set_api=set_api,
         delivery=SimpleNamespace(send=send),
-        auto_resume=SimpleNamespace(items=ar_items, on_result=ar_on_result, _changed=AsyncMock()),
+        auto_resume=SimpleNamespace(items=ar_items, on_result=ar_on_result, _changed=AsyncMock(),
+                                discard=AsyncMock(return_value=False)),
         # test helpers
         _working=working,
         _api_calls=api_calls,
@@ -110,7 +111,7 @@ class QuotaFallbackTest(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as td:
             hub = _fake_hub(Path(td))
             sid = "s1"
-            hub.hosted[sid] = SimpleNamespace(model="claude-opus-4-6", alive=True)
+            hub.hosted[sid] = SimpleNamespace(model="claude-opus-4-6", alive=True, working=False, timers={})
             hub.store.entries[sid] = SimpleNamespace(scanner=SimpleNamespace(meta=SimpleNamespace(model="claude-opus-4-6")))
             resets = time.time() + 3600
 
@@ -163,7 +164,7 @@ class QuotaFallbackTest(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as td:
             hub = _fake_hub(Path(td))
             sid = "s1"
-            hub.hosted[sid] = SimpleNamespace(model="claude-sonnet-4-6", alive=True)
+            hub.hosted[sid] = SimpleNamespace(model="claude-sonnet-4-6", alive=True, working=False, timers={})
             resets = time.time() - 120   # already past reset
             hub.usage.data = {
                 "windows": [
@@ -269,7 +270,7 @@ class QuotaFallbackTest(unittest.IsolatedAsyncioTestCase):
             async def source_items(_sid: str):
                 return [{"kind": "compact"}] * compact_items["count"]
 
-            proc = SimpleNamespace(alive=True, working=False, last_result=None)
+            proc = SimpleNamespace(alive=True, working=False, last_result=None, model=None, timers={})
             hub.hosted[sid] = proc
             hub._source_items = source_items
 
@@ -292,7 +293,7 @@ class QuotaFallbackTest(unittest.IsolatedAsyncioTestCase):
 
             # Without DeepSeek key, _compact_claude fails fast (returns False instead of hanging 300s).
             hub2 = _fake_hub(Path(td) / "nokey", deepseek_configured=False)
-            proc2 = SimpleNamespace(alive=True, working=False, last_result=None)
+            proc2 = SimpleNamespace(alive=True, working=False, last_result=None, model=None, timers={})
             hub2.hosted[sid] = proc2
             hub2._source_items = AsyncMock(return_value=[])
 
@@ -346,6 +347,16 @@ class QuotaFallbackTest(unittest.IsolatedAsyncioTestCase):
                 events.append(ev)
 
             p = ClaudeProcess(cfg, session_id="sess-real", cwd=td, sink=sink)
+            # An automatic compaction failing inside an ordinary turn does not fail that turn.
+            await p._handle({"type": "system", "subtype": "status", "status": "compacting"})
+            await p._handle({"type": "system", "subtype": "status", "status": None, "compact_result": "failed",
+                             "compact_error": "Error during compaction: Request timed out"})
+            await p._handle({"type": "result", "subtype": "success", "is_error": False, "num_turns": 3})
+            assert p.last_result is not None
+            self.assertNotIn("failure", p.last_result)
+            self.assertNotIn("compactError", p.last_result)
+
+            p._turn_compact = True          # the turn is a `/compact` the user sent (send_user sets this)
             await p._handle({"type": "system", "subtype": "status", "status": "compacting"})
             await p._handle({"type": "rate_limit_event", "rate_limit_info": {"status": "rejected", "resetsAt": 1795687200}})
             await p._handle({
@@ -363,7 +374,7 @@ class QuotaFallbackTest(unittest.IsolatedAsyncioTestCase):
             # 3. _compact_claude detects that exact isError=False + failure.cause=quota result and retries on DeepSeek
             hub = _fake_hub(Path(td) / "hub", deepseek_configured=True)
             sid = "s-compact-quota"
-            proc = SimpleNamespace(alive=True, working=False, last_result=None)
+            proc = SimpleNamespace(alive=True, working=False, last_result=None, model=None, timers={})
             hub.hosted[sid] = proc
             compact_items = {"count": 0}
             hub._source_items = AsyncMock(
@@ -391,6 +402,110 @@ class QuotaFallbackTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(ok)
             self.assertEqual(calls["n"], 2)
             self.assertEqual(hub._api_calls, [(sid, FALLBACK_ROUTE, FALLBACK_MODEL, True)])
+
+
+class QuotaFallbackEdgeTest(unittest.IsolatedAsyncioTestCase):
+    def _quota(self) -> dict:
+        return {"isError": True, "failure": {"cause": "quota", "message": "weekly limit", "resetsAt": time.time() + 3600}}
+
+    def _session(self, hub: SimpleNamespace, sid: str) -> None:
+        hub.hosted[sid] = SimpleNamespace(model="claude-opus-4-6", alive=True, working=False, timers={})
+        hub.store.entries[sid] = SimpleNamespace(scanner=SimpleNamespace(meta=SimpleNamespace(model="claude-opus-4-6")))
+
+    async def test_switch_that_fails_after_the_route_changed_keeps_the_restore(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            hub = _fake_hub(Path(td))
+            sid = "s1"
+            self._session(hub, sid)
+
+            async def broken_send(*a, **k):
+                raise RuntimeError("process did not start")
+
+            hub.delivery.send = broken_send
+            self.assertTrue(await hub.quota_fallback.on_result(sid, self._quota()))
+            await asyncio.gather(*list(hub.quota_fallback._tasks))
+
+            self.assertEqual(hub.prefs.get(sid)["api"], FALLBACK_ROUTE)
+            entry = hub.quota_fallback.items.get(sid)
+            assert entry is not None              # still known: it is switched back once quota recovers
+            self.assertIsNotNone(entry["switchedAt"])
+            self.assertFalse(entry["resumePending"])
+            self.assertEqual(len(hub._ar_calls), 1)
+            self.assertIsNone(hub._ar_calls[0][1]["failure"]["resetsAt"])   # carried on now, on DeepSeek
+
+    async def test_second_quota_failure_while_switch_waits_is_absorbed(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            hub = _fake_hub(Path(td))
+            sid = "s1"
+            self._session(hub, sid)
+            hub._working[sid] = True                    # background work: the switch waits for it
+            self.assertTrue(await hub.quota_fallback.on_result(sid, self._quota()))
+            await asyncio.gather(*list(hub.quota_fallback._tasks))
+            self.assertIsNone(hub.quota_fallback.items[sid]["switchedAt"])
+            self.assertTrue(await hub.quota_fallback.on_result(sid, self._quota()))
+            self.assertEqual(hub._ar_calls, [])
+
+    async def test_user_taking_over_before_the_switch_cancels_it(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            hub = _fake_hub(Path(td))
+            sid = "s1"
+            self._session(hub, sid)
+            hub._working[sid] = True
+            await hub.quota_fallback.on_result(sid, self._quota())
+            await asyncio.gather(*list(hub.quota_fallback._tasks))
+            await hub.quota_fallback.taken_over(sid)
+            self.assertNotIn(sid, hub.quota_fallback.items)
+            hub._working[sid] = False
+            await hub.quota_fallback._tick()
+            self.assertEqual(hub._api_calls, [])        # the stopped session is not started on DeepSeek
+
+    async def test_pending_wakeup_defers_restore(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            hub = _fake_hub(Path(td))
+            sid = "s1"
+            self._session(hub, sid)
+            hub.prefs.remember(sid, api=FALLBACK_ROUTE)
+            hub.quota_fallback.register_switched(sid, "claude-opus-4-6", None)
+            hub.quota_fallback.items[sid]["restorePending"] = True
+            hub.hosted[sid].timers = {"t": {"oneshot": True, "next": time.time() + 900}}
+            await hub.quota_fallback._tick()
+            await asyncio.gather(*list(hub.quota_fallback._tasks))
+            self.assertEqual(hub._api_calls, [])        # restarting now would lose the ScheduleWakeup
+            hub.hosted[sid].timers = {}
+            await hub.quota_fallback._tick()
+            await asyncio.gather(*list(hub.quota_fallback._tasks))
+            self.assertEqual(hub._api_calls, [(sid, SOURCE_ROUTE, "claude-opus-4-6", True)])
+
+    async def test_stale_usage_does_not_count_as_recovered(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            hub = _fake_hub(Path(td))
+            hub.usage.data = {"windows": [{"percent": 40.0, "resetsAt": None}], "stale": True}
+            now = time.time()
+            recovered, _ = await hub.quota_fallback._check_quota_recovered(now, now + 1800)
+            self.assertFalse(recovered)
+            recovered, _ = await hub.quota_fallback._check_quota_recovered(now, now - AFTER_RESET - 5)
+            self.assertTrue(recovered)
+
+
+class CompactTurnTrackingTest(unittest.IsolatedAsyncioTestCase):
+    async def test_compact_prompt_marks_its_turn_now_or_when_its_queued_turn_starts(self) -> None:
+        from riesz_runner.config import Config
+        from riesz_runner.process import ClaudeProcess
+        with tempfile.TemporaryDirectory() as td:
+            cfg = Config(claude_bin="claude", socket_path=Path(td) / "runner.sock", token="tok",
+                         state_dir=Path(td), claude_home=Path(td) / "claude", workspace_root=Path(td))
+            p = ClaudeProcess(cfg, session_id="s", cwd=td, sink=AsyncMock())
+            p._write = AsyncMock()
+            await p.send_user("/compact", "u1", "/compact")
+            self.assertTrue(p._turn_compact)                       # idle: it starts a turn right away
+            p._turn_compact = False
+            p.turn_active = True
+            await p.send_user("/compact focus on tests", "u2", "/compact")
+            self.assertFalse(p._turn_compact)                      # queued behind the running turn
+            await p._handle_lifecycle({"command_uuid": "u2", "state": "started"})
+            self.assertTrue(p._turn_compact)
+            await p.send_user("please /compact later", "u3", "x")
+            self.assertNotIn("u3", p._compact_uuids)
 
 
 if __name__ == "__main__":

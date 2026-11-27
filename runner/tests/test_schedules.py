@@ -9,6 +9,7 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from riesz_runner.schedules import Scheduler, next_cron
 
@@ -238,6 +239,60 @@ class ReloadTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(moved, 1)
             self.assertEqual(prefs.children(old_sid), [])
             self.assertEqual(prefs.children(new_sid), [child_sid])
+
+
+class ScheduleEdgeTest(unittest.IsolatedAsyncioTestCase):
+    SID = "6e0f5a52-0000-4000-8000-000000000001"
+
+    def _hub(self, tmp, delivery):
+        async def bg(ev):
+            return None
+        return SimpleNamespace(cfg=SimpleNamespace(state_dir=tmp), delivery=delivery, reload_pending=False,
+                               reload_ready=asyncio.Event(), get_hosted=lambda s: None,
+                               message_queued=lambda s, u: False, broadcast_global=bg)
+
+    async def test_editing_a_schedule_while_it_fires_does_not_fire_it_twice(self):
+        class Slow:
+            def __init__(self):
+                self.sent, self.gate = [], asyncio.Event()
+
+            async def send(self, sid, text, att, uuid):
+                self.sent.append(uuid)
+                await self.gate.wait()
+                return {"uuid": uuid, "held": False}
+
+        with tempfile.TemporaryDirectory() as td:
+            delivery = Slow()
+            sch = Scheduler(self._hub(Path(td), delivery))
+            s = await sch.create({"sessionId": self.SID, "prompt": "hi", "times": ["09:00"]})
+            s["next"] = time.time() - 5
+            tick = asyncio.create_task(sch._tick())
+            await asyncio.sleep(0.05)                       # the run waits in delivery.send
+            await sch.update(s["id"], {"name": "renamed"})
+            delivery.gate.set()
+            await tick
+            await sch._tick()
+            self.assertEqual(len(delivery.sent), 1)
+            self.assertEqual(sch.items[s["id"]]["name"], "renamed")
+            self.assertGreater(sch.items[s["id"]]["next"], time.time())
+
+    async def test_missed_run_with_jitter_is_skipped_without_catch_up(self):
+        with tempfile.TemporaryDirectory() as td:
+            delivery = SimpleNamespace(send=AsyncMock(return_value={"held": False}))
+            sch = Scheduler(self._hub(Path(td), delivery))
+            s = await sch.create({"sessionId": self.SID, "prompt": "hi", "times": ["09:00"], "jitter": 720})
+            s["next"] = time.time() - 11 * 3600            # 11 hours late, the random delay included
+            await sch._tick()
+            delivery.send.assert_not_awaited()
+            self.assertEqual(sch.items[s["id"]]["lastResult"], "missed")
+
+    def test_next_cron_in_the_repeated_hour_is_after_the_given_time(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from riesz_runner.schedules import next_cron
+        tz = ZoneInfo("America/New_York")
+        after = datetime(2026, 11, 1, 1, 35, tzinfo=tz, fold=1).timestamp()   # 01:35 EST, the second 01:35
+        self.assertGreater(next_cron("*/30 * * * *", after, "America/New_York"), after)
 
 
 if __name__ == "__main__":

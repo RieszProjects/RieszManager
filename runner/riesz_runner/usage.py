@@ -118,6 +118,7 @@ class UsageMonitor:
         self._fetched = 0.0
         self._stale = False
         self._lock = asyncio.Lock()
+        self._probe_failed = False
         self.limited: dict[str, Any] | None = None
 
     def note_rate_limit(self, info: Any) -> None:
@@ -141,7 +142,8 @@ class UsageMonitor:
                 candidates.append(ts)
         for w in (self._data or {}).get("windows") or ():
             if isinstance(w, dict) and float(w.get("percent") or 0) >= 100.0 and w.get("resetsAt"):
-                candidates.append(float(w["resetsAt"]))
+                if float(w["resetsAt"]) > now:          # a window that reset since the last probe is not exhausted
+                    candidates.append(float(w["resetsAt"]))
         return max(candidates) if candidates else None
 
     async def get(self, force: bool = False) -> dict[str, Any]:
@@ -155,8 +157,10 @@ class UsageMonitor:
                 try:
                     self._data = await self._probe()
                     self._stale = False
+                    self._probe_failed = False
                 except Exception as exc:  # keep serving the last good value
                     log.warning("usage probe failed: %s", exc)
+                    self._probe_failed = True
                     if self._data is None:
                         self._data = {"windows": [], "plan": None, "error": str(exc)[:200]}
                 self._fetched = time.time()
@@ -165,6 +169,8 @@ class UsageMonitor:
     def _view(self) -> dict[str, Any]:
         data = dict(self._data or {})
         data["fetchedAt"] = self._fetched
+        if self._probe_failed:
+            data["stale"] = True                         # the last probe failed: these numbers are older
         if self.limited and (not self.limited.get("resetsAt") or self.limited["resetsAt"] > time.time()):
             data["limited"] = self.limited
         return data

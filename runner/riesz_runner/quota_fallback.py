@@ -44,6 +44,8 @@ FALLBACK_RESUME_TEXT = (
     "[Riesz Manager 自动切换] Claude 订阅额度已用尽，已自动切换至 DeepSeek API 继续执行；"
     "额度恢复后会自动切回。请直接从刚才中断的地方继续完成上一轮任务。"
 )
+# A failed `/compact` is retried as itself: "carry on with the last task" would make the agent redo its work.
+COMPACT_RESUME_TEXT = "/compact"
 
 
 def _claude_model_or_none(model: Any) -> str | None:
@@ -113,6 +115,25 @@ class ClaudeQuotaFallback:
     def has_in_flight(self) -> bool:
         return bool(self._switching)
 
+    def resuming(self, sid: str) -> bool:
+        """Whether the session's failed turn is about to be carried on here (switching, or resume not sent yet)."""
+        entry = self.items.get(sid)
+        return sid in self._switching or bool(entry is not None and entry.get("resumePending"))
+
+    def _busy(self, sid: str) -> bool:
+        """Not to be restarted now: a turn, queue, prompt or task (as hub.set_api checks, background commands
+        included), or a pending one-shot Claude Code timer (ScheduleWakeup), which a restart would lose."""
+        if self.hub.session_working(sid):
+            return True
+        proc = self.hub.get_hosted(sid)
+        if proc is None:
+            return False
+        now = time.time()
+        timers = getattr(proc, "timers", None) or {}
+        wakeup = any(t.get("oneshot") and t.get("next") is not None and float(t["next"]) > now - 120.0
+                     for t in timers.values())
+        return bool(proc.working or wakeup)
+
     def view(self, sid: str) -> dict[str, Any] | None:
         entry = self.items.get(sid)
         if entry is None:
@@ -138,6 +159,33 @@ class ClaudeQuotaFallback:
         if status and status != "rejected":
             self._probe_soon = True
 
+    async def taken_over(self, sid: str) -> None:
+        """The user stopped the session, sent it a message or cancelled its resume: no automatic carry-on.
+        A switch that has not happened yet is dropped; one that has keeps its automatic restore."""
+        entry = self.items.get(sid)
+        if entry is None:
+            return
+        if entry.get("switchedAt") is None and sid not in self._switching:
+            self.items.pop(sid, None)
+            log.info("quota fallback for %s dropped: the user took over before the switch", sid[:8])
+        elif entry.get("resumePending"):
+            entry["resumePending"] = False
+        else:
+            return
+        await self._changed(sid)
+
+    def register_switched(self, sid: str, original_model: Any, resets_at: float | None) -> None:
+        """A switch to DeepSeek made elsewhere (compacting before a handoff): restore it like our own."""
+        if sid in self.items:
+            return
+        self.items[sid] = {
+            "sessionId": sid, "fromRoute": SOURCE_ROUTE, "toRoute": FALLBACK_ROUTE,
+            "originalModel": _claude_model_or_none(original_model), "fallbackModel": FALLBACK_MODEL,
+            "resetsAt": float(resets_at) if resets_at else None, "switchedAt": time.time(),
+            "resumePending": False, "restorePending": False, "reason": "handoff compact",
+        }
+        self._save()
+
     async def on_manual_api_change(self, sid: str, route: str) -> None:
         """Respect an explicit user route choice by dropping automatic restore for this session."""
         if sid not in self.items:
@@ -159,15 +207,19 @@ class ClaudeQuotaFallback:
 
         # If this session is on fallback and quota already recovered while it was mid-turn, restore now.
         existing = self.items.get(sid)
+        fail = result.get("failure")
+        is_quota = isinstance(fail, dict) and fail.get("cause") == "quota"
         if existing is not None:
-            if existing.get("restorePending") and sid not in self._switching and not self.hub.session_working(sid):
+            if existing.get("switchedAt") is None and is_quota:
+                return True          # the switch already waiting covers this failure too (no second auto-resume)
+            if existing.get("restorePending") and sid not in self._switching and not self._busy(sid):
                 self._switching.add(sid)
                 self._spawn(self._restore(sid))
             return False
 
-        fail = result.get("failure")
-        if not isinstance(fail, dict) or fail.get("cause") != "quota":
+        if not is_quota:
             return False
+        assert isinstance(fail, dict)
         pref = self.hub.prefs.get(sid) or {}
         if pref.get("handedOffTo"):
             return False
@@ -197,6 +249,7 @@ class ClaudeQuotaFallback:
             "restorePending": False,
             "reason": str(fail.get("message") or "")[:300],
             "fail": dict(fail),
+            "compact": bool(result.get("compactError")),
         }
         self._save()
         self._switching.add(sid)
@@ -214,9 +267,9 @@ class ClaudeQuotaFallback:
                     return
                 # Wait briefly for any finishing turn teardown; if background jobs are running, defer to _tick().
                 deadline = time.monotonic() + IDLE_DRAIN_SECONDS
-                while self.hub.session_working(sid) and time.monotonic() < deadline:
+                while self._busy(sid) and time.monotonic() < deadline:
                     await asyncio.sleep(0.1)
-                if self.hub.session_working(sid):
+                if self._busy(sid):
                     log.info("quota fallback for %s deferred while background work finishes", sid[:8])
                     await self._changed(sid)
                     return
@@ -242,16 +295,29 @@ class ClaudeQuotaFallback:
                         sid,
                         {"ev": "notice", "level": "info", "text": f"Claude 订阅额度已用尽，已自动切换至 DeepSeek API 继续执行{when}"},
                     )
+                    # This switch carries the failed turn on; a resume auto_resume planned for it would repeat it.
+                    await self.hub.auto_resume.discard(sid, "carried on by the DeepSeek fallback")
                     if entry.get("resumePending"):
                         assert self.hub.delivery is not None
                         await self.hub.delivery.send(
-                            sid, FALLBACK_RESUME_TEXT, [], str(uuidlib.uuid4()), model=FALLBACK_MODEL,
+                            sid, COMPACT_RESUME_TEXT if entry.get("compact") else FALLBACK_RESUME_TEXT, [],
+                            str(uuidlib.uuid4()), model=FALLBACK_MODEL,
                         )
                         entry["resumePending"] = False
                         self._save()
                 except Exception as exc:  # noqa: BLE001 - fall back to normal auto-resume so the session isn't stranded
-                    log.warning("quota fallback for %s failed: %s; delegating to auto-resume", sid[:8], exc)
-                    self.items.pop(sid, None)
+                    switched = ((self.hub.prefs.get(sid) or {}).get("api") or SOURCE_ROUTE) == FALLBACK_ROUTE
+                    log.warning("quota fallback for %s failed%s: %s; delegating to auto-resume", sid[:8],
+                                " after the route changed" if switched else "", exc)
+                    entry["resumePending"] = False
+                    if switched:
+                        # The route did change (set_api records it before restarting): keep the entry so the
+                        # session goes back to Claude once quota recovers; auto-resume carries the turn on DeepSeek.
+                        entry["switchedAt"] = entry.get("switchedAt") or time.time()
+                        entry.pop("fail", None)
+                        fail = {**fail, "resetsAt": None}
+                    else:
+                        self.items.pop(sid, None)
                     await self._changed(sid)
                     await self.hub.auto_resume.on_result(sid, {"isError": True, "failure": fail})
         finally:
@@ -267,6 +333,8 @@ class ClaudeQuotaFallback:
         except Exception as exc:  # noqa: BLE001
             log.info("quota recovery probe failed: %s", exc)
 
+        if isinstance(data, dict) and data.get("stale"):
+            data = {"limited": data.get("limited")}      # the probe failed: its windows are from before
         limited = data.get("limited") if isinstance(data, dict) else None
         if isinstance(limited, dict):
             lim_reset = limited.get("resetsAt")
@@ -297,7 +365,7 @@ class ClaudeQuotaFallback:
                     self.items.pop(sid, None)
                     self._save()
                     return
-                if self.hub.session_working(sid):
+                if self._busy(sid):
                     entry["restorePending"] = True
                     await self._changed(sid)
                     return
@@ -345,14 +413,17 @@ class ClaudeQuotaFallback:
 
         # 1. Clean up stale entries and retry any activation that was deferred while background tasks ran.
         active: list[tuple[str, dict[str, Any]]] = []
+        handing_off = getattr(self.hub, "_handing_off", set())
         for sid, entry in list(self.items.items()):
             pref = self.hub.prefs.get(sid) or {}
+            if sid in handing_off:
+                continue                                  # its process is the handoff's to stop or keep
             if self.hub.harnesses.has(sid) or pref.get("handedOffTo"):
                 self.items.pop(sid, None)
                 self._save()
                 continue
             if entry.get("switchedAt") is None:
-                if sid not in self._switching and not self.hub.session_working(sid):
+                if sid not in self._switching and not self._busy(sid):
                     self._switching.add(sid)
                     self._spawn(self._activate(sid))
                 continue
@@ -369,7 +440,7 @@ class ClaudeQuotaFallback:
         need_probe: list[tuple[str, dict[str, Any]]] = []
         for sid, entry in active:
             if entry.get("restorePending"):
-                if sid not in self._switching and not self.hub.session_working(sid):
+                if sid not in self._switching and not self._busy(sid):
                     self._switching.add(sid)
                     self._spawn(self._restore(sid))
             else:
@@ -400,7 +471,7 @@ class ClaudeQuotaFallback:
 
         for sid, entry in need_probe:
             entry["restorePending"] = True
-            if sid not in self._switching and not self.hub.session_working(sid):
+            if sid not in self._switching and not self._busy(sid):
                 self._switching.add(sid)
                 self._spawn(self._restore(sid))
             else:

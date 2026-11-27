@@ -170,19 +170,22 @@ class Hub:
         last_note = 0.0
         last_waiting: list[str] | None = None
         while True:
-            waiting = self._reload_waiting_for()
-            if waiting != last_waiting:
-                last_waiting = waiting
-                await self.broadcast_global(self.reload_info())
-            if time.time() - last_note > 300:
-                if waiting:
-                    log.info("reload waiting for sessions with work in progress: %s", ", ".join(s[:8] for s in waiting))
-                last_note = time.time()
-            if self._all_idle():
-                # Two consecutive idle observations, so a turn that is just starting is not cut off.
-                await asyncio.sleep(1.0)
+            try:
+                waiting = self._reload_waiting_for()
+                if waiting != last_waiting:
+                    last_waiting = waiting
+                    await self.broadcast_global(self.reload_info())
+                if time.time() - last_note > 300:
+                    if waiting:
+                        log.info("reload waiting for sessions with work in progress: %s", ", ".join(s[:8] for s in waiting))
+                    last_note = time.time()
                 if self._all_idle():
-                    break
+                    # Two consecutive idle observations, so a turn that is just starting is not cut off.
+                    await asyncio.sleep(1.0)
+                    if self._all_idle():
+                        break
+            except Exception:  # noqa: BLE001 - a failing check means "not idle yet", not "never reload"
+                log.exception("reload idle check failed")
             await asyncio.sleep(1.0)
         log.info("all hosted sessions idle; reloading")
         self._save_working(set())  # nothing is interrupted by a reload
@@ -217,6 +220,7 @@ class Hub:
         subs.add(sub)
         if session_id not in self._tail_wakeup:
             self._tail_wakeup[session_id] = asyncio.Event()
+            self._tasks = [t for t in self._tasks if not t.done()]   # tail loops end with their last subscriber
             self._tasks.append(asyncio.create_task(self._tail_loop(session_id)))
 
     def unsubscribe(self, session_id: str, sub: Subscriber) -> None:
@@ -292,14 +296,17 @@ class Hub:
             before = {sid: (p.pid, p.status) for sid, p in self.live.items()}
             after = {sid: (p.pid, p.status) for sid, p in current.items()}
             self.live = current
-            await self._external_attention(before, current)
-            if self.delivery is not None and self.delivery.held:
-                await self.delivery.on_live_changed()
-            if before != after:
-                await self.broadcast_global({"ev": "live", "live": self.live_list()})
-                for sid in set(before) | set(after):
-                    if before.get(sid) != after.get(sid):
-                        await self.broadcast_session(sid, {"ev": "state", "state": self.session_state(sid)})
+            try:
+                await self._external_attention(before, current)
+                if self.delivery is not None and self.delivery.held:
+                    await self.delivery.on_live_changed()
+                if before != after:
+                    await self.broadcast_global({"ev": "live", "live": self.live_list()})
+                    for sid in set(before) | set(after):
+                        if before.get(sid) != after.get(sid):
+                            await self.broadcast_session(sid, {"ev": "state", "state": self.session_state(sid)})
+            except Exception:  # noqa: BLE001 - one bad session must not end the loop
+                log.exception("live loop failed")
 
     async def _index_loop(self) -> None:
         while True:
@@ -311,9 +318,12 @@ class Hub:
             except Exception:  # noqa: BLE001
                 continue
             if changed:
-                sessions = [self.session_summary(sid) for sid in changed if sid in self.store.entries]
-                removed = [sid for sid in changed if sid not in self.store.entries]
-                await self.broadcast_global({"ev": "sessions", "sessions": sessions, "removed": removed})
+                try:
+                    sessions = [self.session_summary(sid) for sid in changed if sid in self.store.entries]
+                    removed = [sid for sid in changed if sid not in self.store.entries]
+                    await self.broadcast_global({"ev": "sessions", "sessions": sessions, "removed": removed})
+                except Exception:  # noqa: BLE001
+                    log.exception("index loop failed")
 
     async def _reap_loop(self) -> None:
         while True:
@@ -326,9 +336,14 @@ class Hub:
                 idle = now - proc.last_activity
                 # last_activity moves with every message from claude, including the
                 # task events, so the idle time counts from when the last task ended.
-                if proc.alive and not proc.working and idle > self.cfg.idle_timeout and not self.prefs.keep_alive(sid):
-                    log.info("stopping idle claude process for %s", sid)
-                    await proc.stop()
+                try:
+                    # Claude Code's own timers (ScheduleWakeup, CronCreate) live in the process: keep it for them.
+                    if (proc.alive and not proc.working and not proc.timers and idle > self.cfg.idle_timeout
+                            and not self.prefs.keep_alive(sid)):
+                        log.info("stopping idle claude process for %s", sid)
+                        await proc.stop()
+                except Exception:  # noqa: BLE001
+                    log.exception("could not stop idle claude process for %s", sid)
 
     # ---- interrupted sessions ---------------------------------------------------
 
@@ -362,7 +377,10 @@ class Hub:
             await asyncio.sleep(WORKING_SNAPSHOT_INTERVAL)
             if self.reload_ready.is_set():
                 continue
-            self._save_working(self._current_working())
+            try:
+                self._save_working(self._current_working())
+            except Exception:  # noqa: BLE001
+                log.exception("working snapshot failed")
 
     async def clear_interrupted(self, session_id: str) -> None:
         if self.prefs.set_interrupted(session_id, None):
@@ -812,6 +830,8 @@ class Hub:
         `via` and `harness` say how they were started and what runs them."""
         out = []
         for sid in self.prefs.children(parent):
+            if self.final_handoff_target(sid) != sid:
+                continue                                  # moved to another harness: listed as the session it became
             pref = self.prefs.get(sid) or {}
             harness = self.harnesses.harness_of(sid) or "claude"
             running = bool(self.session_working(sid))
@@ -958,10 +978,14 @@ class Hub:
             while proc is not None and proc.working and time.monotonic() < drain:
                 await asyncio.sleep(0.1)
                 proc = self.get_hosted(session_id)
+            original = proc.model if proc is not None else None
             try:
                 await self.set_api(session_id, FALLBACK_ROUTE, model=FALLBACK_MODEL, _internal=True)
                 log.info("handoff compact: switched %s to %s (%s) after Claude quota exhaustion",
                          session_id[:8], FALLBACK_ROUTE, FALLBACK_MODEL)
+                # Restored like any fallback should the source go on (a fork, or a handoff that fails later);
+                # a finished handoff drops it (on_manual_api_change).
+                self.quota_fallback.register_switched(session_id, original, self.usage.reset_time())
                 return True
             except Exception as exc:  # noqa: BLE001
                 log.warning("handoff compact: could not switch %s to %s: %s", session_id[:8], FALLBACK_ROUTE, exc)
@@ -1113,6 +1137,12 @@ class Hub:
                     else:
                         self.prefs.set_keep_alive(new_id, True)
                 self.prefs.reassign_parent(session_id, new_id)
+                src = self.prefs.get(session_id) or {}
+                if src.get("subagentOf"):
+                    # A subagent moved to another harness stays its parent's subagent: replies are still
+                    # called back, subagent_send still reaches it, and it is listed under the parent.
+                    self.prefs.remember(new_id, subagentOf=src["subagentOf"], subagentTask=src.get("subagentTask"),
+                                        startedBy=src.get("startedBy"), browser=src.get("browser"))
                 await self.auto_resume.taken_over(session_id)
                 await self.quota_fallback.on_manual_api_change(session_id, "handoff")
                 if hasattr(self, "schedules"):
@@ -1124,7 +1154,9 @@ class Hub:
             if not fork:
                 self._handing_off.discard(session_id)
                 held = self._handoff_held.pop(session_id, [])
-                dest = new_id or session_id
+                # Sent to the source: delivery follows handedOffTo, so they reach the new session only if the
+                # move got that far, and stay with the source (which carries on) after a failed one.
+                dest = session_id
                 if held and self.delivery is not None:
                     for h in held:
                         try:

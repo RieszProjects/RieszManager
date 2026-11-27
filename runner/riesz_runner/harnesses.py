@@ -581,17 +581,29 @@ class Harnesses:
         rec["promptCount"] = (rec.get("promptCount") or 0) + 1
         rec["firstPrompt"] = rec.get("firstPrompt") or text[:200]
         rec["lastPrompt"] = text[:200]
+        pending_history = None
         if rec.get("pendingHandoff") and not stripped.startswith("/"):
             # The conversation moved here from another harness, put in front of the first message
             # (not of a slash command, which the harness would no longer take as one); a history too big
             # for one message goes first in parts of its own (handoff.split_message).
-            *parts, text = handoff.split_message(rec.pop("pendingHandoff"), text)
-            for part in parts:
-                await driver.send(part, [], str(uuidlib.uuid4()))
+            pending_history = rec.pop("pendingHandoff")
+            *parts, text = handoff.split_message(pending_history, text)
+            try:
+                for part in parts:
+                    await driver.send(part, [], str(uuidlib.uuid4()))
+            except Exception:
+                rec["pendingHandoff"] = pending_history     # not delivered: the next message carries it again
+                raise
         rec["updatedAt"] = time.time()
         self._active[session_id] = time.time()
         self._save()
-        await driver.send(text, images, message_uuid)
+        try:
+            await driver.send(text, images, message_uuid)
+        except Exception:
+            if pending_history is not None:
+                rec["pendingHandoff"] = pending_history
+                self._save()
+            raise
         await self.hub.broadcast_global({"ev": "sessions", "sessions": [self.summary(session_id)], "removed": []})
         return {"uuid": message_uuid, "held": False}
 
@@ -749,57 +761,64 @@ class Harnesses:
         while True:
             await asyncio.sleep(3.0)
             ticks += 1
-            # Watch alive Antigravity sessions for built-in invoke_subagent starts/completions so the sidebar updates live.
-            for sid, driver in list(self.drivers.items()):
-                if not driver.alive or driver.harness != "antigravity":
-                    agy_seen.pop(sid, None)
-                    if agy_sched_seen.pop(sid, None):
-                        await self.hub.broadcast_global({"ev": "schedules"})
-                    continue
-                entries = self.hub.agy_subagents.list(sid, parent_alive=True)
-                sig = (len(entries), tuple(a["agentId"] for a in entries if a["running"]))
-                if agy_seen.get(sid) != sig:
-                    agy_seen[sid] = sig
-                    await self.hub.broadcast_global({"ev": "session_live", "sessionId": sid, "live": self.live_info(sid)})
-                    await self.hub.broadcast_global({"ev": "sessions", "sessions": [self.summary(sid)], "removed": []})
-                scheds = self.hub.agy_subagents.active_schedules(sid, parent_alive=True, started_at=driver.started_at)
-                sched_sig = tuple(s["id"] for s in scheds)
-                if agy_sched_seen.get(sid, ()) != sched_sig:
-                    agy_sched_seen[sid] = sched_sig
+            try:
+                await self._tick(ticks, failures, agy_seen, agy_sched_seen)
+            except Exception:  # noqa: BLE001 - one bad session must not end idle reaping and keep-alive for good
+                log.exception("harness loop tick failed")
+
+    async def _tick(self, ticks: int, failures: dict[str, tuple[float, int]],
+                    agy_seen: dict[str, tuple[int, tuple[str, ...]]], agy_sched_seen: dict[str, tuple[str, ...]]) -> None:
+        # Watch alive Antigravity sessions for built-in invoke_subagent starts/completions so the sidebar updates live.
+        for sid, driver in list(self.drivers.items()):
+            if not driver.alive or driver.harness != "antigravity":
+                agy_seen.pop(sid, None)
+                if agy_sched_seen.pop(sid, None):
                     await self.hub.broadcast_global({"ev": "schedules"})
-            if ticks % max(1, int(REAP_INTERVAL // 3)) != 0:
                 continue
-            now = time.time()
-            for sid, driver in list(self.drivers.items()):
-                rec = self.records.get(sid) or {}
-                lock = self._locks.get(sid)
-                if (
-                    not driver.alive or not driver.ready
-                    or (lock is not None and lock.locked())
-                    or self.is_working(sid) or rec.get("keepAlive")
-                ):
-                    continue
-                last_active = max(self._active.get(sid, 0.0), getattr(driver, "started_at", 0.0) or 0.0)
-                if last_active and now - last_active > self.cfg.idle_timeout:
-                    log.info("stopping idle %s session %s", driver.harness, sid[:8])
-                    with contextlib.suppress(Exception):
-                        await self.stop(sid)
-            if self.hub.reload_ready.is_set():
+            entries = self.hub.agy_subagents.list(sid, parent_alive=True)
+            sig = (len(entries), tuple(a["agentId"] for a in entries if a["running"]))
+            if agy_seen.get(sid) != sig:
+                agy_seen[sid] = sig
+                await self.hub.broadcast_global({"ev": "session_live", "sessionId": sid, "live": self.live_info(sid)})
+                await self.hub.broadcast_global({"ev": "sessions", "sessions": [self.summary(sid)], "removed": []})
+            scheds = self.hub.agy_subagents.active_schedules(sid, parent_alive=True, started_at=driver.started_at)
+            sched_sig = tuple(s["id"] for s in scheds)
+            if agy_sched_seen.get(sid, ()) != sched_sig:
+                agy_sched_seen[sid] = sched_sig
+                await self.hub.broadcast_global({"ev": "schedules"})
+        if ticks % max(1, int(REAP_INTERVAL // 3)) != 0:
+            return
+        now = time.time()
+        for sid, driver in list(self.drivers.items()):
+            rec = self.records.get(sid) or {}
+            lock = self._locks.get(sid)
+            if (
+                not driver.alive or not driver.ready
+                or (lock is not None and lock.locked())
+                or self.is_working(sid) or rec.get("keepAlive")
+            ):
                 continue
-            for sid, rec in list(self.records.items()):
-                driver = self.drivers.get(sid)
-                if not rec.get("keepAlive") or rec.get("handedOffTo") or (driver is not None and driver.alive):
-                    continue
-                last, count = failures.get(sid, (0.0, 0))
-                if now - last < min(60 * 2 ** count, 1800):
-                    continue                            # it keeps failing: back off
-                try:
-                    await self.ensure(sid)
-                    failures.pop(sid, None)
-                    log.info("keep-alive: started %s session %s", rec["harness"], sid[:8])
-                except Exception as exc:  # noqa: BLE001
-                    failures[sid] = (now, count + 1)
-                    log.info("keep-alive: could not start %s: %s", sid[:8], exc)
+            last_active = max(self._active.get(sid, 0.0), getattr(driver, "started_at", 0.0) or 0.0)
+            if last_active and now - last_active > self.cfg.idle_timeout:
+                log.info("stopping idle %s session %s", driver.harness, sid[:8])
+                with contextlib.suppress(Exception):
+                    await self.stop(sid)
+        if self.hub.reload_ready.is_set():
+            return
+        for sid, rec in list(self.records.items()):
+            driver = self.drivers.get(sid)
+            if not rec.get("keepAlive") or rec.get("handedOffTo") or (driver is not None and driver.alive):
+                continue
+            last, count = failures.get(sid, (0.0, 0))
+            if now - last < min(60 * 2 ** count, 1800):
+                continue                            # it keeps failing: back off
+            try:
+                await self.ensure(sid)
+                failures.pop(sid, None)
+                log.info("keep-alive: started %s session %s", rec["harness"], sid[:8])
+            except Exception as exc:  # noqa: BLE001
+                failures[sid] = (now, count + 1)
+                log.info("keep-alive: could not start %s: %s", sid[:8], exc)
 
     # ---- what drivers report ------------------------------------------------------------
 

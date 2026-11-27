@@ -13,7 +13,7 @@ import unittest
 from riesz_runner.drivers.codex import CodexDriver, map_item, unwrap_command
 from riesz_runner.drivers.jsonrpc import JsonRpcError
 
-from .helpers import Events, FakePeer, load_traffic, responses_by_method
+from tests.helpers import Events, FakePeer, load_traffic, responses_by_method
 
 TRAFFIC = load_traffic("codex-session.jsonl")
 RESPONSES = responses_by_method(TRAFFIC)

@@ -627,6 +627,11 @@ class SubagentWatcher:
         start = time.time()
         seen_work = False
         while time.time() - start < seconds:
+            if self.hub.quota_fallback.resuming(child):
+                # Its turn failed on quota and is being carried on (on DeepSeek): the reply is still to come.
+                seen_work = True
+                await asyncio.sleep(1.5)
+                continue
             working = self.hub.session_working(child)
             if working is None:                      # not running (any more)
                 return True
@@ -649,7 +654,7 @@ class SubagentWatcher:
             if self.hub.harnesses.has(child):
                 await self.hub.harnesses.stop(child)
             else:
-                await self.hub.stop_session(child)
+                await self.hub.stop_process(child)
 
     async def finish_sync(self, child: str, finished: bool) -> str | None:
         """End a synchronous wait. Returns the reply text if finished, or None to hand off to async callbacks."""

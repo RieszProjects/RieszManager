@@ -40,6 +40,9 @@ BG_TASK_START_RE = re.compile(
 BG_TASK_DONE_RE = re.compile(r'Task id "([^"]+)" (?:finished|was canceled|stopped)')
 BG_TASK_RESET_MARKER = "All your subagents and background tasks have been stopped"
 BG_SCHEDULE_DESC_RE = re.compile(r"Task Description:\s*(Timer|Cron):\s*([^\n]+)")
+# The description's own words: "Timer: 3m 35s, Prompt: ..." / "Cron: */5 * * * *, Prompt: ...".
+SCHEDULE_DESC_PARTS_RE = re.compile(r"^(?P<when>.*?)(?:,\s*Prompt:\s*(?P<prompt>[\s\S]*))?$")
+DURATION_PART_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([hms])")
 SYS_MSG_RE = re.compile(
     r"\[Message\]\s+timestamp=[^\s]+\s+sender=([^\s]+)\s+priority=[^\s]+\s+content=([\s\S]*?)(?:\n</SYSTEM_MESSAGE>|$)"
 )
@@ -79,6 +82,15 @@ def _step_ts(step: dict[str, Any]) -> float:
         except ValueError:
             pass
     return 0.0
+
+
+def _timer_seconds(when: str) -> float | None:
+    """Seconds in a timer description such as "1h 5m", "3m 35s" or "45s" (None if it is not one)."""
+    text = when.strip()
+    parts = DURATION_PART_RE.findall(text)
+    if not parts or DURATION_PART_RE.sub("", text).strip():
+        return None
+    return sum(float(n) * {"h": 3600, "m": 60, "s": 1}[u] for n, u in parts)
 
 
 def _file_uri_to_path(uri: str | None) -> Path | None:
@@ -158,6 +170,7 @@ class _SubagentStatus:
     last_status: str = ""
     last_has_tools: bool = False
     open_bg_tasks: set[str] = field(default_factory=set)
+    timer_tasks: set[str] = field(default_factory=set)      # those of open_bg_tasks that are `schedule` timers
 
 
 @dataclass
@@ -239,6 +252,10 @@ class AgySubagentStore:
     def _feed_parent_step(self, idx: _ParentIndex, step: dict[str, Any]) -> None:
         stype = step.get("type")
         if stype == "PLANNER_RESPONSE":
+            # A tool's result comes before the next response: calls still unmatched by now failed without one
+            # (e.g. a `schedule` turned down), and pairing later results with them would shift every match.
+            idx.pending_invokes.clear()
+            idx.pending_schedules.clear()
             for tc in step.get("tool_calls") or ():
                 if not isinstance(tc, dict):
                     continue
@@ -294,14 +311,20 @@ class AgySubagentStore:
                 if sched_desc:
                     meta_s = idx.pending_schedules.pop(0) if idx.pending_schedules else {}
                     kind = sched_desc.group(1)
+                    desc = sched_desc.group(2).strip()
+                    parts = SCHEDULE_DESC_PARTS_RE.match(desc)
+                    when = (parts.group("when") if parts else desc).strip()
+                    said_prompt = ((parts.group("prompt") if parts else None) or "").strip()
+                    duration = _timer_seconds(when) if kind == "Timer" else None
                     idx.open_schedules[tid] = {
                         "id": tid,
                         "kind": kind,
                         "createdAt": ts or time.time(),
-                        "duration": meta_s.get("duration"),
-                        "cron": meta_s.get("cron") or (sched_desc.group(2).strip() if kind == "Cron" else None),
-                        "prompt": meta_s.get("prompt") or sched_desc.group(2).strip(),
-                        "desc": sched_desc.group(2).strip(),
+                        # What the result says first; the call's arguments only fill in what it leaves out.
+                        "duration": duration if duration is not None else (meta_s.get("duration") if kind == "Timer" else None),
+                        "cron": (when or meta_s.get("cron")) if kind == "Cron" else None,
+                        "prompt": said_prompt or meta_s.get("prompt") or desc,
+                        "desc": desc,
                     }
             m_created = CREATED_RE.match(clean)
             if m_created:
@@ -362,6 +385,8 @@ class AgySubagentStore:
             if BG_TASK_RESET_MARKER in content:
                 idx.open_bg_tasks.clear()
                 idx.open_schedules.clear()
+                idx.pending_invokes.clear()
+                idx.pending_schedules.clear()
 
     def _sync_status(self, meta: _SubagentMeta) -> _SubagentStatus:
         path = self._safe_transcript(meta)
@@ -402,14 +427,23 @@ class AgySubagentStore:
                 m = BG_TASK_START_RE.match(clean)
                 if m:
                     status.open_bg_tasks.add(m.group(1))
+                    sched = BG_SCHEDULE_DESC_RE.search(clean)
+                    if sched and sched.group(1) == "Timer":
+                        status.timer_tasks.add(m.group(1))
             elif stype == "SYSTEM_MESSAGE":
                 content = str(step.get("content") or "")
                 for m in BG_TASK_DONE_RE.finditer(content):
                     status.open_bg_tasks.discard(m.group(1))
+                    status.timer_tasks.discard(m.group(1))
                 for m in SYS_MSG_RE.finditer(content):
-                    status.open_bg_tasks.discard(m.group(1))
+                    # A timer fires as a message from its task; a background command also sends ones
+                    # ("still running after 180s") that do not mean it ended.
+                    if m.group(1) in status.timer_tasks:
+                        status.open_bg_tasks.discard(m.group(1))
+                        status.timer_tasks.discard(m.group(1))
                 if BG_TASK_RESET_MARKER in content:
                     status.open_bg_tasks.clear()
+                    status.timer_tasks.clear()
         return status
 
     def _is_running(self, meta: _SubagentMeta, status: _SubagentStatus, *, parent_alive: bool, now: float) -> bool:
@@ -624,7 +658,9 @@ class AgySubagentStore:
                 new_tools.append(blk)
             if blocks:
                 self._push_item(view, assistant_item(f"agy:a:{idx}", blocks, ts=ts, model=step.get("model")))
-            view.pending_tools.extend(new_tools)
+            # Results of earlier calls come before the next response; ones still unmatched (a turn cut off)
+            # never got one, and pairing the next results with them would shift every result by one.
+            view.pending_tools = new_tools
             return
 
         if stype == "GENERIC":
