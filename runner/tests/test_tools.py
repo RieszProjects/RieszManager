@@ -219,6 +219,85 @@ class ToolsTest(unittest.IsolatedAsyncioTestCase):
         text, error = await relay.call("subagent_start", task="x", harness="nope")
         self.assertTrue(error)
 
+    async def test_effort_param_and_session_list_filters(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        hub = self.app[HUB]
+        other_dir = self.tmp / "alpha"
+        sub_dir = other_dir / "nested"
+        sub_dir.mkdir(parents=True)
+
+        me = await self.session("main work")
+        hub.harnesses.drivers[me].fake_pid = os.getpid()
+        s_alpha = (await self.api("POST", "sessions", {"cwd": str(other_dir), "harness": "fake", "text": "alpha task"}))["sessionId"]
+        await self.idle(s_alpha)
+        await self.api("POST", f"sessions/{s_alpha}/rename", {"title": "建模主会话"})
+        await hub.harnesses.stop(s_alpha)
+
+        s_nested = (await self.api("POST", "sessions", {"cwd": str(sub_dir), "harness": "fake", "text": "nested task"}))["sessionId"]
+        await self.idle(s_nested)
+        await hub.harnesses.stop(s_nested)
+
+        relay = await self.relay()
+
+        # 1) subagent_start passes effort to non-Claude drivers and hides subagent from session_list.
+        text, error = await relay.call("subagent_start", task="重活任务", harness="fake", effort="xhigh")
+        self.assertFalse(error, text)
+        child_prefix = text.split("子代理 ")[1][:8]
+        child_id = next(sid for sid in hub.harnesses.drivers if sid.startswith(child_prefix))
+        self.assertEqual(hub.harnesses.drivers[child_id].effort, "xhigh")
+
+        # 2) subagent_start validates and forwards effort to Claude create_session.
+        fake_proc = MagicMock(session_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", cwd=str(self.workspace))
+        orig_create = hub.create_session
+        orig_send_new = hub.delivery.send_new
+        hub.create_session = AsyncMock(return_value=fake_proc)  # type: ignore[assignment]
+        hub.delivery.send_new = AsyncMock(return_value={"queued": False})  # type: ignore[assignment]
+        self.addCleanup(setattr, hub, "create_session", orig_create)
+        self.addCleanup(setattr, hub.delivery, "send_new", orig_send_new)
+
+        text, error = await relay.call("subagent_start", task="Opus 重活", harness="claude", model="opus", effort="xhigh", wait=False)
+        self.assertFalse(error, text)
+        hub.create_session.assert_awaited_once()
+        self.assertEqual(hub.create_session.await_args.kwargs["effort"], "xhigh")
+        self.assertEqual(hub.create_session.await_args.kwargs["model"], "opus")
+
+        # Invalid Claude effort returns a clear ToolError.
+        text, error = await relay.call("subagent_start", task="bad", harness="claude", effort="off")
+        self.assertTrue(error)
+        self.assertIn("effort", text)
+
+        # 3) session_new passes effort through POST /v1/sessions.
+        text, error = await relay.call("session_new", message="高强度新会话", harness="fake", effort="high")
+        self.assertFalse(error, text)
+        new_sid = text.split("已开新会话 ")[1].split("（")[0]
+        self.assertEqual(hub.harnesses.drivers[new_sid].effort, "high")
+
+        text, error = await relay.call("session_new", message="bad", harness="claude", effort="minimal")
+        self.assertTrue(error)
+        self.assertIn("effort", text)
+
+        # 4) session_list excludes subagents and supports directory, query, and limit filters without all=true.
+        all_out, err = await relay.call("session_list", all=True)
+        self.assertFalse(err, all_out)
+        self.assertNotIn(child_prefix, all_out)
+        self.assertIn(s_alpha[:8], all_out)
+
+        dir_out, err = await relay.call("session_list", directory=str(other_dir))
+        self.assertFalse(err, dir_out)
+        self.assertIn(s_alpha[:8], dir_out)
+        self.assertIn(s_nested[:8], dir_out)
+        self.assertNotIn(me[:8], dir_out)
+
+        query_out, err = await relay.call("session_list", query="建模主会话")
+        self.assertFalse(err, query_out)
+        self.assertIn(s_alpha[:8], query_out)
+        self.assertNotIn(s_nested[:8], query_out)
+
+        lim_out, err = await relay.call("session_list", all=True, limit=1)
+        self.assertFalse(err, lim_out)
+        self.assertIn("仅显示最近 1 个", lim_out)
+
     async def test_subagent_autonomous_followup_and_background_task_callbacks(self):
         from riesz_runner.drivers.base import assistant_item, tool_block, tool_result
 

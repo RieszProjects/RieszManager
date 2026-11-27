@@ -262,18 +262,54 @@ def _title(s: dict[str, Any]) -> str:
     return re.sub(r"\s+", " ", s.get("title") or s.get("customTitle") or s.get("firstPrompt") or "")[:60]
 
 
+def _matches_dir(cwd: str, raw_filter: str) -> bool:
+    if not cwd:
+        return False
+    needle = raw_filter.strip()
+    if not needle:
+        return True
+    expanded = os.path.expanduser(needle)
+    if os.path.isabs(expanded):
+        target = os.path.realpath(expanded)
+        cand = os.path.realpath(cwd) if os.path.exists(cwd) else cwd
+        if cand == target or cand.startswith(target.rstrip(os.sep) + os.sep):
+            return True
+    return needle.lower() in cwd.lower()
+
+
 async def session_list(call: Call, a: dict[str, Any]) -> str:
-    sessions = await call.sessions()
-    if a.get("all"):
-        sessions = sessions[:50]
-    else:
+    sessions = [s for s in await call.sessions() if not s.get("subagentOf")]
+    directory = str(a.get("directory") or "").strip()
+    query = str(a.get("query") or "").strip()
+    has_filter = bool(directory or query)
+    if directory:
+        sessions = [s for s in sessions if _matches_dir(str(s.get("cwd") or ""), directory)]
+    if query:
+        q = query.lower()
+        sessions = [
+            s for s in sessions
+            if q in _title(s).lower()
+            or q in str(s.get("cwd") or "").lower()
+            or q in str(s.get("sessionId") or "").lower()
+            or q in str(s.get("harness") or "claude").lower()
+        ]
+    if not a.get("all") and not has_filter:
         sessions = [s for s in sessions if s.get("live") or s.get("keepAlive") or s.get("sessionId") == call.session_id]
+    raw_limit = a.get("limit")
+    limit = max(1, min(int(raw_limit), 200)) if isinstance(raw_limit, (int, float)) and not isinstance(raw_limit, bool) else 50
+    total = len(sessions)
+    if a.get("all") or has_filter:
+        sessions = sessions[:limit]
     lines = []
     for s in sessions:
         flags = [f for f in ("常驻" if s.get("keepAlive") else "", "你自己" if s.get("sessionId") == call.session_id else "") if f]
         lines.append(f"{s['sessionId'][:8]}  {s.get('harness') or 'claude'}  {_state_word(s)}"
                      + (f"（{'，'.join(flags)}）" if flags else "") + f"  {s.get('cwd') or ''}  {_title(s)}")
-    return "\n".join(lines) if lines else "没有会话"
+    if not lines:
+        return "没有匹配的会话" if has_filter else "没有会话"
+    if total > len(sessions):
+        lines.append(f"（共 {total} 个会话，仅显示最近 {len(sessions)} 个；可用 directory / query 过滤或调大 limit）")
+    return "\n".join(lines)
 
 
 async def _last_reply(call: Call, sid: str) -> str:
@@ -313,6 +349,24 @@ async def session_send(call: Call, a: dict[str, Any]) -> str:
     return f"已发给 {sid[:8]}。它回复后可以用 session_reply 查看"
 
 
+CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+ALL_EFFORTS = ("off", "none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+
+def _parse_effort(harness: str, value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    effort = str(value).strip().lower()
+    if not effort:
+        return None
+    if harness == "claude":
+        if effort not in CLAUDE_EFFORTS:
+            raise ToolError(f"claude 的 effort 只能是 {' / '.join(CLAUDE_EFFORTS)} 之一，收到的是 {value!r}")
+    elif not re.fullmatch(r"[a-z]{1,16}", effort):
+        raise ToolError(f"无效的 effort：{value!r}")
+    return effort
+
+
 async def session_new(call: Call, a: dict[str, Any]) -> str:
     text = str(a.get("message") or "").strip()
     if not text:
@@ -320,10 +374,14 @@ async def session_new(call: Call, a: dict[str, Any]) -> str:
     cwd = os.path.realpath(os.path.expanduser(str(a.get("directory") or call.cwd() or "")))
     if not os.path.isdir(cwd):
         raise ToolError(f"目录不存在：{cwd}")
+    harness = str(a.get("harness") or "claude")
+    effort = _parse_effort(harness, a.get("effort"))
     body: dict[str, Any] = {"cwd": cwd, "text": text, "startedBy": call.session_id}
     for key, field in (("harness", "harness"), ("model", "model")):
         if a.get(key):
             body[field] = str(a[key])
+    if effort:
+        body["effort"] = effort
     if a.get("keep_running"):
         body["keepAlive"] = True
     res = await call.api("POST", "/v1/sessions", body)
@@ -802,7 +860,7 @@ async def _start_child(call: Call, harness: str, text: str, label: str, *, mode:
             proc = await hub.create_session(cwd, model=model, permission_mode=mode, effort=effort, browser=browser)
             child = proc.session_id
         else:
-            child = str((await hub.harnesses.create(harness, cwd, model=model, mode=mode)).session_id)
+            child = str((await hub.harnesses.create(harness, cwd, model=model, effort=effort, mode=mode)).session_id)
     except Exception as exc:  # noqa: BLE001 - why the harness could not start, for the agent
         raise ToolError(f"{harness} 没能启动：{exc}") from None
     hub.prefs.remember(child, startedBy=call.session_id, subagentOf=call.session_id, subagentTask=label[:200],
@@ -831,6 +889,7 @@ async def subagent_start(call: Call, a: dict[str, Any]) -> str:
         raise ToolError("task 不能为空")
     if harness != "claude" and harness not in HARNESSES:
         raise ToolError(f"harness 是 {'、'.join(HARNESS_IDS)} 之一")
+    effort = _parse_effort(harness, a.get("effort"))
     # As permissive as the caller: its mode's tier, in the target harness's own mode for that tier.
     caller = call.session_id
     if hub.harnesses.has(caller):
@@ -841,7 +900,7 @@ async def subagent_start(call: Call, a: dict[str, Any]) -> str:
     wait = a.get("wait", True) is not False
     text = SUBAGENT_PREFACE.format(name=_harness_name(hub, caller), caller=caller[:8], task=task)
     child = await _start_child(call, harness, text, task, mode=mode, model=a.get("model") or None,
-                               directory=a.get("directory"), sync_wait=wait)
+                               effort=effort, directory=a.get("directory"), sync_wait=wait)
     reply = await _reply_when_done(call, child, wait, "子代理")
     return f"子代理 {child[:8]}（{_harness_name(hub, child)}）：\n\n{reply}\n\n（接着跟它说话用 subagent_send，agent_id={child[:8]}）"
 
@@ -972,6 +1031,12 @@ async def node_pull(call: Call, a: dict[str, Any]) -> str:
 
 
 _SESSION_ID = {"type": "string", "description": "会话 ID（可以只写前 8 位）"}
+_EFFORT = {
+    "type": "string",
+    "enum": list(ALL_EFFORTS),
+    "description": "思考强度（可选）：claude 支持 low/medium/high/xhigh/max；codex 支持 minimal/low/medium/high/xhigh；"
+                   "dsh 支持 off/low/high/max；antigravity/gemini 思考档位含在 model 名里",
+}
 
 TOOLS: list[Tool] = [
     Tool("subagent_start",
@@ -982,6 +1047,7 @@ TOOLS: list[Tool] = [
          {"task": {"type": "string", "description": "交给它的事，写清楚背景、要求和要交回什么"},
           "harness": {"type": "string", "enum": list(HARNESS_IDS), "description": "用哪个工具（默认 claude）"},
           "model": {"type": "string", "description": "模型（不写就用该工具的默认）"},
+          "effort": _EFFORT,
           "directory": {"type": "string", "description": "工作目录（默认是你的）"},
           "wait": {"type": "boolean", "description": "是否等它做完（默认 true）"}},
          subagent_start, required=("task",)),
@@ -1052,8 +1118,14 @@ TOOLS: list[Tool] = [
          {"id": {"type": "string", "description": "schedule_list 列出的定时 ID"},
           "action": {"type": "string", "enum": list(SCHEDULE_ACTIONS)}},
          schedule_change, required=("id", "action")),
-    Tool("session_list", "列出正在运行或设为常驻的会话（all 为真时列出最近的所有会话），包括用的是哪个工具。",
-         {"all": {"type": "boolean"}}, session_list, read_only=True),
+    Tool("session_list",
+         "列出正在运行或设为常驻的会话（all 为真时列出最近的所有会话），包括用的是哪个工具。"
+         "传 directory 或 query 时自动在全部历史会话中过滤（不含子代理）。",
+         {"all": {"type": "boolean", "description": "为真时列出最近的所有会话（默认仅列运行中/常驻）"},
+          "directory": {"type": "string", "description": "按工作目录过滤（支持绝对路径或目录子串，匹配该目录及子目录）"},
+          "query": {"type": "string", "description": "按标题、目录、工具名或会话 ID 关键词过滤（不区分大小写）"},
+          "limit": {"type": "integer", "description": "最多返回条数（默认 50，上限 200）"}},
+         session_list, read_only=True),
     Tool("session_send", "给另一个会话发一条消息（它没在运行会先启动）。不等回复；之后用 session_reply 查看。",
          {"session_id": _SESSION_ID, "message": {"type": "string"}}, session_send, required=("session_id", "message")),
     Tool("session_reply", "查看另一个会话的状态和它最后一条回复。",
@@ -1065,6 +1137,7 @@ TOOLS: list[Tool] = [
           "harness": {"type": "string", "enum": ["claude", "codex", "dsh", "gemini", "antigravity"],
                       "description": "用哪个工具（默认 claude，即 Claude Code）"},
           "model": {"type": "string"},
+          "effort": _EFFORT,
           "keep_running": {"type": "boolean", "description": "设为常驻（空闲时不关闭）"}},
          session_new, required=("message",)),
 ]
