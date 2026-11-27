@@ -37,7 +37,22 @@ function useLiveData(enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
     const app = useApp.getState();
-    void app.loadConfig().catch(() => undefined);
+    let cancelled = false;
+    let configRetryTimer: number | undefined;
+    const ensureConfig = async (delay = 2000) => {
+      if (cancelled) return;
+      try {
+        await useApp.getState().loadConfig();
+        if (!cancelled && useApp.getState().config?.runner === false) {
+          configRetryTimer = window.setTimeout(() => void ensureConfig(Math.min(delay * 2, 15000)), delay);
+        }
+      } catch {
+        if (!cancelled) {
+          configRetryTimer = window.setTimeout(() => void ensureConfig(Math.min(delay * 2, 15000)), delay);
+        }
+      }
+    };
+    void ensureConfig();
     void app.loadProjects().catch(() => undefined);
     void app.loadSessions().catch(() => undefined);
     preloadHarnesses();
@@ -52,6 +67,8 @@ function useLiveData(enabled: boolean) {
       if (state === "closed") wasClosed = true;
       if (state === "open" && wasClosed) {
         // Catch up on anything missed while disconnected.
+        window.clearTimeout(configRetryTimer);
+        void ensureConfig();
         void useApp.getState().loadSessions().catch(() => undefined);
         void useApp.getState().loadProjects().catch(() => undefined);
         void useSchedules.getState().load().catch(() => undefined);
@@ -68,6 +85,8 @@ function useLiveData(enabled: boolean) {
     startNodes();
     const timer = window.setInterval(() => void useApp.getState().loadProjects().catch(() => undefined), 60000);
     return () => {
+      cancelled = true;
+      window.clearTimeout(configRetryTimer);
       offEvent();
       offState();
       stopPresence();

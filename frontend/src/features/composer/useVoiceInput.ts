@@ -64,10 +64,15 @@ interface LiveSession {
  * `onText(text, interim)`: interim text replaces the previous interim text of the same recording; the final
  * text (possibly empty) replaces it for good. `cancel()` ends a recording and drops whatever it would still deliver.
  */
-export function useVoiceInput(serverAvailable: boolean, liveAvailable: boolean, onText: (text: string, interim: boolean) => void) {
-  const canRecord = serverAvailable && typeof MediaRecorder !== "undefined";
+export function useVoiceInput(
+  serverAvailable: boolean | null,
+  liveAvailable: boolean,
+  onText: (text: string, interim: boolean) => void,
+) {
+  const canRecord = serverAvailable === true && typeof MediaRecorder !== "undefined";
   const canStream = canRecord && liveAvailable && typeof AudioWorkletNode !== "undefined" && audioContextCtor() !== null;
-  const mode: Mode = canStream ? "live" : canRecord ? "server" : speechCtor() ? "browser" : "none";
+  // Do not silently fall back to browser SpeechRecognition while `/api/config` is still loading (`serverAvailable === null`).
+  const mode: Mode = canStream ? "live" : canRecord ? "server" : serverAvailable === false && speechCtor() ? "browser" : "none";
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [elapsed, setElapsed] = useState(0);

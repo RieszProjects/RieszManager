@@ -453,7 +453,7 @@ export function Composer({
     }
   };
 
-  const voice = useVoiceInput(Boolean(config?.transcription), Boolean(config?.transcriptionLive), (spoken, isInterim) => {
+  const voice = useVoiceInput(config ? Boolean(config.transcription) : null, Boolean(config?.transcriptionLive), (spoken, isInterim) => {
     // The words go into the text itself, at the caret; later versions of them replace that same stretch.
     const cur = textRef.current;
     let span = voiceSpan.current;
