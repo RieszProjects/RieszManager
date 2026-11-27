@@ -72,17 +72,18 @@ function nextFirstIndex(tracker: IndexTracker, sessionKey: string, items: Item[]
   if (tracker.sessionKey !== sessionKey || !tracker.keys.length || !items.length) {
     idx = START_INDEX;
   } else if (items[0].key !== tracker.keys[0]) {
-    const prepended = items.findIndex((it) => it.key === tracker.keys[0]);
-    if (prepended > 0) {
-      idx = Math.max(0, tracker.firstIndex - prepended);
-    } else {
-      const trimmed = tracker.keys.indexOf(items[0].key);
-      if (trimmed > 0) {
-        idx = tracker.firstIndex + trimmed;
+    // Align on the first item both lists share: it keeps its index, whatever was added in front of it
+    // or dropped from the head (both at once included).
+    const oldAt = new Map(tracker.keys.map((k, i) => [k, i]));
+    for (let j = 0; j < items.length; j++) {
+      const i = oldAt.get(items[j].key);
+      if (i !== undefined) {
+        idx = Math.max(0, tracker.firstIndex + i - j);
+        break;
       }
-      // Disjoint replacement (e.g. session/load regenerated keys): keep firstIndex unchanged
-      // so Virtuoso does not emit a negative shiftWithOffset yank.
     }
+    // No shared item (e.g. session/load regenerated keys): keep firstIndex unchanged
+    // so Virtuoso does not emit a negative shiftWithOffset yank.
   }
   tracker.sessionKey = sessionKey;
   tracker.itemsRef = items;
@@ -228,6 +229,11 @@ export function MessageList({ sessionKey, items, hasMore, loadingOlder, resetSeq
         atBottomThreshold={80}
         startReached={() => {
           if (settledRef.current && ready.current && hasMore) onLoadOlder();
+        }}
+        // startReached fires once per first item: after a load that failed (or one it skipped while
+        // settling), getting back to the top is what asks again.
+        atTopStateChange={(atTop) => {
+          if (atTop && settledRef.current && ready.current && hasMore) onLoadOlder();
         }}
         increaseViewportBy={{ top: 800, bottom: 400 }}
         context={context}

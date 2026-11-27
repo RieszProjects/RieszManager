@@ -6,7 +6,11 @@
  *   contiguous generation burst (gaps > BURST_GAP_MS start a fresh burst so tool execution
  *   and TTFT pauses do not drag down TPS).
  * - Harnesses that report exact `usage.output_tokens` (Claude Code, dsh): refines or
- *   computes the finalized step TPS from the exact output token count.
+ *   computes the finalized step TPS from the exact output token count. For Claude Code the
+ *   span starts at the message's first content block: thinking may stream no text at all
+ *   (its tokens are in output_tokens, so its time must be in the span too).
+ * - A message or step already under way when the page joined (snapshot) cannot be timed:
+ *   it keeps the estimate and is not given an exact figure.
  */
 
 export interface TpsSample {
@@ -20,13 +24,17 @@ export interface TpsState {
   lastChunkAt: number | null;
   burstTokens: number;
   stepStartedAt: number | null;
+  /** When the current message's first content block (thinking included) began streaming. */
+  firstBlockAt: number | null;
+  /** The current message or step was already under way when the page joined: no exact figure for it. */
+  joinedMidway: boolean;
   tps: number | null;
   live: boolean;
   exact: boolean;
 }
 
 const WINDOW_MS = 3500;
-const BURST_GAP_MS = 3000;
+export const BURST_GAP_MS = 3000;
 const MIN_WINDOW_MS = 250;
 const MIN_EXACT_BURST_MS = 300;
 const MIN_STEP_MS = 200;
@@ -39,6 +47,8 @@ export function emptyTps(): TpsState {
     lastChunkAt: null,
     burstTokens: 0,
     stepStartedAt: null,
+    firstBlockAt: null,
+    joinedMidway: false,
     tps: null,
     live: false,
     exact: false,
@@ -76,8 +86,25 @@ export function onTurnStart(prev: TpsState, now: number): TpsState {
     lastChunkAt: null,
     burstTokens: 0,
     stepStartedAt: now,
+    firstBlockAt: null,
+    joinedMidway: false,
     live: false,
   };
+}
+
+/** A content block of the streaming message began (thinking blocks too, even when they carry no text). */
+export function onBlockStart(prev: TpsState, now: number): TpsState {
+  return prev.firstBlockAt === null ? { ...prev, firstBlockAt: now } : prev;
+}
+
+/** The page joined while a message or step was in progress (a snapshot of a busy session). */
+export function onJoinMidway(prev: TpsState, now: number): TpsState {
+  return { ...prev, stepStartedAt: prev.stepStartedAt ?? now, joinedMidway: true };
+}
+
+/** Whether the throughput shown is of output arriving right now (not of a burst that paused or ended). */
+export function isLive(state: TpsState, now: number): boolean {
+  return state.live && state.lastChunkAt !== null && now - state.lastChunkAt <= BURST_GAP_MS;
 }
 
 export function onStepReset(prev: TpsState, now: number): TpsState {
@@ -98,6 +125,8 @@ export function onTurnEnd(prev: TpsState): TpsState {
     lastChunkAt: null,
     burstTokens: 0,
     stepStartedAt: null,
+    firstBlockAt: null,
+    joinedMidway: false,
     live: false,
   };
 }
@@ -152,10 +181,15 @@ export function recordChunk(prev: TpsState, text: string, now: number): TpsState
 
 export function recordUsage(prev: TpsState, outputTokens: number, now: number): TpsState {
   if (!Number.isFinite(outputTokens) || outputTokens <= 0) return prev;
+  if (prev.joinedMidway) {
+    // Part of this output came before the page was watching: no span to divide it by. The next one is timed.
+    return { ...prev, joinedMidway: false, stepStartedAt: now };
+  }
 
-  // Streaming harness: refine with exact output_tokens over the observed burst span.
+  // Streaming harness: refine with exact output_tokens over the span the message streamed in.
   if (prev.burstStart !== null && prev.lastChunkAt !== null) {
-    const burstMs = Math.max(prev.lastChunkAt, now) - prev.burstStart;
+    const start = prev.firstBlockAt !== null ? Math.min(prev.firstBlockAt, prev.burstStart) : prev.burstStart;
+    const burstMs = Math.max(prev.lastChunkAt, now) - start;
     if (burstMs >= MIN_EXACT_BURST_MS) {
       const rate = outputTokens / (burstMs / 1000);
       if (Number.isFinite(rate) && rate > 0) {

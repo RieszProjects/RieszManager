@@ -52,13 +52,17 @@ function wsUrl(targetId: string): string {
 export function resolveAddressInput(raw: string): string {
   const s = raw.trim();
   if (!s) return "";
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(s) || /^(about|chrome|data|javascript|view-source):/i.test(s)) {
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(s) || /^(about|chrome|data|javascript|view-source|mailto|tel):/i.test(s)) {
     return s;
   }
   if (/\s/.test(s)) {
     return `https://www.google.com/search?q=${encodeURIComponent(s)}`;
   }
-  if (/^(localhost|(\d{1,3}\.){3}\d{1,3}|\[[0-9a-fA-F:]+\])(:\d+)?([/?#].*)?$/i.test(s)) {
+  // Plain http: loopback, IP addresses, LAN names (nas.local, router.lan) and bare host:port (my-server:8080).
+  if (
+    /^(localhost|(\d{1,3}\.){3}\d{1,3}|\[[0-9a-fA-F:]+\]|([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+\.(local|lan|internal|home\.arpa))(:\d+)?([/?#].*)?$/i.test(s) ||
+    /^[a-zA-Z0-9-]+:\d+([/?#].*)?$/.test(s)
+  ) {
     return `http://${s}`;
   }
   if (/^([a-zA-Z0-9-]+\.)+([a-zA-Z]{2,}|xn--[a-zA-Z0-9-]+)(:\d+)?([/?#].*)?$/.test(s)) {

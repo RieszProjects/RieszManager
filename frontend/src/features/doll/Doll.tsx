@@ -15,7 +15,17 @@
  */
 import { ListItemIcon, ListItemText, Menu, MenuItem } from "@mui/material";
 import { Check, EyeOff, MessageSquareText, Pencil, RefreshCw, Volume2, VolumeX } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+  type RefObject,
+} from "react";
 import { DRAGGING_CLASS } from "@/features/organize/SortableList";
 import { composerBus } from "@/lib/composerBus";
 import { storage } from "@/lib/storage";
@@ -420,6 +430,8 @@ export default function Doll() {
   }, [waiting, route, sessions, navigate, showBubble]);
 
   // A subscription's usage crosses 80% / 95%: say so once per window and reset period.
+  const bubbleKind = useRef<BubbleKind | null>(null);
+  bubbleKind.current = bubble?.kind ?? null;
   useEffect(() => {
     const warned = storage.get<Record<string, number>>("doll.warned", {});
     for (const q of list) {
@@ -432,6 +444,8 @@ export default function Doll() {
         // Forget keys older than two weeks.
         for (const [k, t] of Object.entries(warned)) if (Date.now() - t > 14 * 86400000) delete warned[k];
         storage.set("doll.warned", warned);
+        // The panel the user opened shows these numbers already: do not replace it with the warning.
+        if (bubbleKind.current === "status") continue;
         setOut(true);
         showBubble({ kind: "warn", text: say.warnLine(w, `${q.label} ${windowName(w)}`), quota: q.id });
         return;
@@ -558,6 +572,8 @@ export default function Doll() {
   };
 
   // ---- geometry --------------------------------------------------------------
+  const bubbleEl = useRef<HTMLDivElement>(null);
+  const bubbleFit = useFitInViewport(bubbleEl, root, bubble?.kind === "status" ? bubble.id : null, isMobile);
   const topLimit = 64;
   const bottomLimit = () => {
     const floor = composer && composer.top > window.innerHeight / 3 ? composer.top : window.innerHeight;
@@ -615,7 +631,9 @@ export default function Doll() {
       {bubble && (
         <div
           key={bubble.id}
+          ref={bubbleEl}
           className={`rz-doll-bubble ${bubble.kind}`}
+          style={bubbleFit as CSSProperties | undefined}
           role="status"
           onPointerEnter={() => { hovering.current = true; }}
           onPointerLeave={() => { hovering.current = false; }}
@@ -727,3 +745,59 @@ export default function Doll() {
     </div>
   );
 }
+
+const VIEWPORT_MARGIN = 12;
+const BUBBLE_CHROME = 24;     // the bubble's padding and border around the panel
+
+/**
+ * Keeps the status panel on screen wherever she stands: its height is limited to the room there is
+ * (above the bubble on desktop, the whole viewport on phones), and on phones the bubble, centred on
+ * her, is moved up or down as far as needed. Re-measured when its content or the window changes size.
+ */
+function useFitInViewport(
+  bubble: RefObject<HTMLDivElement | null>,
+  doll: RefObject<HTMLDivElement | null>,
+  openId: number | null,
+  mobile: boolean,
+): Record<string, string> | undefined {
+  const [fit, setFit] = useState<{ dy: number; max: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = bubble.current;
+    const anchor = doll.current;
+    if (openId === null || !el || !anchor) {
+      setFit(null);
+      return;
+    }
+    const measure = () => {
+      const vh = window.visualViewport?.height ?? window.innerHeight;
+      const box = el.getBoundingClientRect();
+      let max: number;
+      let dy = 0;
+      if (mobile) {
+        max = vh - 2 * VIEWPORT_MARGIN - BUBBLE_CHROME;
+        // Layout sizes: the opening animation scales the bubble, which getBoundingClientRect would include.
+        const centre = anchor.getBoundingClientRect().top + anchor.offsetHeight / 2;
+        const height = Math.min(el.offsetHeight, vh - 2 * VIEWPORT_MARGIN);
+        const natural = centre - height / 2;
+        dy = Math.min(Math.max(natural, VIEWPORT_MARGIN), vh - VIEWPORT_MARGIN - height) - natural;
+      } else {
+        max = box.bottom - VIEWPORT_MARGIN - BUBBLE_CHROME;
+      }
+      max = Math.max(120, Math.min(680, Math.floor(max)));
+      dy = Math.round(dy);
+      setFit((cur) => (cur && cur.dy === dy && cur.max === max ? cur : { dy, max }));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    window.addEventListener("resize", measure);
+    window.visualViewport?.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+      window.visualViewport?.removeEventListener("resize", measure);
+    };
+  }, [bubble, doll, openId, mobile]);
+  return fit ? { "--bubble-dy": `${fit.dy}px`, "--panel-max": `${fit.max}px` } : undefined;
+}
+

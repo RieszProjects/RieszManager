@@ -780,12 +780,12 @@ body.rz-dragging, body.rz-dragging * { cursor: grabbing !important; user-select:
   font-size: 12px; text-align: left; padding: 5px 4px 5px 9px; cursor: pointer;
 }
 .rz-browser-tab-btn > .clamp-1 { display: block; flex: 1; min-width: 0; }
-.rz-browser-tab.on .rz-browser-tab-btn { color: var(--text1); }
+.rz-browser-tab.on .rz-browser-tab-btn { color: var(--text); }
 .rz-browser-tab-close {
   flex-shrink: 0; border: 0; background: none; color: var(--text3); padding: 4px 6px; cursor: pointer;
   display: inline-flex; align-items: center; border-radius: 5px;
 }
-.rz-browser-tab-close:hover { color: var(--text1); background: rgba(255, 255, 255, 0.06); }
+.rz-browser-tab-close:hover { color: var(--text); background: rgba(255, 255, 255, 0.06); }
 .rz-browser-head-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
 .rz-browser-bar {
   display: flex; align-items: center; gap: 6px; padding: 6px 10px; flex-wrap: wrap;
@@ -794,7 +794,7 @@ body.rz-dragging, body.rz-dragging * { cursor: grabbing !important; user-select:
 .rz-browser-url { flex: 1 1 260px; display: flex; }
 .rz-browser-url input, .rz-browser-ime input {
   width: 100%; border: 1px solid var(--line); border-radius: 7px;
-  background: var(--bg2); color: var(--text1); font-size: 12.5px; padding: 5px 10px; outline: none;
+  background: var(--bg2); color: var(--text); font-size: 12.5px; padding: 5px 10px; outline: none;
 }
 .rz-browser-url input:focus, .rz-browser-ime input:focus { border-color: var(--sage); }
 .rz-browser-ime { display: flex; align-items: center; gap: 4px; flex: 0 1 220px; }

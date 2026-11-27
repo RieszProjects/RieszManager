@@ -5,6 +5,9 @@ export function Toaster() {
   const toasts = useUi((s) => s.toasts);
   const dismiss = useUi((s) => s.dismissToast);
   const current = toasts[0];
+  // Mounted only while there is a toast: a portal that already exists when a dialog opens is marked
+  // aria-hidden by it, which hides the alert from screen readers and the keyboard.
+  if (!current) return null;
   return (
     <Portal>
       <Snackbar

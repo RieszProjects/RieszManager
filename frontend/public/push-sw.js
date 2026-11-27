@@ -3,7 +3,8 @@
  *
  * The server sends {title, body, url, tag, kind}. Nothing is shown when a
  * window of the app is in front and already showing that page. At most
- * MAX_NOTIFICATIONS remain active at once; older ones are closed first (FIFO).
+ * MAX_NOTIFICATIONS remain active at once; older ones are closed first (FIFO),
+ * those waiting for an answer (permission, question) last.
  * Tapping a notification focuses an open window (which then navigates, see
  * src/lib/push.ts) or opens a new one.
  */
@@ -33,9 +34,11 @@ async function pruneNotifications(incomingTag) {
   const others = incomingTag ? active.filter((n) => n.tag !== incomingTag) : active.slice();
   const excess = others.length - (MAX_NOTIFICATIONS - 1);
   if (excess <= 0) return;
+  // Oldest first, but ones waiting for the user (a permission, a question) only once no other is left:
+  // the agent is stuck until they are answered.
   const ordered = others
-    .map((n, idx) => ({ n, ts: notificationTime(n), idx }))
-    .sort((a, b) => a.ts - b.ts || a.idx - b.idx);
+    .map((n, idx) => ({ n, ts: notificationTime(n), idx, urgent: Boolean(n.data && n.data.urgent) }))
+    .sort((a, b) => Number(a.urgent) - Number(b.urgent) || a.ts - b.ts || a.idx - b.idx);
   for (let i = 0; i < excess; i++) {
     ordered[i].n.close();
   }
@@ -67,7 +70,7 @@ async function handlePush(data) {
     timestamp: ts,
     icon: "/icons/icon-192.png",
     badge: "/icons/badge-96.png",
-    data: { url, ts },
+    data: { url, ts, urgent },
   });
 }
 

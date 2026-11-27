@@ -142,10 +142,15 @@
   top: 50%;
   right: calc(var(--doll-w) + 6px);
   max-width: min(248px, calc(100vw - var(--doll-w) - 22px));
-  translate: 0 -50%;
+  /* --bubble-dy: moved to stay on screen (Doll.tsx useFitInViewport); the arrow keeps pointing at her. */
+  translate: 0 calc(-50% + var(--bubble-dy, 0px));
   transform-origin: 100% 50%;
 }
-.rz-doll.mobile .rz-doll-bubble::after { right: -6px; top: calc(50% - 5px); transform: rotate(-45deg); }
+.rz-doll.mobile .rz-doll-bubble::after {
+  right: -6px;
+  top: clamp(10px, calc(50% - 5px - var(--bubble-dy, 0px)), calc(100% - 20px));
+  transform: rotate(-45deg);
+}
 .rz-doll.mobile.side-left .rz-doll-bubble { right: auto; left: calc(var(--doll-w) + 6px); transform-origin: 0 50%; }
 .rz-doll.mobile.side-left .rz-doll-bubble::after { right: auto; left: -6px; transform: rotate(135deg); }
 
@@ -214,7 +219,7 @@
 /* The panel opened by tapping her: quick phrases, Claude plan usage, other balances. */
 .rz-doll.desktop .rz-doll-bubble.status { width: 300px; max-width: calc(100vw - 32px); }
 .rz-doll.mobile .rz-doll-bubble.status { width: min(300px, calc(100vw - var(--doll-w) - 22px)); max-width: none; }
-.rz-doll-panel { max-height: min(680px, calc(100dvh - 120px)); overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+.rz-doll-panel { max-height: var(--panel-max, min(680px, calc(100dvh - 120px))); overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
 .rz-doll-sec { min-width: 0; }
 .rz-doll-sec + .rz-doll-sec { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
 .rz-doll-sec-head {

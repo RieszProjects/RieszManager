@@ -14,7 +14,7 @@ import { StatusDot } from "@/components/StatusDot";
 import { copyText } from "@/lib/clipboard";
 import { clockTime } from "@/lib/format";
 import { handOff } from "@/lib/handoff";
-import { formatTps } from "@/lib/tps";
+import { BURST_GAP_MS, formatTps, isLive, type TpsState } from "@/lib/tps";
 import { harnessLabel, resumeCommand, useHarnessLabel, useHarnesses, useRouteTag } from "@/lib/harnesses";
 import { sessionTitle, useApp } from "@/store/app";
 import { useOrganize } from "@/store/organize";
@@ -239,6 +239,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
   const waiting = Boolean(state?.permissions?.length);
   const tps = data?.tps;
   const tpsText = formatTps(tps?.tps ?? null);
+  const tpsLive = useTpsLive(tps);
 
   useEffect(() => {
     document.title = `${sessionTitle(summary)} · Riesz Manager`;
@@ -410,8 +411,8 @@ export function ChatView({ sessionId }: { sessionId: string }) {
             rightNote={
               tpsText ? (
                 <span
-                  className={`rz-tps${tps?.live ? " live" : ""}`}
-                  title={tps?.live ? "当前输出速度（估算）" : tps?.exact ? "最近输出速度" : "最近输出速度（估算）"}
+                  className={`rz-tps${tpsLive ? " live" : ""}`}
+                  title={tpsLive ? "当前输出速度（估算）" : tps?.exact ? "最近输出速度" : "最近输出速度（估算）"}
                 >
                   {tpsText}
                 </span>
@@ -423,4 +424,17 @@ export function ChatView({ sessionId }: { sessionId: string }) {
       overlay={dragging && <div className="rz-dropzone">松开以添加附件</div>}
     />
   );
+}
+
+/** Whether output is arriving now; turns false by itself once a burst pauses (a tool running, a prompt waiting). */
+function useTpsLive(tps: TpsState | undefined): boolean {
+  const [, rerender] = useState(0);
+  const live = tps ? isLive(tps, Date.now()) : false;
+  const last = tps?.lastChunkAt ?? null;
+  useEffect(() => {
+    if (!live || last === null) return;
+    const id = window.setTimeout(() => rerender((n) => n + 1), Math.max(0, last + BURST_GAP_MS - Date.now()) + 50);
+    return () => window.clearTimeout(id);
+  }, [live, last]);
+  return live;
 }

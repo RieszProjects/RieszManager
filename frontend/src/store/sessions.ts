@@ -2,7 +2,17 @@
 import { create } from "zustand";
 import { api } from "@/api/client";
 import type { AssistantItem, Item, PartialBlock, ServerEvent, SessionState } from "@/api/types";
-import { emptyTps, onStepReset, onTurnEnd, onTurnStart, recordChunk, recordUsage, type TpsState } from "@/lib/tps";
+import {
+  emptyTps,
+  onBlockStart,
+  onJoinMidway,
+  onStepReset,
+  onTurnEnd,
+  onTurnStart,
+  recordChunk,
+  recordUsage,
+  type TpsState,
+} from "@/lib/tps";
 
 export interface OverlayBlock extends PartialBlock {
   index: number;
@@ -159,7 +169,8 @@ function updateTpsFromItems(d: SessionData, incoming: Item[], now: number): TpsS
     if (toolResultCount(inc) > (prevAssistant ? toolResultCount(prevAssistant) : 0)) {
       tps = onStepReset(tps, now);
     }
-    if (active && d.state?.harness !== "claude") {
+    // Claude Code streams its output (stream events); counting the transcript too would count it twice.
+    if (active && (d.state?.harness ?? "claude") !== "claude") {
       const incText = assistantText(inc);
       const prevText = prevAssistant ? assistantText(prevAssistant) : "";
       if (incText.length > prevText.length && (!inc.usage?.output_tokens || prevAssistant !== undefined)) {
@@ -240,7 +251,9 @@ export const useSessions = create<SessionsStore>((set, get) => {
               stream: overlayFromPartial(event.state),
               turnStartedAt: event.state.busy ? d.turnStartedAt ?? Date.now() : null,
               notices: event.state.busy ? d.notices : [],
-              tps: event.state.busy && d.tps.stepStartedAt === null ? onStepReset(d.tps, Date.now()) : d.tps,
+              // Busy: what is being produced began before this snapshot. Idle: whatever was live has ended
+              // (the result may have come while the page was not subscribed).
+              tps: event.state.busy ? onJoinMidway(d.tps, Date.now()) : onTurnEnd(d.tps),
             };
           });
           break;
@@ -278,6 +291,7 @@ export const useSessions = create<SessionsStore>((set, get) => {
             const idx = stream.blocks.findIndex((b) => b.index === event.index);
             let tps = d.tps;
             if (event.op === "block") {
+              tps = onBlockStart(tps, now);
               const block: OverlayBlock = {
                 index: event.index ?? 0, type: event.blockType ?? "text", text: "", name: event.name, id: event.id, done: false,
               };

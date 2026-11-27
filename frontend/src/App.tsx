@@ -39,17 +39,19 @@ function useLiveData(enabled: boolean) {
     const app = useApp.getState();
     let cancelled = false;
     let configRetryTimer: number | undefined;
-    const ensureConfig = async (delay = 2000) => {
-      if (cancelled) return;
+    // Each (re)start of the retries is a new generation; an older chain still awaiting a request stops there.
+    let configGen = 0;
+    const ensureConfig = async (delay = 2000, gen = ++configGen) => {
+      if (cancelled || gen !== configGen) return;
+      let retry: boolean;
       try {
         await useApp.getState().loadConfig();
-        if (!cancelled && useApp.getState().config?.runner === false) {
-          configRetryTimer = window.setTimeout(() => void ensureConfig(Math.min(delay * 2, 15000)), delay);
-        }
+        retry = useApp.getState().config?.runner === false;
       } catch {
-        if (!cancelled) {
-          configRetryTimer = window.setTimeout(() => void ensureConfig(Math.min(delay * 2, 15000)), delay);
-        }
+        retry = true;
+      }
+      if (retry && !cancelled && gen === configGen) {
+        configRetryTimer = window.setTimeout(() => void ensureConfig(Math.min(delay * 2, 15000), gen), delay);
       }
     };
     void ensureConfig();
