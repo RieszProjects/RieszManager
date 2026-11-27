@@ -24,9 +24,10 @@ const EVENT_DEBOUNCE_MS = 20 * 1000;
 
 /** Short Chinese name of a window, e.g. "Current week (all models)" → "本周". */
 export function windowName(w: UsageWindow): string {
-  const scope = /\(([^)]+)\)/.exec(w.label)?.[1];
+  const rawScope = /\(([^)]+)\)/.exec(w.label)?.[1];
   const base = w.kind === "session" ? "5 小时" : w.kind === "week" ? "本周" : w.kind === "day" ? "今日" : w.label;
-  if (!scope || /all models/i.test(scope)) return base;
+  if (!rawScope || /all models/i.test(rawScope)) return base;
+  const scope = /^(claude\s*(和|and)\s*gpt(\s*(模型|models))?)$/i.test(rawScope.trim()) ? "其他" : rawScope;
   return `${base} · ${scope}`;
 }
 

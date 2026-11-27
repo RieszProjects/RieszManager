@@ -45,7 +45,7 @@ class LimitsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([(w["label"], w["kind"], w["percent"]) for w in windows], [
             ("Weekly Limit Remaining (Gemini 模型)", "week", 25.0),
             ("Five Hour Limit Remaining (Gemini 模型)", "session", 0.0),
-            ("Weekly Limit Remaining (Claude 和 GPT 模型)", "week", 100.0)])
+            ("Weekly Limit Remaining (其他)", "week", 100.0)])
         self.assertEqual(windows[0]["resetsAt"], 1795808799.0)
         self.assertEqual((windows[2]["resetsAt"], windows[2]["resetText"]), (None, "soon"))
 

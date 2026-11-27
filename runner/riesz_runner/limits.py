@@ -32,7 +32,7 @@ MIN_REFRESH_SECONDS = 60
 LIVE_SECONDS = 10 * 60          # a running session's update is used if it is this recent
 KINDS = {300: "session", 1440: "day", 10080: "week"}
 AGY_KINDS = {"five hour": "session", "daily": "day", "weekly": "week"}
-AGY_GROUPS = {"gemini models": "Gemini 模型", "claude and gpt models": "Claude 和 GPT 模型"}
+AGY_GROUPS = {"gemini models": "Gemini 模型", "claude and gpt models": "其他"}
 
 
 def codex_windows(snapshot: dict[str, Any] | None) -> tuple[list[dict[str, Any]], bool]:

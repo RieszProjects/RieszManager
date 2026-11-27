@@ -119,6 +119,33 @@ function WindowRows({ windows, compact }: { windows: UsageWindow[]; compact: boo
   );
 }
 
+/** Render a service's balance(s): stacked onto separate lines for multi-unit quotas like NovelAI (Opus + Anlas). */
+function BalanceValues({ balances }: { balances: { amount: number; unit: string }[] }) {
+  if (!balances.length) return <span className="mono">—</span>;
+  const formatted = balances.map(formatBalance);
+  const stack = balances.length > 1 && balances.some((b) => b.unit !== "USD" && b.unit !== "CNY");
+  if (stack) {
+    return (
+      <span className="rz-doll-balance-stack mono">
+        {formatted.map((text, idx) => <span key={idx}>{text}</span>)}
+      </span>
+    );
+  }
+  if (formatted.length > 1) {
+    return (
+      <span className="rz-doll-balance-vals mono">
+        {formatted.map((text, idx) => (
+          <span key={idx}>
+            {idx > 0 && <span className="dim">· </span>}
+            {text}
+          </span>
+        ))}
+      </span>
+    );
+  }
+  return <span className="mono">{formatted[0]}</span>;
+}
+
 /** Every quota alike; the one the open session uses is marked and shown in full, the others briefly. */
 function QuotaRows({ list, current }: { list: Quota[]; current: string | null }) {
   if (!list.length) return <div className="rz-doll-usage dim">没有可查的额度。</div>;
@@ -127,7 +154,7 @@ function QuotaRows({ list, current }: { list: Quota[]; current: string | null })
       {list.map((q) => (
         <div key={q.id} className="rz-doll-quota">
           <div className="rz-doll-balance">
-            <span>
+            <span className="rz-doll-balance-label">
               {q.label}
               {current !== null && q.route === current && <span className="rz-doll-tag">当前</span>}
             </span>
@@ -136,7 +163,7 @@ function QuotaRows({ list, current }: { list: Quota[]; current: string | null })
             ) : q.windows === null ? (
               <span className="dim">正在看……</span>
             ) : q.balances ? (
-              <span className="mono">{q.balances.map(formatBalance).join(" · ") || "—"}</span>
+              <BalanceValues balances={q.balances} />
             ) : null}
           </div>
           {!q.error && q.windows && q.windows.length > 0 && (
