@@ -41,8 +41,9 @@ SANDBOX_CSP = (
 
 _SENSITIVE_DIRS = {".git", ".ssh", ".gnupg", ".aws", ".claude", ".codex", ".config", ".kube", ".docker"}
 _SENSITIVE_PREFIXES = ("/etc", "/proc", "/sys", "/root", "/dev", "/var/run")
-_SENSITIVE_EXTS = {".pem", ".key", ".p12", ".pfx", ".jks", ".kdbx"}
-_SENSITIVE_NAMES = {".env", ".netrc", ".npmrc", ".pypirc", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"}
+_SENSITIVE_EXTS = {".pem", ".key", ".p12", ".pfx", ".jks", ".kdbx", ".sqlite", ".sqlite3", ".db"}
+_SENSITIVE_NAMES = {".env", ".netrc", ".npmrc", ".pypirc", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa",
+                    ".git-credentials", "credentials.json", ".credentials.json", "node_download_token"}
 
 _URL_ATTRS = {"src", "href", "poster", "data", "xlink:href"}
 
@@ -351,9 +352,16 @@ async def serve(request: HttpRequest, token: str, path: str) -> HttpResponse:
     method = "HEAD" if request.method == "HEAD" else "GET"
     forward = {h: request.headers[h] for h in ("Range", "If-Range") if h in request.headers}
     try:
-        resp = await runner.request(method, endpoint, params=params, headers=forward or None, timeout=600)
+        resp = await runner.request(method, endpoint, params=params, headers=forward or None, timeout=600, stream=True)
     except runner.RunnerUnavailable:
         return _apply_headers(error_response(503, "宿主机运行器未连接"))
+
+    # A preview page runs scripts, so whatever its token reaches it can read and send anywhere: keep
+    # secrets out by the file the runner actually resolved (symlinks followed), whatever the URL said.
+    served = posixpath.normpath(unquote(resp.headers.get("X-Riesz-File-Path") or "") or "/")
+    if resp.status in (200, 206) and _is_sensitive_fs(served):
+        resp.close()
+        return _apply_headers(error_response(403, "这个文件不能在预览里打开"))
 
     if resp.status == 416:
         async with resp:

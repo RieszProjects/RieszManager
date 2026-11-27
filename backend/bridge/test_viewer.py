@@ -47,6 +47,9 @@ class _FakeResp:
     def release(self) -> None:
         pass
 
+    def close(self) -> None:
+        self.closed = True
+
     async def __aenter__(self):
         return self
 
@@ -221,6 +224,35 @@ class ViewerServeAsyncTest(unittest.IsolatedAsyncioTestCase):
         args, kwargs = m.call_args
         self.assertEqual(args, ("GET", "/v1/files/view-asset"))
         self.assertEqual(kwargs["params"], {"path": "/tmp/chart.webp"})
+
+
+class ViewerSensitiveFileTest(unittest.IsolatedAsyncioTestCase):
+    """A preview page runs scripts: secrets in the project must not be readable through its token."""
+
+    def setUp(self):
+        self.rf = RequestFactory()
+        self.tok = viewer.make_token("demo-app")
+
+    async def _serve(self, requested: str, resolved: str):
+        fake = _FakeResp(200, b"SECRET=1", headers={"Content-Type": "text/plain", "Content-Length": "8",
+                                                     "X-Riesz-File-Path": resolved})
+        with mock.patch("bridge.viewer.runner.request", new=mock.AsyncMock(return_value=fake)):
+            req = self.rf.get(f"/api/view/{self.tok}/{requested}")
+            return await viewer.serve(req, self.tok, requested), fake
+
+    async def test_env_git_and_database_are_refused(self):
+        for requested, resolved in ((".env", "/workspace/demo-app/.env"),
+                                    (".git/config", "/workspace/demo-app/.git/config"),
+                                    ("data/backend/db.sqlite3", "/workspace/demo-app/data/backend/db.sqlite3"),
+                                    ("notes.txt", "/workspace/demo-app/.env.local")):   # a symlink: what it points to counts
+            resp, fake = await self._serve(requested, resolved)
+            self.assertEqual(resp.status_code, 403, requested)
+            self.assertNotIn(b"SECRET", resp.content)
+            self.assertTrue(getattr(fake, "closed", False))
+
+    async def test_ordinary_files_are_served(self):
+        resp, _ = await self._serve("report/data.json", "/workspace/demo-app/report/data.json")
+        self.assertEqual(resp.status_code, 200)
 
 
 if __name__ == "__main__":

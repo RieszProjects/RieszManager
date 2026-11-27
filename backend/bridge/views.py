@@ -134,7 +134,8 @@ async def stream(request: HttpRequest, path: str) -> HttpResponse:
     # Pass byte ranges through: audio seeking needs them, and Safari will not play media without them.
     forward = {h: request.headers[h] for h in ("Range", "If-Range") if h in request.headers}
     try:
-        resp = await runner.request("GET", target, params=list(request.GET.items()), headers=forward or None, timeout=600)
+        resp = await runner.request("GET", target, params=list(request.GET.items()), headers=forward or None,
+                                    timeout=600, stream=True)
     except runner.RunnerUnavailable:
         return _unavailable()
     if resp.status == 416:
@@ -197,14 +198,16 @@ async def upload(request: HttpRequest) -> HttpResponse:
 @require_http_methods(["GET"])
 @api_view()
 async def app_config(request: HttpRequest) -> HttpResponse:
-    health: dict[str, Any] = {}
+    health: Any = {}
     try:
         resp = await runner.request("GET", "/v1/health", timeout=5)
         async with resp:
             if resp.status == 200:
                 health = await resp.json()
-    except runner.RunnerUnavailable:
-        pass
+    except (runner.RunnerUnavailable, aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+        pass  # the page still gets its config; `runner: false` says the runner is not answering
+    if not isinstance(health, dict):
+        health = {}
     return ok({
         "runner": bool(health.get("ok")),
         "workspaceRoot": health.get("workspaceRoot"),
@@ -276,7 +279,7 @@ def _check_download_token(request: HttpRequest) -> str | None:
     """Validate secret download token from `?token=` or `X-Riesz-Download-Token`. Returns token if valid."""
     expected, _ = _get_node_download_token()
     provided = (request.GET.get("token") or request.headers.get("X-Riesz-Download-Token") or "").strip()
-    if not provided or not hmac.compare_digest(provided, expected):
+    if not provided or not hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
         return None
     return expected
 
@@ -344,7 +347,7 @@ async def node_transfer(request: HttpRequest, token: str) -> HttpResponse:
     target = f"/v1/nodes/transfer/{token}"
     if request.method == "GET":
         try:
-            resp = await runner.request("GET", target, timeout=600)
+            resp = await runner.request("GET", target, timeout=600, stream=True)
         except runner.RunnerUnavailable:
             return _unavailable()
         if resp.status != 200:
@@ -379,7 +382,8 @@ async def node_transfer(request: HttpRequest, token: str) -> HttpResponse:
             yield chunk
 
     try:
-        resp = await runner.request("POST", target, data=upload_stream(), headers=headers or None, timeout=600)
+        resp = await runner.request("POST", target, data=upload_stream(), headers=headers or None, timeout=600,
+                                    stream=True)
     except runner.RunnerUnavailable:
         return _unavailable()
     async with resp:

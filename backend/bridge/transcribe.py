@@ -9,6 +9,7 @@ once more without them.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 
@@ -61,6 +62,16 @@ async def _request(client: aiohttp.ClientSession, audio: bytes, filename: str, c
         return resp.status, await resp.json(content_type=None)
 
 
+def _error_message(data: object) -> str | None:
+    """The `error.message` of an OpenAI-style error body (`error` may also be a bare string)."""
+    if not isinstance(data, dict):
+        return None
+    err = data.get("error")
+    if isinstance(err, dict):
+        return str(err.get("message") or "") or None
+    return str(err) if err else None
+
+
 @require_POST
 @api_view()
 async def transcribe(request: HttpRequest) -> HttpResponse:
@@ -86,13 +97,17 @@ async def transcribe(request: HttpRequest) -> HttpResponse:
         base.append(("language", languages[0]))
 
     timeout = aiohttp.ClientTimeout(total=120)
-    async with aiohttp.ClientSession(timeout=timeout) as client:
-        status, data = await _request(client, audio, filename, content_type, base + hints)
-        if status == 400 and hints:
-            log.warning("transcription with keywords was refused (%s); trying without them",
-                        (data.get("error") or {}).get("message") if isinstance(data, dict) else status)
-            status, data = await _request(client, audio, filename, content_type, base)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as client:
+            status, data = await _request(client, audio, filename, content_type, base + hints)
+            if status == 400 and hints:
+                log.warning("transcription with keywords was refused (%s); trying without them",
+                            _error_message(data) or status)
+                status, data = await _request(client, audio, filename, content_type, base)
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+        # Unreachable, too slow, or an answer that is not JSON (a proxy's HTML error page).
+        log.warning("transcription request failed: %s", exc)
+        raise ApiError(502, "转写失败：语音转写服务没有正常响应", "transcription_failed") from None
     if status != 200:
-        message = (data.get("error") or {}).get("message") if isinstance(data, dict) else None
-        raise ApiError(502, f"转写失败：{message or status}", "transcription_failed")
+        raise ApiError(502, f"转写失败：{_error_message(data) or status}", "transcription_failed")
     return ok({"text": (data.get("text") or "").strip() if isinstance(data, dict) else ""})

@@ -102,7 +102,7 @@ def provisioning_uri(secret: str, username: str) -> str:
 
 def verify_totp_secret(secret: str, code: str) -> int | None:
     """Return the matched time step if `code` is valid for `secret` (±1 step), else None."""
-    code = "".join(ch for ch in code if ch.isdigit())
+    code = "".join(ch for ch in code if ch in "0123456789")   # isdigit() also takes other scripts' digits
     if len(code) != 6:
         return None
     totp = pyotp.TOTP(secret)

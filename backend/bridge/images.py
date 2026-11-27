@@ -17,6 +17,8 @@ CONVERT_TYPES = {"image/heic", "image/heif", "image/heic-sequence", "image/heif-
                  "image/tiff", "image/bmp", "image/x-ms-bmp"}
 CONVERT_SUFFIXES = {".heic", ".heif", ".hif", ".avif", ".tif", ".tiff", ".bmp"}
 MAX_EDGE = 2000          # like the web app does for large photos
+# Larger images are uploaded as they are: a 48-megapixel phone photo is about 49 million pixels.
+MAX_PIXELS = 64_000_000
 JPEG_QUALITY = 88
 
 
@@ -35,6 +37,9 @@ def to_jpeg(data: bytes, name: str) -> tuple[bytes, str] | None:
 
         pillow_heif.register_heif_opener()
         with Image.open(io.BytesIO(data)) as img:
+            if img.width * img.height > MAX_PIXELS:   # decoding would take gigabytes (a decompression bomb)
+                log.warning("not converting %s: %dx%d is too large", name, img.width, img.height)
+                return None
             img = ImageOps.exif_transpose(img)
             img.thumbnail((MAX_EDGE, MAX_EDGE))
             if img.mode not in ("RGB", "L"):

@@ -150,9 +150,17 @@ def security_overview(request: HttpRequest) -> JsonResponse:
     })
 
 
+def _refuse_if_totp_enabled(request: HttpRequest) -> None:
+    """Binding an authenticator replaces the current one and its recovery codes: with one bound already, that
+    would let a stolen session lock the user out without knowing a code (turning it off first asks for one)."""
+    if services.totp_device(request.user.username) is not None:
+        raise ApiError(409, "两步验证已启用；要更换验证器，请先关闭两步验证", "totp_enabled")
+
+
 @require_POST
 @api_view(allow_totp_setup=True)
 def totp_setup(request: HttpRequest) -> JsonResponse:
+    _refuse_if_totp_enabled(request)
     secret = services.new_totp_secret()
     request.session["totp_setup"] = {"secret": secret, "t": time.time()}
     return ok({"secret": secret, "uri": services.provisioning_uri(secret, request.user.username)})
@@ -161,6 +169,7 @@ def totp_setup(request: HttpRequest) -> JsonResponse:
 @require_POST
 @api_view(allow_totp_setup=True)
 def totp_confirm(request: HttpRequest) -> JsonResponse:
+    _refuse_if_totp_enabled(request)
     pending = request.session.get("totp_setup")
     if not pending or time.time() - pending.get("t", 0) > 900:
         raise ApiError(400, "设置已过期，请重新开始", "setup_expired")

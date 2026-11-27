@@ -34,10 +34,15 @@ def session() -> aiohttp.ClientSession:
 
 
 async def request(method: str, path: str, *, params: Any = None, json: Any = None, data: Any = None,
-                  headers: dict[str, str] | None = None, timeout: float = 120) -> aiohttp.ClientResponse:
+                  headers: dict[str, str] | None = None, timeout: float = 120,
+                  stream: bool = False) -> aiohttp.ClientResponse:
+    """`stream`: the body is relayed as it arrives (files, media, node transfers), so `timeout` limits how
+    long the runner may go silent, not the whole transfer (a total limit would cut slow downloads short)."""
+    limit = (aiohttp.ClientTimeout(total=None, sock_connect=5, sock_read=timeout) if stream
+             else aiohttp.ClientTimeout(total=timeout))
     try:
         return await session().request(method, BASE + path, params=params, json=json, data=data, headers=headers,
-                                       timeout=aiohttp.ClientTimeout(total=timeout))
+                                       timeout=limit)
     except (aiohttp.ClientError, asyncio.TimeoutError, FileNotFoundError, ConnectionRefusedError, OSError) as exc:
         raise RunnerUnavailable(str(exc)) from exc
 
