@@ -126,7 +126,7 @@ cd RieszManager
   <li><b>丢失验证器</b>：登录时改用之前保存的恢复码；如果恢复码也找不到了，在宿主机上执行<code>./rieszctl reset-totp</code>直接关闭两步验证。</li>
   <li><b>登出所有设备</b>：在「设置」→「设备」里操作，或在宿主机上执行<code>./rieszctl revoke-sessions</code>。</li>
 </ul>
-<p>登录接口带有失败限流：同一客户端IP在<code>RIESZ_LOGIN_LOCKOUT_MINUTES</code>分钟内连续失败达到<code>RIESZ_LOGIN_MAX_FAILURES</code>次后会被暂时锁定；如果所有IP的累计失败次数达到<code>RIESZ_LOGIN_MAX_FAILURES_GLOBAL</code>，整个站点的登录都会暂缓。</p>
+<p>登录失败时每次会附带短暂延迟并写入安全日志，但不会因输错密码或验证码锁定账号；建议配合两步验证（TOTP）使用。</p>
 
 <h2 id="push">推送通知</h2>
 <p>Riesz Manager使用浏览器标准的Web Push推送消息：当你在某个浏览器里开启推送时，由该浏览器厂商的推送服务（Chrome为Google FCM、Firefox为Mozilla、Safari/iPhone为Apple）分配一个推送地址，backend容器在需要通知时把端到端加密后的消息直接发往这个地址。整个过程不需要注册任何第三方账号或API key，也不经过Riesz Manager作者的任何服务器，每个部署都使用自己生成的密钥。</p>
@@ -244,14 +244,6 @@ cd RieszManager
 <tr><td><code>RIESZ_BIND</code></td><td><code>127.0.0.1</code></td><td>gateway在宿主机上监听的网卡地址。放在隧道或反向代理后面时应保持为<code>127.0.0.1</code></td></tr>
 <tr><td><code>RIESZ_PORT</code></td><td><code>18573</code></td><td>gateway在宿主机上监听的端口</td></tr>
 <tr><td><code>RIESZ_TRUST_CF_HEADER</code></td><td><code>false</code></td><td>是否信任<code>CF-Connecting-IP</code>请求头作为客户端真实IP（仅在位于Cloudflare后面且绑定本机时开启）</td></tr>
-</table></div>
-
-<h3 id="env-throttle">登录限流</h3>
-<div class="wrap"><table style="--first-col: 16em">
-<tr><th>变量</th><th>默认值</th><th>说明</th></tr>
-<tr><td><code>RIESZ_LOGIN_MAX_FAILURES</code></td><td><code>5</code></td><td>单个IP在锁定窗口内允许的最大登录失败次数</td></tr>
-<tr><td><code>RIESZ_LOGIN_MAX_FAILURES_GLOBAL</code></td><td><code>30</code></td><td>全局在锁定窗口内允许的最大登录失败次数</td></tr>
-<tr><td><code>RIESZ_LOGIN_LOCKOUT_MINUTES</code></td><td><code>15</code></td><td>登录失败计数与锁定的时间窗口（分钟）</td></tr>
 </table></div>
 
 <h3 id="env-runner">宿主机用户与runner</h3>

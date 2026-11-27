@@ -18,6 +18,7 @@ import asyncio
 import json
 import os
 import re
+import threading
 import time
 import urllib.parse
 from collections import OrderedDict
@@ -206,6 +207,11 @@ class AgySubagentStore:
         self._statuses: dict[str, _SubagentStatus] = {}
         self._views: OrderedDict[str, _SubagentView] = OrderedDict()
         self._locks: dict[str, asyncio.Lock] = {}
+        self._io_lock = threading.Lock()
+
+    def sync(self, parent_sid: str) -> None:
+        """Warm the incremental index for `parent_sid` (safe to run via `asyncio.to_thread`)."""
+        self._sync_parent(parent_sid)
 
     def _transcript_for(self, cid: str) -> Path:
         return self.brain_dir / cid / ".system_generated" / "logs" / "transcript.jsonl"
@@ -225,29 +231,30 @@ class AgySubagentStore:
         if not UUID_RE.match(parent_sid):
             return None
         path = self._transcript_for(parent_sid)
-        try:
-            st = path.stat()
-        except OSError:
-            return self._parents.get(parent_sid)
-        idx = self._parents.get(parent_sid)
-        if idx is None or st.st_ino != idx.inode or st.st_size < idx.offset:
-            idx = _ParentIndex(inode=st.st_ino, offset=0)
-            self._parents[parent_sid] = idx
-        if st.st_size == idx.offset:
-            return idx
-        try:
-            lines, idx.offset = _read_lines_from(path, idx.offset)
-        except OSError:
-            return idx
-        for raw in lines:
+        with self._io_lock:
             try:
-                step = json.loads(raw)
-            except ValueError:
-                continue
-            if not isinstance(step, dict):
-                continue
-            self._feed_parent_step(idx, step)
-        return idx
+                st = path.stat()
+            except OSError:
+                return self._parents.get(parent_sid)
+            idx = self._parents.get(parent_sid)
+            if idx is None or st.st_ino != idx.inode or st.st_size < idx.offset:
+                idx = _ParentIndex(inode=st.st_ino, offset=0)
+                self._parents[parent_sid] = idx
+            if st.st_size == idx.offset:
+                return idx
+            try:
+                lines, idx.offset = _read_lines_from(path, idx.offset)
+            except OSError:
+                return idx
+            for raw in lines:
+                try:
+                    step = json.loads(raw)
+                except ValueError:
+                    continue
+                if not isinstance(step, dict):
+                    continue
+                self._feed_parent_step(idx, step)
+            return idx
 
     def _feed_parent_step(self, idx: _ParentIndex, step: dict[str, Any]) -> None:
         stype = step.get("type")
@@ -390,61 +397,62 @@ class AgySubagentStore:
 
     def _sync_status(self, meta: _SubagentMeta) -> _SubagentStatus:
         path = self._safe_transcript(meta)
-        status = self._statuses.get(meta.conversation_id)
-        if path is None:
-            return status or _SubagentStatus()
-        try:
-            st = path.stat()
-        except OSError:
-            return status or _SubagentStatus()
-        if status is not None and status.inode == st.st_ino and status.size == st.st_size and status.mtime == st.st_mtime:
-            return status
-        if status is None or st.st_ino != status.inode or st.st_size < status.offset:
-            status = _SubagentStatus(inode=st.st_ino, offset=0)
-            self._statuses[meta.conversation_id] = status
-        status.mtime = st.st_mtime
-        status.size = st.st_size
-        try:
-            lines, status.offset = _read_lines_from(path, status.offset)
-        except OSError:
-            return status
-        for raw in lines:
+        with self._io_lock:
+            status = self._statuses.get(meta.conversation_id)
+            if path is None:
+                return status or _SubagentStatus()
             try:
-                step = json.loads(raw)
-            except ValueError:
-                continue
-            if not isinstance(step, dict):
-                continue
-            stype = str(step.get("type") or "")
-            sstat = str(step.get("status") or "")
-            status.last_type = stype
-            status.last_status = sstat
-            if stype == "PLANNER_RESPONSE":
-                status.last_has_tools = bool(step.get("tool_calls"))
-            elif stype == "GENERIC":
-                content = str(step.get("content") or "")
-                clean = _clean_generic_content(content)
-                m = BG_TASK_START_RE.match(clean)
-                if m:
-                    status.open_bg_tasks.add(m.group(1))
-                    sched = BG_SCHEDULE_DESC_RE.search(clean)
-                    if sched and sched.group(1) == "Timer":
-                        status.timer_tasks.add(m.group(1))
-            elif stype == "SYSTEM_MESSAGE":
-                content = str(step.get("content") or "")
-                for m in BG_TASK_DONE_RE.finditer(content):
-                    status.open_bg_tasks.discard(m.group(1))
-                    status.timer_tasks.discard(m.group(1))
-                for m in SYS_MSG_RE.finditer(content):
-                    # A timer fires as a message from its task; a background command also sends ones
-                    # ("still running after 180s") that do not mean it ended.
-                    if m.group(1) in status.timer_tasks:
+                st = path.stat()
+            except OSError:
+                return status or _SubagentStatus()
+            if status is not None and status.inode == st.st_ino and status.size == st.st_size and status.mtime == st.st_mtime:
+                return status
+            if status is None or st.st_ino != status.inode or st.st_size < status.offset:
+                status = _SubagentStatus(inode=st.st_ino, offset=0)
+                self._statuses[meta.conversation_id] = status
+            status.mtime = st.st_mtime
+            status.size = st.st_size
+            try:
+                lines, status.offset = _read_lines_from(path, status.offset)
+            except OSError:
+                return status
+            for raw in lines:
+                try:
+                    step = json.loads(raw)
+                except ValueError:
+                    continue
+                if not isinstance(step, dict):
+                    continue
+                stype = str(step.get("type") or "")
+                sstat = str(step.get("status") or "")
+                status.last_type = stype
+                status.last_status = sstat
+                if stype == "PLANNER_RESPONSE":
+                    status.last_has_tools = bool(step.get("tool_calls"))
+                elif stype == "GENERIC":
+                    content = str(step.get("content") or "")
+                    clean = _clean_generic_content(content)
+                    m = BG_TASK_START_RE.match(clean)
+                    if m:
+                        status.open_bg_tasks.add(m.group(1))
+                        sched = BG_SCHEDULE_DESC_RE.search(clean)
+                        if sched and sched.group(1) == "Timer":
+                            status.timer_tasks.add(m.group(1))
+                elif stype == "SYSTEM_MESSAGE":
+                    content = str(step.get("content") or "")
+                    for m in BG_TASK_DONE_RE.finditer(content):
                         status.open_bg_tasks.discard(m.group(1))
                         status.timer_tasks.discard(m.group(1))
-                if BG_TASK_RESET_MARKER in content:
-                    status.open_bg_tasks.clear()
-                    status.timer_tasks.clear()
-        return status
+                    for m in SYS_MSG_RE.finditer(content):
+                        # A timer fires as a message from its task; a background command also sends ones
+                        # ("still running after 180s") that do not mean it ended.
+                        if m.group(1) in status.timer_tasks:
+                            status.open_bg_tasks.discard(m.group(1))
+                            status.timer_tasks.discard(m.group(1))
+                    if BG_TASK_RESET_MARKER in content:
+                        status.open_bg_tasks.clear()
+                        status.timer_tasks.clear()
+            return status
 
     def _is_running(self, meta: _SubagentMeta, status: _SubagentStatus, *, parent_alive: bool, now: float) -> bool:
         if not parent_alive or meta.killed:
@@ -490,8 +498,19 @@ class AgySubagentStore:
     def has_running(self, parent_sid: str, *, parent_alive: bool) -> bool:
         return bool(self.running_ids(parent_sid, parent_alive=parent_alive))
 
-    def has_active_work(self, parent_sid: str, *, parent_alive: bool, started_at: float | None = None) -> bool:
-        """Whether an Antigravity session has live built-in subagents or open background tasks/timers."""
+    def has_active_work(
+        self,
+        parent_sid: str,
+        *,
+        parent_alive: bool,
+        started_at: float | None = None,
+        include_crons: bool = True,
+    ) -> bool:
+        """Whether an Antigravity session has live built-in subagents or open background tasks/timers.
+
+        Pass `include_crons=False` for graceful reload checks so recurring crons do not permanently
+        deadlock a runner reload while still keeping the process alive during normal idle reaping.
+        """
         if not parent_alive:
             return False
         if self.has_running(parent_sid, parent_alive=True):
@@ -501,15 +520,19 @@ class AgySubagentStore:
             return False
         now = time.time()
         cutoff = (started_at - 5.0) if started_at is not None else None
-        for tid, ts in idx.open_bg_tasks.items():
+        for tid, ts in list(idx.open_bg_tasks.items()):
             # Entries without a parsed timestamp (0.0) are treated as current; older ones belong to a prior process.
             if cutoff is not None and ts > 0.0 and ts < cutoff:
                 continue
             sched = idx.open_schedules.get(tid)
-            if sched is not None and not sched.get("cron") and sched.get("duration") is not None:
-                created = float(sched.get("createdAt") or ts or 0.0)
-                if created > 0.0 and created + float(sched["duration"]) < now - 120.0:
-                    continue
+            if sched is not None:
+                if sched.get("cron"):
+                    if not include_crons:
+                        continue
+                elif sched.get("duration") is not None:
+                    created = float(sched.get("createdAt") or ts or 0.0)
+                    if created > 0.0 and created + float(sched["duration"]) < now - 120.0:
+                        continue
             return True
         return False
 

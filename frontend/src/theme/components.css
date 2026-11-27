@@ -388,10 +388,11 @@
 .rz-plan-body { max-height: 50vh; overflow: auto; padding: 4px 2px; }
 
 /* Activity line */
-.rz-activity { display: flex; align-items: center; gap: 10px; padding: 8px 0 2px; font-size: 13px; color: var(--text2); min-height: 60px; }
-.rz-activity-mascot { animation: rz-bob 1.6s ease-in-out infinite; }
-.rz-activity-verb { font-family: var(--font-display); font-style: italic; font-size: 16px; color: var(--amber-strong); }
-.rz-activity-hint { margin-left: auto; font-size: 12px; }
+.rz-activity { display: flex; align-items: center; gap: 10px; padding: 8px 0 2px; font-size: 13px; color: var(--text2); min-height: 60px; min-width: 0; max-width: 100%; }
+.rz-activity-mascot { animation: rz-bob 1.6s ease-in-out infinite; flex-shrink: 0; }
+.rz-activity-verb { font-family: var(--font-display); font-style: italic; font-size: 16px; color: var(--amber-strong); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rz-activity-elapsed { flex-shrink: 0; white-space: nowrap; }
+.rz-activity-hint { margin-left: auto; font-size: 12px; flex-shrink: 0; white-space: nowrap; }
 .rz-shell.mobile .rz-activity-hint { display: none; }
 
 /* Queue & external */

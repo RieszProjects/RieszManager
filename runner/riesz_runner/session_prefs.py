@@ -56,6 +56,11 @@ class SessionPrefs:
         self._data[session_id] = updated
         self._save()
 
+    def delete(self, session_id: str) -> None:
+        """Remove the entire stored entry for `session_id`, if any."""
+        if self._data.pop(session_id, None) is not None:
+            self._save()
+
     def children(self, parent: str) -> list[str]:
         """Sessions started for `parent` as its subagents (browser tasks), oldest first."""
         found = [(v.get("time") or 0, k) for k, v in self._data.items() if v.get("subagentOf") == parent]

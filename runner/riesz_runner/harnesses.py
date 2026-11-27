@@ -552,6 +552,9 @@ class Harnesses:
                 self._active.pop(session_id, None)
                 raise
             self._active[session_id] = time.time()
+            if rec["harness"] == "antigravity":
+                # Warm the incremental transcript index off the event loop so huge logs never stall it.
+                await asyncio.to_thread(self.hub.agy_subagents.sync, session_id)
             log.info("resumed %s session %s", rec["harness"], session_id[:8])
             await self.hub.broadcast_global({"ev": "session_live", "sessionId": session_id, "live": self.live_info(session_id)})
             return driver
@@ -728,7 +731,22 @@ class Harnesses:
         await self.hub.broadcast_global({"ev": "session_live", "sessionId": session_id, "live": None})
         return True
 
-    def is_working(self, session_id: str) -> bool | None:
+    async def discard(self, session_id: str) -> None:
+        """Stop and remove a half-created session (e.g. when a handoff fails before completing)."""
+        handle = self._save_handles.pop(session_id, None)
+        if handle:
+            handle.cancel()
+        with contextlib.suppress(Exception):
+            await self.stop(session_id)
+        self.drivers.pop(session_id, None)
+        self._active.pop(session_id, None)
+        if self.records.pop(session_id, None) is not None:
+            self._save()
+        for suffix in (".json", ".imported.json", ".dsh-patch.yml"):
+            with contextlib.suppress(OSError):
+                (self.cache_dir / f"{session_id}{suffix}").unlink(missing_ok=True)
+
+    def is_working(self, session_id: str, *, include_crons: bool = True) -> bool | None:
         """Whether a hosted non-Claude session is busy (turn, queue, prompt, tasks, or Antigravity background work); None if not running."""
         driver = self.drivers.get(session_id)
         if driver is None or not driver.alive:
@@ -736,16 +754,16 @@ class Harnesses:
         if driver.busy or driver.permissions or driver.tasks or driver.has_pending_queue():
             return True
         if driver.harness == "antigravity" and self.hub.agy_subagents.has_active_work(
-            session_id, parent_alive=True, started_at=driver.started_at
+            session_id, parent_alive=True, started_at=driver.started_at, include_crons=include_crons
         ):
             return True
         return False
 
-    def working_ids(self) -> list[str]:
-        return [sid for sid in list(self.drivers) if self.is_working(sid)]
+    def working_ids(self, *, include_crons: bool = True) -> list[str]:
+        return [sid for sid in list(self.drivers) if self.is_working(sid, include_crons=include_crons)]
 
-    def working(self) -> bool:
-        return bool(self.working_ids())
+    def working(self, *, include_crons: bool = True) -> bool:
+        return bool(self.working_ids(include_crons=include_crons))
 
     async def close(self) -> None:
         for sid in list(self.drivers):
@@ -775,13 +793,13 @@ class Harnesses:
                 if agy_sched_seen.pop(sid, None):
                     await self.hub.broadcast_global({"ev": "schedules"})
                 continue
-            entries = self.hub.agy_subagents.list(sid, parent_alive=True)
+            entries = await asyncio.to_thread(self.hub.agy_subagents.list, sid, parent_alive=True)
             sig = (len(entries), tuple(a["agentId"] for a in entries if a["running"]))
             if agy_seen.get(sid) != sig:
                 agy_seen[sid] = sig
                 await self.hub.broadcast_global({"ev": "session_live", "sessionId": sid, "live": self.live_info(sid)})
                 await self.hub.broadcast_global({"ev": "sessions", "sessions": [self.summary(sid)], "removed": []})
-            scheds = self.hub.agy_subagents.active_schedules(sid, parent_alive=True, started_at=driver.started_at)
+            scheds = await asyncio.to_thread(self.hub.agy_subagents.active_schedules, sid, parent_alive=True, started_at=driver.started_at)
             sched_sig = tuple(s["id"] for s in scheds)
             if agy_sched_seen.get(sid, ()) != sched_sig:
                 agy_sched_seen[sid] = sched_sig

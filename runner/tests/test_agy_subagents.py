@@ -377,6 +377,22 @@ class AgyTimerBookkeepingTest(unittest.TestCase):
             self.assertTrue(store.list(parent, parent_alive=True)[0]["running"])
             self.assertTrue(store.has_active_work(parent, parent_alive=True))
 
+    def test_recurring_cron_keeps_idle_reap_alive_but_does_not_block_reload(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            brain = Path(td)
+            log = brain / self.PARENT / ".system_generated" / "logs" / "transcript.jsonl"
+            now = time.time()
+            _write_jsonl(log, [
+                {"type": "PLANNER_RESPONSE", "status": "DONE", "created_at": _iso(now - 10),
+                 "tool_calls": [{"name": "schedule", "args": {"CronExpression": '"*/5 * * * *"', "Prompt": '"poll"'}}]},
+                {"type": "GENERIC", "status": "RUNNING", "created_at": _iso(now - 9),
+                 "content": "Tool is running as a background task with task id: 44444444/task-cron\n"
+                            "Task Description: Cron: */5 * * * *, Prompt: poll\n"},
+            ])
+            store = AgySubagentStore(brain)
+            self.assertTrue(store.has_active_work(self.PARENT, parent_alive=True, started_at=now - 60, include_crons=True))
+            self.assertFalse(store.has_active_work(self.PARENT, parent_alive=True, started_at=now - 60, include_crons=False))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -36,3 +36,19 @@ class TotpRebindTest(SimpleTestCase):
             resp = views.totp_setup(self._request("/api/account/totp/setup"))
         self.assertEqual(resp.status_code, 200)
         self.assertIn("secret", json.loads(resp.content))
+
+    def test_repeated_login_typos_never_lock_out(self) -> None:
+        with mock.patch.object(views.time, "sleep"), \
+                mock.patch.object(views.services, "record_attempt"), \
+                mock.patch.object(views.services, "check_credentials", return_value=False):
+            for _ in range(10):
+                req = RequestFactory().post(
+                    "/api/auth/login",
+                    data=json.dumps({"username": "dev", "password": "wrong"}),
+                    content_type="application/json",
+                )
+                req.user = SimpleNamespace(is_authenticated=False)
+                req.session = {}
+                req._dont_enforce_csrf_checks = True
+                resp = views.auth_login(req)
+                self.assertEqual(resp.status_code, 400)

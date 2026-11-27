@@ -279,7 +279,7 @@ export function ChatView({ sessionId }: { sessionId: string }) {
           busy
           since={Math.min(...background.map((t) => t.startedAt)) * 1000}
           waiting={false}
-          label={`等待后台任务${background.length > 1 ? `（${background.length} 个）` : ""}：${background[0].description || background[0].type}`}
+          label={`等待后台任务${background.length > 1 ? `（${background.length} 个）` : ""}：${(background[0].description || background[0].type).replace(/\s+/g, " ").trim()}`}
           interruptible={false}
         />
       )}

@@ -38,7 +38,7 @@ log = logging.getLogger(__name__)
 MODES = ("readonly", "ask", "auto", "full")
 MODE_RANK = {m: i for i, m in enumerate(MODES)}
 PAIR_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-MAX_PAIR_FAILURES = 10
+MAX_REGISTER_FAILURES_PER_CLIENT = 20
 MAX_TRANSFER_BYTES = 200 * 1024 * 1024
 MAX_CMD_OUTPUT_CHARS = 128 * 1024
 MAX_CMD_HISTORY = 50
@@ -71,7 +71,6 @@ class PairingCode:
     project: str
     created_at: float
     expires_at: float
-    failures: int = 0
 
 
 @dataclass
@@ -213,7 +212,7 @@ class NodeManager:
         self._live: dict[str, LiveNode] = {}
         self._approvals: dict[str, PendingApproval] = {}
         self._transfers: dict[str, TransferTicket] = {}
-        self._register_failures: list[float] = []
+        self._register_failures: dict[str, list[float]] = {}
 
     def _broadcast_soon(self) -> None:
         try:
@@ -290,11 +289,17 @@ class NodeManager:
     def _prune(self) -> None:
         now = time.time()
         for c, p in list(self._pairings.items()):
-            if p.expires_at <= now or p.failures >= MAX_PAIR_FAILURES:
+            if p.expires_at <= now:
                 self._pairings.pop(c, None)
         for nid, pend in list(self._pending.items()):
             if pend.expires_at <= now:
                 self._pending.pop(nid, None)
+        for key, stamps in list(self._register_failures.items()):
+            recent = [t for t in stamps if now - t < 60.0]
+            if recent:
+                self._register_failures[key] = recent
+            else:
+                self._register_failures.pop(key, None)
 
     def create_pairing(self, *, session_id: str, ttl: int = 300) -> dict[str, Any]:
         self._prune()
@@ -328,19 +333,24 @@ class NodeManager:
     def register_node(
         self, *, code: str, public_key: str, name: str = "",
         os_name: str = "", platform: str = "", hostname: str = "",
+        client_key: str = "",
     ) -> dict[str, Any]:
         self._prune()
         now = time.time()
-        self._register_failures = [t for t in self._register_failures if now - t < 60.0]
-        if len(self._register_failures) >= 20:
+        key = client_key.strip() or "default"
+        recent = [t for t in self._register_failures.get(key, ()) if now - t < 60.0]
+        if recent:
+            self._register_failures[key] = recent
+        else:
+            self._register_failures.pop(key, None)
+        if len(recent) >= MAX_REGISTER_FAILURES_PER_CLIENT:
             raise NodeError("配对尝试失败次数过多，请 1 分钟后再试")
 
         norm_code = code.strip().upper()
         pair = self._pairings.get(norm_code)
         if pair is None:
-            self._register_failures.append(now)
-            for p in self._pairings.values():
-                p.failures += 1
+            recent.append(now)
+            self._register_failures[key] = recent
             raise NodeError("配对码无效或已过期")
 
         try:
@@ -348,7 +358,8 @@ class NodeManager:
             if len(pub_bytes) != 32:
                 raise ValueError("bad length")
         except Exception:
-            self._register_failures.append(now)
+            recent.append(now)
+            self._register_failures[key] = recent
             raise NodeError("无效的 Ed25519 公钥") from None
 
         self._pairings.pop(norm_code, None)

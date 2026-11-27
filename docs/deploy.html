@@ -29,7 +29,7 @@
     <div class="toc-title">文档</div>
     <ul class="toc-site"><li><a href="index.html">前言</a></li><li><a href="quickstart.html">快速上手</a></li><li><a href="guide.html">使用指南</a></li><li><a href="deploy.html" class="current">部署教程</a></li></ul>
     <div class="toc-title">本页</div>
-    <ul class="toc-page"><li class="l2"><a href="#overview">组件与要求</a></li><li class="l2"><a href="#get-code">获取代码</a></li><li class="l2"><a href="#configure">填写配置</a></li><li class="l2"><a href="#runner">安装runner</a></li><li class="l2"><a href="#containers">启动容器</a></li><li class="l2"><a href="#https">配置HTTPS</a></li><li class="l3"><a href="#https-cloudflare">Cloudflare Tunnel（推荐）</a></li><li class="l3"><a href="#https-caddy">Caddy</a></li><li class="l3"><a href="#https-nginx">已有的nginx</a></li><li class="l2"><a href="#account">账号与两步验证</a></li><li class="l2"><a href="#push">推送通知</a></li><li class="l2"><a href="#balances">其他服务的余额</a></li><li class="l2"><a href="#harnesses">其他工具：Codex、DeepSeek Harness、Gemini CLI 与 Antigravity</a></li><li class="l2"><a href="#upgrade">升级</a></li><li class="l2"><a href="#backup">备份</a></li><li class="l2"><a href="#security">安全说明</a></li><li class="l2"><a href="#troubleshoot">排错</a></li><li class="l2"><a href="#uninstall">卸载</a></li><li class="l2"><a href="#env">环境变量参考</a></li><li class="l3"><a href="#env-account">账号</a></li><li class="l3"><a href="#env-secrets">密钥</a></li><li class="l3"><a href="#env-network">网络</a></li><li class="l3"><a href="#env-throttle">登录限流</a></li><li class="l3"><a href="#env-runner">宿主机用户与runner</a></li><li class="l3"><a href="#env-voice">语音输入（可选）</a></li><li class="l3"><a href="#env-misc">其他</a></li><li class="l3"><a href="#env-push">推送通知（可选）</a></li></ul>
+    <ul class="toc-page"><li class="l2"><a href="#overview">组件与要求</a></li><li class="l2"><a href="#get-code">获取代码</a></li><li class="l2"><a href="#configure">填写配置</a></li><li class="l2"><a href="#runner">安装runner</a></li><li class="l2"><a href="#containers">启动容器</a></li><li class="l2"><a href="#https">配置HTTPS</a></li><li class="l3"><a href="#https-cloudflare">Cloudflare Tunnel（推荐）</a></li><li class="l3"><a href="#https-caddy">Caddy</a></li><li class="l3"><a href="#https-nginx">已有的nginx</a></li><li class="l2"><a href="#account">账号与两步验证</a></li><li class="l2"><a href="#push">推送通知</a></li><li class="l2"><a href="#balances">其他服务的余额</a></li><li class="l2"><a href="#harnesses">其他工具：Codex、DeepSeek Harness、Gemini CLI 与 Antigravity</a></li><li class="l2"><a href="#upgrade">升级</a></li><li class="l2"><a href="#backup">备份</a></li><li class="l2"><a href="#security">安全说明</a></li><li class="l2"><a href="#troubleshoot">排错</a></li><li class="l2"><a href="#uninstall">卸载</a></li><li class="l2"><a href="#env">环境变量参考</a></li><li class="l3"><a href="#env-account">账号</a></li><li class="l3"><a href="#env-secrets">密钥</a></li><li class="l3"><a href="#env-network">网络</a></li><li class="l3"><a href="#env-runner">宿主机用户与runner</a></li><li class="l3"><a href="#env-voice">语音输入（可选）</a></li><li class="l3"><a href="#env-misc">其他</a></li><li class="l3"><a href="#env-push">推送通知（可选）</a></li></ul>
   </aside>
   <article>
 <h1>部署教程</h1>
@@ -160,7 +160,7 @@ cd RieszManager
   <li><b>丢失验证器</b>：登录时改用之前保存的恢复码；如果恢复码也找不到了，在宿主机上执行<code>./rieszctl reset-totp</code>直接关闭两步验证。</li>
   <li><b>登出所有设备</b>：在「设置」→「设备」里操作，或在宿主机上执行<code>./rieszctl revoke-sessions</code>。</li>
 </ul>
-<p>登录接口带有失败限流：同一客户端IP在<code>RIESZ_LOGIN_LOCKOUT_MINUTES</code>分钟内连续失败达到<code>RIESZ_LOGIN_MAX_FAILURES</code>次后会被暂时锁定；如果所有IP的累计失败次数达到<code>RIESZ_LOGIN_MAX_FAILURES_GLOBAL</code>，整个站点的登录都会暂缓。</p>
+<p>登录失败时每次会附带短暂延迟并写入安全日志，但不会因输错密码或验证码锁定账号；建议配合两步验证（TOTP）使用。</p>
 
 <h2 id="push">推送通知</h2>
 <p>Riesz Manager使用浏览器标准的Web Push推送消息：当你在某个浏览器里开启推送时，由该浏览器厂商的推送服务（Chrome为Google FCM、Firefox为Mozilla、Safari/iPhone为Apple）分配一个推送地址，backend容器在需要通知时把端到端加密后的消息直接发往这个地址。整个过程不需要注册任何第三方账号或API key，也不经过Riesz Manager作者的任何服务器，每个部署都使用自己生成的密钥。</p>
@@ -278,14 +278,6 @@ cd RieszManager
 <tr><td><code>RIESZ_BIND</code></td><td><code>127.0.0.1</code></td><td>gateway在宿主机上监听的网卡地址。放在隧道或反向代理后面时应保持为<code>127.0.0.1</code></td></tr>
 <tr><td><code>RIESZ_PORT</code></td><td><code>18573</code></td><td>gateway在宿主机上监听的端口</td></tr>
 <tr><td><code>RIESZ_TRUST_CF_HEADER</code></td><td><code>false</code></td><td>是否信任<code>CF-Connecting-IP</code>请求头作为客户端真实IP（仅在位于Cloudflare后面且绑定本机时开启）</td></tr>
-</table></div>
-
-<h3 id="env-throttle">登录限流</h3>
-<div class="wrap"><table style="--first-col: 16em">
-<tr><th>变量</th><th>默认值</th><th>说明</th></tr>
-<tr><td><code>RIESZ_LOGIN_MAX_FAILURES</code></td><td><code>5</code></td><td>单个IP在锁定窗口内允许的最大登录失败次数</td></tr>
-<tr><td><code>RIESZ_LOGIN_MAX_FAILURES_GLOBAL</code></td><td><code>30</code></td><td>全局在锁定窗口内允许的最大登录失败次数</td></tr>
-<tr><td><code>RIESZ_LOGIN_LOCKOUT_MINUTES</code></td><td><code>15</code></td><td>登录失败计数与锁定的时间窗口（分钟）</td></tr>
 </table></div>
 
 <h3 id="env-runner">宿主机用户与runner</h3>

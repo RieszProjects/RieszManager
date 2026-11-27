@@ -156,6 +156,19 @@ class NodeEndToEndTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(err["type"], "auth_error")
         await ws.close()
 
+    async def test_bad_pairing_codes_do_not_wipe_active_code_or_block_other_clients(self):
+        hub = self.app[HUB]
+        pair = hub.nodes.create_pairing(session_id=self.sid)
+        _, pub = ed.generate_keypair()
+        pub_b64 = ed.b64u_encode(pub)
+        # 20 failed attempts from another client must NOT invalidate the active pairing code
+        # or prevent the legitimate client from pairing.
+        for _ in range(20):
+            with self.assertRaises(Exception):
+                hub.nodes.register_node(code="RZ-0000-0000", public_key=pub_b64, client_key="198.51.100.9")
+        reg = hub.nodes.register_node(code=pair["code"], public_key=pub_b64, client_key="203.0.113.5")
+        self.assertEqual(reg["sessionId"], self.sid)
+
     async def test_session_isolation_conflict_naming_rename_and_ephemeral_cleanup(self):
         sid_other = "99999999-2222-4333-8444-555555555555"
         hub = self.app[HUB]

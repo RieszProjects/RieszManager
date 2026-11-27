@@ -81,8 +81,8 @@ export function ActivityLine({ busy, since, status, waiting, label: override, in
   return (
     <div className="rz-activity">
       {compact ? <LoaderCircle size={14} className="spin" /> : <Mascot pose="working" size={50} className="rz-activity-mascot" />}
-      <span className="rz-activity-verb">{label}…</span>
-      {elapsed && <span className="dim">{elapsed}</span>}
+      <span className="rz-activity-verb" title={label}>{label}…</span>
+      {elapsed && <span className="dim rz-activity-elapsed">{elapsed}</span>}
       {!waiting && interruptible && <span className="dim rz-activity-hint"><kbd>Esc</kbd> 中断</span>}
     </div>
   );

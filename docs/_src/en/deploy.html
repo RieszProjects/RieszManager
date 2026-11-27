@@ -126,7 +126,7 @@ cd RieszManager
   <li><b>Lost authenticator</b>: sign in using one of the recovery codes you saved earlier; if those are also lost, run <code>./rieszctl reset-totp</code> on the host to disable two-factor authentication directly.</li>
   <li><b>Sign out all devices</b>: use “Settings” (设置) → “Devices” (设备), or run <code>./rieszctl revoke-sessions</code> on the host.</li>
 </ul>
-<p>The sign-in endpoint rate-limits failed attempts: a single client IP is temporarily locked out after <code>RIESZ_LOGIN_MAX_FAILURES</code> consecutive failures within <code>RIESZ_LOGIN_LOCKOUT_MINUTES</code> minutes; if total failures across all IPs reach <code>RIESZ_LOGIN_MAX_FAILURES_GLOBAL</code>, sign-in is throttled site-wide.</p>
+<p>Failed sign-in attempts add a brief per-request delay and are recorded in the security log without locking out the account on typos; pairing with TOTP two-factor authentication is recommended.</p>
 
 <h2 id="push">Push notifications</h2>
 <p>Riesz Manager uses standard browser Web Push: when you enable notifications in a browser, that browser vendor's push service (Google FCM for Chrome, Mozilla for Firefox, Apple for Safari/iPhone) assigns a push endpoint, and the backend container sends end-to-end encrypted payloads directly to that endpoint whenever a notification is needed. No third-party account or API key is required, nothing goes through any server run by the Riesz Manager authors, and each deployment uses its own generated keys.</p>
@@ -244,14 +244,6 @@ cd RieszManager
 <tr><td><code>RIESZ_BIND</code></td><td><code>127.0.0.1</code></td><td>Host interface address the gateway binds to. Keep this as <code>127.0.0.1</code> when running behind a tunnel or reverse proxy</td></tr>
 <tr><td><code>RIESZ_PORT</code></td><td><code>18573</code></td><td>Host port the gateway listens on</td></tr>
 <tr><td><code>RIESZ_TRUST_CF_HEADER</code></td><td><code>false</code></td><td>Whether to trust the <code>CF-Connecting-IP</code> header as the real client IP (enable only when behind Cloudflare and bound to localhost)</td></tr>
-</table></div>
-
-<h3 id="env-throttle">Login rate limiting</h3>
-<div class="wrap"><table style="--first-col: 16em">
-<tr><th>Variable</th><th>Default</th><th>Description</th></tr>
-<tr><td><code>RIESZ_LOGIN_MAX_FAILURES</code></td><td><code>5</code></td><td>Maximum failed sign-in attempts allowed from a single IP within the lockout window</td></tr>
-<tr><td><code>RIESZ_LOGIN_MAX_FAILURES_GLOBAL</code></td><td><code>30</code></td><td>Maximum failed sign-in attempts allowed globally within the lockout window</td></tr>
-<tr><td><code>RIESZ_LOGIN_LOCKOUT_MINUTES</code></td><td><code>15</code></td><td>Time window (in minutes) for counting failed logins and enforcing lockouts</td></tr>
 </table></div>
 
 <h3 id="env-runner">Host user and runner</h3>

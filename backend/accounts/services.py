@@ -1,11 +1,10 @@
-"""Authentication logic: credential checks, TOTP, recovery codes and throttling."""
+"""Authentication logic: credential checks, TOTP and recovery codes."""
 
 from __future__ import annotations
 
 import hmac
 import secrets
 import time
-from dataclasses import dataclass
 from datetime import timedelta
 
 import pyotp
@@ -56,26 +55,7 @@ def get_account_user() -> User:
     return user
 
 
-# ---- throttling ----------------------------------------------------------------
-
-@dataclass
-class ThrottleState:
-    blocked: bool
-    retry_after: int = 0
-
-
-def throttle_state(ip: str) -> ThrottleState:
-    window = timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES)
-    since = timezone.now() - window
-    failures = LoginAttempt.objects.filter(created_at__gte=since, success=False)
-    ip_failures = failures.filter(ip=ip)
-    if ip_failures.count() >= settings.LOGIN_MAX_FAILURES_PER_IP:
-        oldest = ip_failures.order_by("-created_at")[settings.LOGIN_MAX_FAILURES_PER_IP - 1]
-        retry = int((oldest.created_at + window - timezone.now()).total_seconds()) + 1
-        return ThrottleState(True, max(retry, 1))
-    if failures.count() >= settings.LOGIN_MAX_FAILURES_GLOBAL:
-        return ThrottleState(True, 60)
-    return ThrottleState(False)
+# ---- audit log -----------------------------------------------------------------
 
 
 def record_attempt(request: HttpRequest, username: str, stage: str, success: bool) -> None:

@@ -1549,6 +1549,7 @@ async def nodes_pair(request: web.Request) -> web.Response:
 
 async def nodes_register(request: web.Request) -> web.Response:
     body = await _body(request)
+    client_key = (request.headers.get("X-Riesz-Client-IP") or request.remote or "").strip()
     try:
         res = request.app[HUB].nodes.register_node(
             code=str(body.get("code") or ""),
@@ -1557,6 +1558,7 @@ async def nodes_register(request: web.Request) -> web.Response:
             os_name=str(body.get("os") or ""),
             platform=str(body.get("platform") or ""),
             hostname=str(body.get("hostname") or ""),
+            client_key=client_key,
         )
     except NodeError as exc:
         return _err(400, str(exc))

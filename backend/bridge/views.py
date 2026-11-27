@@ -227,8 +227,12 @@ async def node_register(request: HttpRequest) -> HttpResponse:
         body = json.loads(request.body or b"{}")
     except ValueError:
         return error_response(400, "invalid json")
+    from accounts.services import client_ip
     try:
-        resp = await runner.request("POST", "/v1/nodes/register", json=body, timeout=30)
+        resp = await runner.request(
+            "POST", "/v1/nodes/register", json=body,
+            headers={"X-Riesz-Client-IP": client_ip(request)}, timeout=30,
+        )
     except runner.RunnerUnavailable:
         return _unavailable()
     async with resp:

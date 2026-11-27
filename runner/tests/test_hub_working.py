@@ -18,7 +18,7 @@ class _StubHarnesses:
         self.ids = list(ids or [])
         self.close = AsyncMock()
 
-    def working_ids(self) -> list[str]:
+    def working_ids(self, *, include_crons: bool = True) -> list[str]:
         return list(self.ids)
 
 

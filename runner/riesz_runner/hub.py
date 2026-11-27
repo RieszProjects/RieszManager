@@ -151,7 +151,7 @@ class Hub:
             self._tasks.append(asyncio.create_task(self._reload_when_idle()))
 
     def _reload_waiting_for(self) -> list[str]:
-        return [sid for sid, p in self.hosted.items() if p.alive and p.working] + self.harnesses.working_ids()
+        return [sid for sid, p in self.hosted.items() if p.alive and p.working] + self.harnesses.working_ids(include_crons=False)
 
     def reload_info(self) -> dict[str, Any]:
         """A reload waiting for sessions to be idle (shown in the web app): since when, and for which."""
@@ -164,7 +164,7 @@ class Hub:
             return False
         if self.subagent_watcher.has_in_flight() or self.quota_fallback.has_in_flight():
             return False
-        return all(not p.alive or not p.working for p in self.hosted.values()) and not self.harnesses.working()
+        return all(not p.alive or not p.working for p in self.hosted.values()) and not self.harnesses.working(include_crons=False)
 
     async def _reload_when_idle(self) -> None:
         last_note = 0.0
@@ -192,7 +192,7 @@ class Hub:
         self.reload_ready.set()
 
     def _current_working(self) -> set[str]:
-        return {sid for sid, p in self.hosted.items() if p.alive and p.working} | set(self.harnesses.working_ids())
+        return {sid for sid, p in self.hosted.items() if p.alive and p.working} | set(self.harnesses.working_ids(include_crons=False))
 
     async def close(self) -> None:
         if not self.reload_ready.is_set():
@@ -1052,6 +1052,21 @@ class Hub:
         mode = CLAUDE_MODE_TABLE.get(tier)
         return CLAUDE_MODE_TABLE["auto"] if mode == "bypassPermissions" and not self.cfg.allow_bypass else mode
 
+    async def _cleanup_failed_handoff(self, target: str, new_id: str, cwd: str) -> None:
+        """Remove a half-created target session if handoff failed before committing."""
+        from . import handoff
+        try:
+            if target == "claude":
+                await self.stop_process(new_id)
+                (handoff.claude_project_dir(self.cfg.projects_dir, cwd) / f"{new_id}.jsonl").unlink(missing_ok=True)
+                self._handoff_file(new_id).unlink(missing_ok=True)
+                self.prefs.delete(new_id)
+                self.store.refresh()
+            elif hasattr(self.harnesses, "discard"):
+                await self.harnesses.discard(new_id)
+        except Exception:  # noqa: BLE001
+            log.exception("failed to clean up aborted handoff target %s", new_id[:8])
+
     async def handoff(self, session_id: str, target: str, *, api: str | None = None, model: str | None = None,
                       mode: str | None = None, fork: bool = False) -> str:
         """Continue a session in another harness (handoff.py); returns the session that now carries it on.
@@ -1073,6 +1088,7 @@ class Hub:
                 raise ControlError("the session is already moving to another harness")
             self._handing_off.add(session_id)
         new_id: str | None = None
+        committed = False
         try:
             items = await self._source_items(session_id)
             msgs = handoff.conversation(handoff.since_last_compaction(items))
@@ -1147,9 +1163,14 @@ class Hub:
                 await self.quota_fallback.on_manual_api_change(session_id, "handoff")
                 if hasattr(self, "schedules"):
                     await self.schedules.reassign(session_id, new_id)
+            committed = True
             log.info("moved the conversation of %s (%s) to %s session %s", session_id[:8], source, target, new_id[:8])
             await self.broadcast_global({"ev": "sessions", "sessions": [self.session_summary(new_id), self.session_summary(session_id)],
                                          "removed": []})
+        except Exception:
+            if new_id is not None and not committed:
+                await self._cleanup_failed_handoff(target, new_id, cwd)
+            raise
         finally:
             if not fork:
                 self._handing_off.discard(session_id)

@@ -40,7 +40,10 @@ class _Harnesses:
         self.records[NEW] = {"harness": target, "cwd": cwd}
         return SimpleNamespace(session_id=NEW)
 
-    def is_working(self, sid: str) -> bool | None:
+    async def discard(self, sid: str) -> None:
+        self.records.pop(sid, None)
+
+    def is_working(self, sid: str, *, include_crons: bool = True) -> bool | None:
         return None
 
 
@@ -104,6 +107,8 @@ class HandoffTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(hub.delivery.send.await_args.args[0], CHILD)
             self.assertNotIn(CHILD, hub._handing_off)
             self.assertIsNone((hub.prefs.get(CHILD) or {}).get("handedOffTo"))
+            # Aborted handoff discards the half-created orphan target session.
+            self.assertNotIn(NEW, hub.harnesses.records)
 
 
 class ReloadWaitTest(unittest.IsolatedAsyncioTestCase):

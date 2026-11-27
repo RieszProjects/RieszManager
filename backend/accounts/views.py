@@ -20,13 +20,6 @@ from .models import LoginAttempt, SessionInfo
 FAILURE_DELAY_SECONDS = 0.6
 
 
-def _throttle_or_raise(request: HttpRequest) -> None:
-    state = services.throttle_state(services.client_ip(request))
-    if state.blocked:
-        raise ApiError(429, f"尝试次数过多，请 {state.retry_after} 秒后再试", "throttled",
-                       retryAfter=state.retry_after)
-
-
 def _complete_login(request: HttpRequest, remember: bool) -> JsonResponse:
     user = services.get_account_user()
     login(request, user)
@@ -66,7 +59,6 @@ def auth_state(request: HttpRequest) -> JsonResponse:
 @require_POST
 @api_view(auth=False)
 def auth_login(request: HttpRequest) -> JsonResponse:
-    _throttle_or_raise(request)
     body = json_body(request)
     username = str(body.get("username") or "")[:150]
     password = str(body.get("password") or "")[:1024]
@@ -90,7 +82,6 @@ def auth_totp(request: HttpRequest) -> JsonResponse:
     if not pending or time.time() - pending.get("t", 0) > settings.PENDING_LOGIN_SECONDS:
         request.session.pop("pending_login", None)
         raise ApiError(400, "登录已过期，请重新输入密码", "pending_expired")
-    _throttle_or_raise(request)
     body = json_body(request)
     code = str(body.get("code") or "")[:64]
     username = settings.RIESZ_USERNAME
