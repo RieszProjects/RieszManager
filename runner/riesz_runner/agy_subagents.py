@@ -47,7 +47,7 @@ DURATION_PART_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([hms])")
 SYS_MSG_RE = re.compile(
     r"\[Message\]\s+timestamp=[^\s]+\s+sender=([^\s]+)\s+priority=[^\s]+\s+content=([\s\S]*?)(?:\n</SYSTEM_MESSAGE>|$)"
 )
-STALE_RUNNING_SECONDS = 900.0
+STALE_RUNNING_SECONDS = 3600.0
 VIEW_CACHE_SIZE = 8
 MAX_TOOL_OUTPUT = 16_000
 

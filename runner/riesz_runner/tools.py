@@ -706,6 +706,23 @@ class SubagentWatcher:
             return
         _keep(asyncio.get_running_loop().create_task(self._deliver_exit(child, event)))
 
+    def notify_interrupted(self, child: str) -> bool:
+        """Queue a parent callback for a subagent that was cut off by an unexpected runner restart."""
+        parent, pref = self._parent_of(child)
+        if not parent:
+            return False
+        self._deferred.discard(child)
+        if child not in self._pending:
+            label = "浏览器任务" if pref.get("browser") else "子代理"
+            msg = f"[{label} {child[:8]} 因服务意外重启而中断，未能完成这一轮；如需继续请用 subagent_send 接着发消息]"
+            self._pending[child] = {
+                "parent": parent, "header": "", "text": msg, "key": None,
+                "is_exit_error": True, "attempts": 0, "next_at": time.time() + 2.0, "created_at": time.time(),
+            }
+        self._save()
+        self._wakeup.set()
+        return True
+
     async def _attempt_send(self, child: str) -> bool:
         """Try to deliver `self._pending[child]` once. Caller holds `self._lock(child)`."""
         entry = self._pending.get(child)

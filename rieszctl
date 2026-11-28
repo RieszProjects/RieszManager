@@ -82,6 +82,8 @@ Restart=on-failure
 RestartSec=3
 # Let the runner close its claude children itself (they finish cleanly on stdin EOF).
 KillMode=mixed
+# A single child tool (e.g. Blender/Python) hitting OOM must not make systemd kill the runner and every session.
+OOMPolicy=continue
 TimeoutStopSec=30
 Environment=PYTHONUNBUFFERED=1
 Environment=SHELL=${SHELL:-/bin/bash}

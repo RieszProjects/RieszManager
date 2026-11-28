@@ -75,6 +75,64 @@ class HubWorkingSnapshotTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(json.loads(hub._working_file.read_text())["sessions"], [])
 
+    def test_mark_interrupted_notifies_idle_parent_of_interrupted_subagent(self) -> None:
+        from riesz_runner.session_prefs import SessionPrefs
+        from riesz_runner.tools import SubagentWatcher
+
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            hub = _make_stub_hub(tmp, [])
+            hub.cfg = SimpleNamespace(state_dir=tmp)
+            hub.prefs = SessionPrefs(tmp / "session_settings.json")
+            hub.final_handoff_target = lambda sid: sid
+            hub.subagent_watcher = SubagentWatcher(hub)
+
+            hub.prefs.remember("child-1", subagentOf="parent-idle")
+            hub.prefs.remember("child-2", subagentOf="parent-busy")
+            hub.subagent_watcher._deferred.add("child-1")
+
+            hub._working_file.write_text(
+                json.dumps({"sessions": ["child-1", "child-2", "parent-busy"], "time": 1234.0}),
+                encoding="utf-8",
+            )
+            hub._mark_interrupted()
+
+            # Idle parent gets a queued callback telling it child-1 was interrupted; deferred is cleared.
+            self.assertIn("child-1", hub.subagent_watcher._pending)
+            self.assertEqual(hub.subagent_watcher._pending["child-1"]["parent"], "parent-idle")
+            self.assertNotIn("child-1", hub.subagent_watcher._deferred)
+            # Parent that was itself interrupted already has its own red dot, so no duplicate callback.
+            self.assertNotIn("child-2", hub.subagent_watcher._pending)
+            self.assertEqual(hub.prefs.interrupted("parent-busy"), 1234.0)
+            self.assertEqual(hub.prefs.interrupted("child-1"), 1234.0)
+
+    async def test_idle_reaper_keeps_parent_alive_while_subagent_is_working(self) -> None:
+        from riesz_runner.harnesses import Harnesses, REAP_INTERVAL
+
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            hub = _make_stub_hub(tmp, [])
+            hub.cfg = SimpleNamespace(state_dir=tmp, idle_timeout=60)
+            hub.broadcast_global = AsyncMock()
+            hub.has_working_subagent = lambda sid: sid == "parent-1"
+
+            harnesses = Harnesses.__new__(Harnesses)
+            harnesses.hub = hub
+            harnesses.cfg = hub.cfg
+            harnesses.records = {"parent-1": {"id": "parent-1", "harness": "codex"}}
+            driver = SimpleNamespace(alive=True, ready=True, harness="codex", busy=False, permissions={}, tasks={},
+                                     started_at=100.0, has_pending_queue=lambda: False)
+            harnesses.drivers = {"parent-1": driver}
+            harnesses._locks = {}
+            harnesses._active = {"parent-1": 100.0}  # stale (> 60s old)
+            harnesses.stop = AsyncMock()
+
+            tick_n = max(1, int(REAP_INTERVAL // 3))
+            await harnesses._tick(tick_n, {}, {}, {})
+
+            harnesses.stop.assert_not_awaited()
+            self.assertGreater(harnesses._active["parent-1"], 1000.0)
+
 
 if __name__ == "__main__":
     unittest.main()

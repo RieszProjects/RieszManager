@@ -333,12 +333,14 @@ class Hub:
                 lock = self._spawn_locks.get(sid)
                 if lock is not None and lock.locked():
                     continue
+                if proc.alive and (proc.working or self.has_working_subagent(sid)):
+                    # Keep the idle countdown starting from when work/subagents actually end.
+                    proc.last_activity = now
+                    continue
                 idle = now - proc.last_activity
-                # last_activity moves with every message from claude, including the
-                # task events, so the idle time counts from when the last task ended.
                 try:
                     # Claude Code's own timers (ScheduleWakeup, CronCreate) live in the process: keep it for them.
-                    if (proc.alive and not proc.working and not proc.timers and idle > self.cfg.idle_timeout
+                    if (proc.alive and not proc.timers and idle > self.cfg.idle_timeout
                             and not self.prefs.keep_alive(sid)):
                         log.info("stopping idle claude process for %s", sid)
                         await proc.stop()
@@ -355,9 +357,19 @@ class Hub:
             saved = {}
         sessions = saved.get("sessions") if isinstance(saved, dict) else None
         when = saved.get("time") if isinstance(saved, dict) and isinstance(saved.get("time"), (int, float)) else time.time()
-        for sid in sessions or []:
-            if isinstance(sid, str) and self.prefs.set_interrupted(sid, when):
+        interrupted = [sid for sid in (sessions or []) if isinstance(sid, str)]
+        interrupted_set = set(interrupted)
+        for sid in interrupted:
+            if self.prefs.set_interrupted(sid, when):
                 log.info("session %s was interrupted when the runner stopped", sid[:8])
+        watcher = getattr(self, "subagent_watcher", None)
+        if watcher is not None:
+            for sid in interrupted:
+                parent = (self.prefs.get(sid) or {}).get("subagentOf")
+                if isinstance(parent, str) and parent:
+                    target = self.final_handoff_target(parent)
+                    if target not in interrupted_set:
+                        watcher.notify_interrupted(sid)
         self._save_working(set())
 
     def _save_working(self, working: set[str]) -> None:
@@ -823,6 +835,10 @@ class Hub:
             if proc is not None:
                 last = max(last, proc.last_activity)
         return max(last, pref.get("time") or 0)
+
+    def has_working_subagent(self, parent: str) -> bool:
+        """Whether `parent` currently has any active Riesz MCP subagent."""
+        return any(self.session_working(cid) for cid in self.prefs.children(parent))
 
     def child_entries(self, parent: str) -> list[dict[str, Any]]:
         """The sessions started as `parent`'s subagents (tools.py: subagent_start, browser_task), as entries of

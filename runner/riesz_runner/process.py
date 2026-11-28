@@ -294,8 +294,11 @@ class ClaudeProcess:
             raise ControlError("process is not running")
         data = (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8")
         async with self._write_lock:
-            proc.stdin.write(data)
-            await proc.stdin.drain()
+            try:
+                proc.stdin.write(data)
+                await proc.stdin.drain()
+            except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+                raise ControlError("process is not running") from exc
         self.last_activity = time.time()
 
     async def control(self, subtype: str, timeout: float = 30, **payload: Any) -> dict[str, Any]:

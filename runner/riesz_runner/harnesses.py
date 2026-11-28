@@ -810,11 +810,14 @@ class Harnesses:
         for sid, driver in list(self.drivers.items()):
             rec = self.records.get(sid) or {}
             lock = self._locks.get(sid)
-            if (
-                not driver.alive or not driver.ready
-                or (lock is not None and lock.locked())
-                or self.is_working(sid) or rec.get("keepAlive")
-            ):
+            if not driver.alive or not driver.ready or (lock is not None and lock.locked()):
+                continue
+            if self.is_working(sid) or self.hub.has_working_subagent(sid):
+                # Refresh activity while built-in tasks/subagents or Riesz subagents run, so the idle
+                # timer starts after they finish rather than killing the parent the instant they end.
+                self._active[sid] = now
+                continue
+            if rec.get("keepAlive"):
                 continue
             last_active = max(self._active.get(sid, 0.0), getattr(driver, "started_at", 0.0) or 0.0)
             if last_active and now - last_active > self.cfg.idle_timeout:
