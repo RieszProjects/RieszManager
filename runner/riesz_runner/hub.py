@@ -602,8 +602,13 @@ class Hub:
         if ev == "exit":
             self._remember(proc)
             self._poke(proc.session_id)
-            await self.auto_resume.on_exit(proc.session_id, during_turn=bool(event.get("duringTurn")),
-                                           requested=bool(event.get("requested")))
+            await self.auto_resume.on_exit(
+                proc.session_id,
+                during_turn=bool(event.get("duringTurn")),
+                requested=bool(event.get("requested")),
+                had_work=bool(event.get("hadWork")),
+                code=event.get("code"),
+            )
             self.subagent_watcher.on_exit(proc.session_id, event)
             await self.broadcast_global({"ev": "live", "live": self.live_list()})
         if ev == "state":

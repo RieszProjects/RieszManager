@@ -808,22 +808,26 @@ class SubagentWatcher:
                 return
             key, text = await _last_reply_item(self.hub, child, include_error=True)
             label = "浏览器任务" if pref.get("browser") else "子代理"
-            if text and not self._is_delivered(child, key, text):
+            code = event.get("code")
+            abnormal = bool(event.get("duringTurn") or event.get("hadWork") or code not in (0, None))
+            if abnormal:
+                oom_hint = "，疑似内存不足被系统终止" if code in (-9, 137) else ""
+                msg = f"[{label} {child[:8]} 进程异常退出（代码 {code}{oom_hint}），未能完成这一轮；如需继续请用 subagent_send 接着发消息]"
+                if text and not self._is_delivered(child, key, text):
+                    msg += f"\n\n退出前最后一段输出：\n{text}"
+                self._pending[child] = {
+                    "parent": parent, "header": "", "text": msg, "key": None,
+                    "is_exit_error": True, "attempts": 0, "next_at": 0.0, "created_at": time.time(),
+                }
+                self._save()
+                await self._attempt_send(child)
+            elif text and not self._is_delivered(child, key, text):
                 is_followup = child in self._reported_this_prompt
                 header = (f"[{label} {child[:8]} 后台任务完成后又更新了回复，最新结果如下]"
                           if is_followup else f"[{label} {child[:8]} 这一轮做完了，回复如下]")
                 self._pending[child] = {
                     "parent": parent, "header": header, "text": text, "key": key,
                     "is_exit_error": False, "attempts": 0, "next_at": 0.0, "created_at": time.time(),
-                }
-                self._save()
-                await self._attempt_send(child)
-            elif event.get("duringTurn") or event.get("code") not in (0, None):
-                code = event.get("code")
-                msg = f"[{label} {child[:8]} 进程异常退出（代码 {code}），未能完成这一轮]"
-                self._pending[child] = {
-                    "parent": parent, "header": "", "text": msg, "key": None,
-                    "is_exit_error": True, "attempts": 0, "next_at": 0.0, "created_at": time.time(),
                 }
                 self._save()
                 await self._attempt_send(child)

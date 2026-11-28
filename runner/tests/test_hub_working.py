@@ -133,6 +133,37 @@ class HubWorkingSnapshotTests(unittest.IsolatedAsyncioTestCase):
             harnesses.stop.assert_not_awaited()
             self.assertGreater(harnesses._active["parent-1"], 1000.0)
 
+    async def test_subagent_oom_exit_with_partial_text_reports_crash_not_completion(self) -> None:
+        from riesz_runner.session_prefs import SessionPrefs
+        from riesz_runner.tools import SubagentWatcher
+
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            hub = _make_stub_hub(tmp, [])
+            hub.cfg = SimpleNamespace(state_dir=tmp)
+            hub.prefs = SessionPrefs(tmp / "session_settings.json")
+            hub.prefs.remember("child-oom", subagentOf="parent-1")
+            hub.final_handoff_target = lambda sid: sid
+            hub.harnesses = SimpleNamespace(
+                has=lambda sid: sid == "child-oom",
+                items=lambda sid: [{"kind": "assistant", "key": "a:1", "blocks": [{"type": "text", "text": "开始跑渲染…"}]}],
+                summary=lambda sid: {"sessionId": sid},
+            )
+            hub.delivery = SimpleNamespace(send=AsyncMock())
+            hub.broadcast_global = AsyncMock()
+            hub.session_summary = lambda sid: {"sessionId": sid}
+            watcher = SubagentWatcher(hub)
+
+            await watcher._deliver_exit("child-oom", {"code": -9, "duringTurn": True, "requested": False})
+
+            hub.delivery.send.assert_awaited_once()
+            sent_text = hub.delivery.send.await_args.args[1]
+            self.assertIn("进程异常退出", sent_text)
+            self.assertIn("内存不足", sent_text)
+            self.assertIn("subagent_send", sent_text)
+            self.assertIn("开始跑渲染…", sent_text)
+            self.assertNotIn("这一轮做完了", sent_text)
+
 
 if __name__ == "__main__":
     unittest.main()

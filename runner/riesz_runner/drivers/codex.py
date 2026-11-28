@@ -254,13 +254,14 @@ class CodexDriver(Driver):
         self.ready = False
         self.exit_code = code
         during_turn = self.busy
+        had_work = bool(self.tasks or self.has_pending_queue())
         if self.busy:
             self.mark_unfinished_tools("exited")
             self.busy = False
         self.cancel_permissions()
         await self.flush()
         await self.emit({"ev": "exit", "code": code, "stderr": list(self.peer.stderr_tail)[-15:] if self.peer else [],
-                         "duringTurn": during_turn})
+                         "duringTurn": during_turn, "hadWork": had_work})
         await self.emit_state()
 
     # ---- what the user does -------------------------------------------------------------

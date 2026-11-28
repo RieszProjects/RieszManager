@@ -158,6 +158,21 @@ class AutoResumeLifecycleTest(unittest.IsolatedAsyncioTestCase):
             # Subagent ignored
             hub.prefs = SimpleNamespace(get=lambda sid: {"subagentOf": "parent"})
             await ar.on_result("sub1", {"isError": True, "failure": failure("quota", "limit")})
+
+    async def test_oom_exit_during_background_work_resumes_promptly(self) -> None:
+        from riesz_runner.auto_resume import EXIT_BACKOFF, resume_text
+        with tempfile.TemporaryDirectory() as td:
+            hub = _fake_hub(Path(td))
+            ar = AutoResume(hub)
+            t0 = time.time()
+            # Main turn ended, but background tasks / built-in subagents were active when OOM-killed.
+            await ar.on_exit("s1", during_turn=False, requested=False, had_work=True, code=-9)
+            view = ar.view("s1")
+            assert view is not None
+            self.assertEqual(view["cause"], "exit")
+            self.assertIn("OOM", view["message"])
+            self.assertAlmostEqual(view["nextAt"], t0 + EXIT_BACKOFF[0], delta=2.0)
+            self.assertIn("OOM", resume_text(ar.items["s1"]))
             self.assertIsNone(ar.view("sub1"))
 
     async def test_other_message_succeeding_accelerates_resume(self) -> None:

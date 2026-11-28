@@ -417,6 +417,7 @@ class ClaudeProcess:
         assert self.proc
         code = await self.proc.wait()
         during_turn = self.turn_active
+        had_work = bool(self.queue or self.tasks)
         self.alive = False
         self.exit_code = code
         self.turn_active = False
@@ -437,7 +438,7 @@ class ClaudeProcess:
         if had_timers:
             await self.sink(self, {"ev": "schedules_changed"})
         await self.sink(self, {"ev": "exit", "code": code, "stderr": list(self.stderr_tail)[-15:],
-                               "duringTurn": during_turn, "requested": self.stop_requested})
+                               "duringTurn": during_turn, "hadWork": had_work, "requested": self.stop_requested})
         await self._emit_state()
 
     async def _handle(self, msg: dict[str, Any]) -> None:

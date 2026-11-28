@@ -388,6 +388,7 @@ class AcpDriver(Driver):
         self.alive = False
         self.ready = False
         self.exit_code = code
+        had_work = bool(self._queue or self.tasks)
         self._open.clear()
         self.tasks.clear()                              # background calls end with the process
         self._autonomous = False
@@ -398,7 +399,7 @@ class AcpDriver(Driver):
         self.cancel_permissions()
         await self.flush()
         await self.emit({"ev": "exit", "code": code, "stderr": list(self.peer.stderr_tail)[-15:] if self.peer else [],
-                         "duringTurn": during_turn})
+                         "duringTurn": during_turn, "hadWork": had_work})
         await self.emit_state()
 
     def snapshot(self) -> dict[str, Any]:

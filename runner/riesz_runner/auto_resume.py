@@ -47,9 +47,11 @@ CAUSES = {
     "exit": "进程意外退出",
 }
 BACKOFF = (120, 300, 900, 1800, 3600)       # seconds before attempt 1, 2, ...; then hourly
+EXIT_BACKOFF = (20, 120, 300)               # process crash/OOM: recover promptly once memory is freed
 AFTER_RESET = 60
 GIVE_UP_AFTER = 2 * 24 * 3600
 EXIT_ATTEMPTS = 3
+OOM_EXIT_CODES = (-9, 137)
 CHECK_INTERVAL = 15.0
 BUSY_RETRY = 60
 STUCK_SENT_GRACE = 60.0
@@ -249,10 +251,22 @@ class AutoResume:
             del self.items[sid]
             await self._changed(sid)
 
-    async def on_exit(self, sid: str, *, during_turn: bool, requested: bool) -> None:
-        if requested or not during_turn or self.hub.closing or self.hub.reload_ready.is_set() or not self._watched(sid):
+    async def on_exit(
+        self,
+        sid: str,
+        *,
+        during_turn: bool,
+        requested: bool,
+        had_work: bool = False,
+        code: int | None = None,
+    ) -> None:
+        if requested or not (during_turn or had_work) or self.hub.closing or self.hub.reload_ready.is_set() or not self._watched(sid):
             return
-        await self._failed(sid, failure("exit", "进程在这一轮中途退出"))
+        if code in OOM_EXIT_CODES:
+            msg = f"进程被系统强制终止（代码 {code}，疑似内存不足 OOM）"
+        else:
+            msg = f"进程在工作中意外退出（代码 {code}）" if code is not None else "进程在这一轮中途退出"
+        await self._failed(sid, failure("exit", msg))
 
     async def _failed(self, sid: str, fail: dict[str, Any]) -> None:
         now = time.time()
@@ -283,7 +297,8 @@ class AutoResume:
         resets = entry.get("resetsAt")
         if resets and resets > now:
             return resets + AFTER_RESET
-        return now + BACKOFF[min(entry.get("attempts", 0), len(BACKOFF) - 1)]
+        schedule = EXIT_BACKOFF if entry.get("cause") == "exit" else BACKOFF
+        return now + schedule[min(entry.get("attempts", 0), len(schedule) - 1)]
 
     async def taken_over(self, sid: str) -> bool:
         """The user sent the session a message or stopped it: no more waiting."""
@@ -371,6 +386,9 @@ class AutoResume:
 
 def resume_text(entry: dict[str, Any]) -> str:
     if entry.get("cause") == "exit":
+        if "OOM" in (entry.get("message") or ""):
+            return ("[Riesz Manager 自动续跑] 上一轮运行你的进程被系统强制终止（疑似内存不足 OOM），"
+                    "当时在跑的命令、内置子代理和后台任务也都停了。请先检查已完成的部分，注意控制内存占用与并发，然后接着做完。")
         return ("[Riesz Manager 自动续跑] 上一轮做到一半，运行你的进程意外退出了，当时在跑的命令和后台任务也都停了。"
                 "请先确认做到了哪一步，然后接着做完。")
     detail = f"（{entry['message']}）" if entry.get("message") else ""
