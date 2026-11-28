@@ -262,6 +262,26 @@ class AcpDriver(Driver):
         self._autonomous = False                    # working on its own, without a prompt of ours
         self._autonomous_cancel: asyncio.Event | None = None
         self._elicitation_answers: dict[str, dict[str, str]] = {}  # toolCallId -> {question: formatted answer}
+        self._seeded_user_images: list[tuple[str, list[dict[str, Any]]]] = []
+
+    def seed_user_images(self, entries: list[tuple[str, list[dict[str, Any]]]]) -> None:
+        """Remember previously cached `(user_text, images)` so `session/load` replay keeps attachments."""
+        self._seeded_user_images = list(entries)
+
+    def _restore_seeded_user_images(self) -> None:
+        if not self._seeded_user_images:
+            return
+        cursor = 0
+        for it in self.items.items:
+            if it.get("kind") != "user" or it.get("images"):
+                continue
+            want = (it.get("text") or "").strip()
+            for k in range(cursor, len(self._seeded_user_images)):
+                cached_text, cached_imgs = self._seeded_user_images[k]
+                if cached_text == want:
+                    it["images"] = [dict(img) for img in cached_imgs]
+                    cursor = k + 1
+                    break
 
     @property
     def pid(self) -> int | None:
@@ -315,6 +335,7 @@ class AcpDriver(Driver):
                 finally:
                     self._loading = False
                 self._close_current()
+                self._restore_seeded_user_images()
                 await self.reset()
             else:
                 try:
@@ -628,6 +649,21 @@ class AcpDriver(Driver):
 
     def _user_chunk(self, content: Any) -> None:
         """History replay (session/load): the user's messages."""
+        if isinstance(content, dict) and content.get("type") == "image":
+            uri = str(content.get("uri") or "").strip()
+            if uri.startswith("file://"):
+                from urllib.parse import unquote, urlparse
+                uri = unquote(urlparse(uri).path)
+            if uri.startswith("/"):
+                img = {"ref": f"file:{uri}", "mediaType": str(content.get("mimeType") or "image/png")}
+                if self.items.items and self.items.items[-1].get("kind") == "user":
+                    self.items.items[-1].setdefault("images", []).append(img)
+                    self.items.touch(self.items.items[-1]["key"])
+                    return
+                self._turn += 1
+                self._close_current()
+                self.items.put(user_item(f"a:u:h{self._turn}", "", images=[img], origin="user"))
+                return
         self._turn += 1
         self._close_current()
         self.items.put(user_item(f"a:u:h{self._turn}", _text(content), origin="user"))

@@ -47,6 +47,8 @@ DURATION_PART_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([hms])")
 SYS_MSG_RE = re.compile(
     r"\[Message\]\s+timestamp=[^\s]+\s+sender=([^\s]+)\s+priority=[^\s]+\s+content=([\s\S]*?)(?:\n</SYSTEM_MESSAGE>|$)"
 )
+USER_REQUEST_RE = re.compile(r"<USER_REQUEST>\s*([\s\S]*?)\s*</USER_REQUEST>")
+ADDITIONAL_META_RE = re.compile(r"\s*<ADDITIONAL_METADATA>[\s\S]*$</ADDITIONAL_METADATA>", re.S)
 STALE_RUNNING_SECONDS = 3600.0
 VIEW_CACHE_SIZE = 8
 MAX_TOOL_OUTPUT = 16_000
@@ -159,6 +161,7 @@ class _ParentIndex:
     children: dict[str, _SubagentMeta] = field(default_factory=dict)
     open_bg_tasks: dict[str, float] = field(default_factory=dict)
     open_schedules: dict[str, dict[str, Any]] = field(default_factory=dict)
+    user_inputs: list[tuple[str, list[dict[str, str]]]] = field(default_factory=list)
 
 
 @dataclass
@@ -256,8 +259,29 @@ class AgySubagentStore:
                 self._feed_parent_step(idx, step)
             return idx
 
+    @staticmethod
+    def _extract_user_request(content: str) -> str:
+        blocks = USER_REQUEST_RE.findall(content)
+        if blocks:
+            return "\n\n".join(b.strip() for b in blocks if b.strip()).strip()
+        return ADDITIONAL_META_RE.sub("", content).strip()
+
     def _feed_parent_step(self, idx: _ParentIndex, step: dict[str, Any]) -> None:
         stype = step.get("type")
+        if stype == "USER_INPUT":
+            content = str(step.get("content") or "")
+            text = self._extract_user_request(content)
+            imgs: list[dict[str, str]] = []
+            for m in step.get("media") or ():
+                if not isinstance(m, dict):
+                    continue
+                mime = str(m.get("mime_type") or m.get("mimeType") or "").strip()
+                uri = str(m.get("uri") or "").strip()
+                path = _file_uri_to_path(uri)
+                if path is not None and (not mime or mime.startswith("image/")):
+                    imgs.append({"ref": f"file:{path}", "mediaType": mime or "image/png"})
+            idx.user_inputs.append((text, imgs))
+            return
         if stype == "PLANNER_RESPONSE":
             # A tool's result comes before the next response: calls still unmatched by now failed without one
             # (e.g. a `schedule` turned down), and pairing later results with them would shift every match.
@@ -497,6 +521,44 @@ class AgySubagentStore:
 
     def has_running(self, parent_sid: str, *, parent_alive: bool) -> bool:
         return bool(self.running_ids(parent_sid, parent_alive=parent_alive))
+
+    def hydrate_user_images(self, session_id: str, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Attach user-uploaded images from Antigravity's `transcript.jsonl` onto replayed user items.
+
+        Antigravity's ACP `session/load` only replays text chunks for user turns, leaving out the
+        attachments recorded in `USER_INPUT.media`.
+        """
+        idx = self._sync_parent(session_id)
+        if idx is None or not any(imgs for _, imgs in idx.user_inputs):
+            return items
+        from .handoff import strip_history
+        records = list(idx.user_inputs)
+        user_count = sum(1 for it in items if it.get("kind") == "user")
+        positional_ok = user_count == len(records)
+        out: list[dict[str, Any]] = []
+        cursor = 0
+        user_pos = 0
+        for it in items:
+            if it.get("kind") != "user":
+                out.append(it)
+                continue
+            want = (it.get("text") or "").strip()
+            matched: list[dict[str, str]] | None = None
+            for k in range(cursor, len(records)):
+                tr_text, tr_imgs = records[k]
+                if tr_text == want or strip_history(tr_text) == want:
+                    matched = tr_imgs
+                    cursor = k + 1
+                    break
+            if matched is None and positional_ok and user_pos < len(records):
+                matched = records[user_pos][1]
+                cursor = max(cursor, user_pos + 1)
+            user_pos += 1
+            if matched and not it.get("images"):
+                out.append({**it, "images": [dict(img) for img in matched]})
+            else:
+                out.append(it)
+        return out
 
     def has_active_work(
         self,

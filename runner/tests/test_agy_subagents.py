@@ -393,6 +393,53 @@ class AgyTimerBookkeepingTest(unittest.TestCase):
             self.assertTrue(store.has_active_work(self.PARENT, parent_alive=True, started_at=now - 60, include_crons=True))
             self.assertFalse(store.has_active_work(self.PARENT, parent_alive=True, started_at=now - 60, include_crons=False))
 
+    def test_hydrate_user_images_and_serve_isolation(self) -> None:
+        from types import SimpleNamespace
+        from riesz_runner.server import _allowed_image_file
+
+        with tempfile.TemporaryDirectory() as td:
+            brain = Path(td) / "brain"
+            uploads = Path(td) / "uploads"
+            uploads.mkdir()
+            img_dir = brain / self.PARENT / ".user_uploaded"
+            img_dir.mkdir(parents=True)
+            img1 = img_dir / "shot1.jpg"
+            img2 = img_dir / "shot2.png"
+            img1.write_bytes(b"\xff\xd8\xff\xe0")
+            img2.write_bytes(b"\x89PNG\r\n\x1a\n")
+            other_sid = "55555555-5555-4555-8555-555555555555"
+            other_img = brain / other_sid / ".user_uploaded" / "secret.jpg"
+            other_img.parent.mkdir(parents=True)
+            other_img.write_bytes(b"\xff\xd8\xff\xe0")
+
+            log = brain / self.PARENT / ".system_generated" / "logs" / "transcript.jsonl"
+            _write_jsonl(log, [
+                {"type": "USER_INPUT", "status": "DONE",
+                 "content": "<USER_REQUEST>\n看下这两张图\n</USER_REQUEST>\n<ADDITIONAL_METADATA>...</ADDITIONAL_METADATA>",
+                 "media": [{"mime_type": "image/jpeg", "uri": str(img1)}, {"mime_type": "image/png", "uri": str(img2)}]},
+                {"type": "USER_INPUT", "status": "DONE",
+                 "content": "<USER_REQUEST>\n纯文字消息\n</USER_REQUEST>",
+                 "media": []},
+            ])
+            store = AgySubagentStore(brain)
+            replayed = [
+                {"kind": "user", "key": "a:u:h1", "text": "看下这两张图", "images": []},
+                {"kind": "assistant", "key": "a:a:1", "blocks": [{"type": "text", "text": "收到"}]},
+                {"kind": "user", "key": "a:u:h2", "text": "纯文字消息", "images": []},
+            ]
+            hydrated = store.hydrate_user_images(self.PARENT, replayed)
+            self.assertEqual([m["ref"] for m in hydrated[0]["images"]], [f"file:{img1}", f"file:{img2}"])
+            self.assertEqual(hydrated[2]["images"], [])
+
+            hub = SimpleNamespace(
+                cfg=SimpleNamespace(uploads_dir=uploads),
+                agy_subagents=store,
+                prefs=SimpleNamespace(get=lambda sid: None),
+                harnesses=SimpleNamespace(records={}),
+            )
+            self.assertTrue(_allowed_image_file(hub, self.PARENT, img1.resolve()))
+            self.assertFalse(_allowed_image_file(hub, self.PARENT, other_img.resolve()))
+
 
 if __name__ == "__main__":
     unittest.main()

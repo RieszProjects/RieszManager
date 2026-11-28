@@ -264,6 +264,7 @@
   background: rgba(198, 150, 107, 0.14); color: var(--amber-strong);
 }
 .rz-user-images { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.rz-user-images:last-child { margin-bottom: 0; }
 .rz-user-images img { max-width: 220px; max-height: 180px; border-radius: 8px; border: 1px solid var(--line); display: block; object-fit: cover; }
 .rz-user-meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text4); padding: 4px 4px 0; opacity: 0; transition: opacity 0.15s; }
 .rz-user:hover .rz-user-meta, .rz-shell.mobile .rz-user-meta { opacity: 1; }

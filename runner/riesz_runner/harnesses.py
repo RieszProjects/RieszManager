@@ -430,7 +430,10 @@ class Harnesses:
     def items(self, session_id: str) -> list[dict[str, Any]]:
         driver = self.drivers.get(session_id)
         own = driver.items.items if driver is not None and driver.items.items else self._cached_items(session_id)
-        return self._imported(session_id) + _shown(own)
+        shown = _shown(own)
+        if self.harness_of(session_id) == "antigravity":
+            shown = self.hub.agy_subagents.hydrate_user_images(session_id, shown)
+        return self._imported(session_id) + shown
 
     async def models(self, session_id: str | None = None, harness: str | None = None,
                      route: str | None = None) -> list[dict[str, Any]]:
@@ -538,6 +541,14 @@ class Harnesses:
             rec["api"] = route
             driver = await self._make(rec["harness"], cwd=rec["cwd"], session_id=session_id, route=route,
                                       model=rec.get("model"), effort=rec.get("effort"), mode=rec.get("mode"))
+            # Seed cached user images before start() so harnesses whose replay omits attachments can restore them.
+            cached_imgs = [
+                ((it.get("text") or "").strip(), list(it.get("images") or []))
+                for it in self._cached_items(session_id)
+                if it.get("kind") == "user" and it.get("images")
+            ]
+            if cached_imgs and hasattr(driver, "seed_user_images"):
+                driver.seed_user_images(cached_imgs)
             # Refresh activity BEFORE registering the driver so the idle reaper cannot kill it mid-start().
             self._active[session_id] = time.time()
             self.drivers[session_id] = driver
@@ -852,9 +863,12 @@ class Harnesses:
         if ev in ("items", "reset"):
             if rec is not None:
                 self._save_items_soon(sid)
-            if rec is not None and rec.get("handoffFrom"):
-                shown = _shown(list(event.get("items") or []))
-                event = {**event, "items": self._imported(sid) + shown if ev == "reset" else shown}
+            if rec is not None and (rec.get("handoffFrom") or (driver.harness == "antigravity" and ev == "reset")):
+                raw_items = list(event.get("items") or [])
+                shown = _shown(raw_items) if rec.get("handoffFrom") else raw_items
+                if driver.harness == "antigravity" and ev == "reset":
+                    shown = self.hub.agy_subagents.hydrate_user_images(sid, shown)
+                event = {**event, "items": (self._imported(sid) + shown) if (ev == "reset" and rec.get("handoffFrom")) else shown}
         if ev == "rate_limit" and driver.harness == "codex" and getattr(driver, "api", None) in (None, "openai:subscription"):
             self.hub.limits.codex_update(event.get("info"))          # the ChatGPT plan's limits, for the doll
         if ev == "state":

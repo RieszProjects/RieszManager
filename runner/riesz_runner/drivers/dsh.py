@@ -114,7 +114,12 @@ class DshEvents:
                 return                                       # runtime/time context and other injected text
             mid = str(data.get("id") or ev.get("seq"))
             uuid = getattr(self.d, "_uuids", {}).pop(mid, None)
-            items.put(user_item(f"d:u:{mid}", _texts(data.get("content")), ts=ts, uuid=uuid or mid, origin="user"))
+            images = getattr(self.d, "_sent_images", {}).pop(mid, None)
+            if images is None and live:
+                pending = getattr(self.d, "_pending_images", None)
+                if pending:
+                    images = pending.pop(0)
+            items.put(user_item(f"d:u:{mid}", _texts(data.get("content")), ts=ts, uuid=uuid or mid, images=images, origin="user"))
         elif kind == "assistant/message":
             self._assistant(data, ts)
         elif kind == "tool/result":
@@ -233,10 +238,32 @@ class DshDriver(Driver):
         self.peer: JsonRpcPeer | None = None
         self.events = DshEvents(self)
         self._uuids: dict[str, str] = {}
+        self._sent_images: dict[str, list[dict[str, Any]]] = {}
+        self._pending_images: list[list[dict[str, Any]]] = []
+        self._seeded_user_images: list[tuple[str, list[dict[str, Any]]]] = []
         self._questions: dict[str, str] = {}                 # dsh question request id -> our request id
         self._restart_pending = False
         self._restarting = False
         self._mode_sent = False
+
+    def seed_user_images(self, entries: list[tuple[str, list[dict[str, Any]]]]) -> None:
+        """Remember previously cached `(user_text, images)` so `load_history` keeps attachments."""
+        self._seeded_user_images = list(entries)
+
+    def _restore_seeded_user_images(self) -> None:
+        if not self._seeded_user_images:
+            return
+        cursor = 0
+        for it in self.items.items:
+            if it.get("kind") != "user" or it.get("images"):
+                continue
+            want = (it.get("text") or "").strip()
+            for k in range(cursor, len(self._seeded_user_images)):
+                cached_text, cached_imgs = self._seeded_user_images[k]
+                if cached_text == want:
+                    it["images"] = [dict(img) for img in cached_imgs]
+                    cursor = k + 1
+                    break
 
     @property
     def pid(self) -> int | None:
@@ -359,13 +386,35 @@ class DshDriver(Driver):
         if not self._mode_sent and self.mode != DEFAULT_MODE:
             await self._query(f"/permission {self.mode}")
         self._mode_sent = True
-        res = await self.peer.request("session/query", {"sessionId": self.session_id, "contentBlocks": self._content(text, images)},
-                                      timeout=60)
-        if uuid and isinstance(res, dict) and res.get("messageId"):
-            self._uuids[str(res["messageId"])] = uuid
-            found = self.items.get(f"d:u:{res['messageId']}")
-            if found and found.get("uuid") != uuid:          # the message was shown before the receipt arrived
-                found["uuid"] = uuid
+        shown_images = [{"ref": f"file:{im['path']}", "mediaType": im.get("mime") or "image/png"}
+                        for im in images or () if im.get("path")]
+        if shown_images:
+            self._pending_images.append(shown_images)
+        try:
+            res = await self.peer.request("session/query", {"sessionId": self.session_id, "contentBlocks": self._content(text, images)},
+                                          timeout=60)
+        except Exception:
+            if shown_images and self._pending_images:
+                self._pending_images.pop()
+            raise
+        if isinstance(res, dict) and res.get("messageId"):
+            mid = str(res["messageId"])
+            found = self.items.get(f"d:u:{mid}")
+            touched = False
+            if uuid:
+                self._uuids[mid] = uuid
+                if found and found.get("uuid") != uuid:          # the message was shown before the receipt arrived
+                    found["uuid"] = uuid
+                    touched = True
+            if shown_images:
+                if found is None:
+                    self._sent_images[mid] = shown_images
+                elif not found.get("images"):
+                    found["images"] = shown_images
+                    touched = True
+                if self._pending_images and self._pending_images[0] is shown_images:
+                    self._pending_images.pop(0)
+            if touched and found is not None:
                 self.items.touch(found["key"])
                 await self.flush()
 
@@ -444,12 +493,21 @@ class DshDriver(Driver):
 
     async def load_history(self) -> None:
         path = self.log_path()
+        if self.items.items:
+            existing = [
+                ((it.get("text") or "").strip(), list(it.get("images") or []))
+                for it in self.items.items
+                if it.get("kind") == "user" and it.get("images")
+            ]
+            if existing:
+                self._seeded_user_images = existing
         self.items.clear()
         self.events = DshEvents(self)
         if path is not None:
             for ev in await read_log(path):
                 if ev.get("type") != "session":
                     self.events.apply(ev, live=False)
+        self._restore_seeded_user_images()
         await self.reset()
 
     # ---- what dsh reports -----------------------------------------------------------------

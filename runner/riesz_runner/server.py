@@ -307,12 +307,25 @@ async def session_items(request: web.Request) -> web.Response:
     return _json({"items": page, "hasMore": len(items) > len(page), "total": len(every)})
 
 
+def _allowed_image_file(hub: Hub, sid: str, path: Path) -> bool:
+    """Whether `path` (already resolved via realpath) is an image owned by uploads or this session's harness."""
+    if path.is_relative_to(Path(os.path.realpath(hub.cfg.uploads_dir))):
+        return True
+    brain_dir = getattr(getattr(hub, "agy_subagents", None), "brain_dir", None)
+    if brain_dir is not None:
+        for owner in _handoff_chain(hub, sid):
+            root = Path(os.path.realpath(brain_dir / owner / ".user_uploaded"))
+            if path.is_relative_to(root):
+                return True
+    return False
+
+
 def _serve_image(hub: Hub, sid: str, ref: str) -> web.StreamResponse:
     """Serve an image from either a session's upload (`file:`), its own transcript (`<off>:<path>`),
     or an earlier session in its handoff chain (`sid:<owner>:<ref>` or fallback search)."""
     if ref.startswith("file:"):
         path = Path(os.path.realpath(ref[5:]))
-        if not path.is_relative_to(Path(os.path.realpath(hub.cfg.uploads_dir))) or not path.is_file():
+        if not _allowed_image_file(hub, sid, path) or not path.is_file():
             return _err(404, "not found")
         mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         if not mime.startswith("image/"):
